@@ -678,6 +678,13 @@ async function loadMaint(){
   el("uninst-confirm").hidden = true;
 }
 
+el("btn-shortcut").onclick = async () => {
+  const r = await api("/api/shortcut", {method:"POST"})
+    .catch(e => ({ok: false, detail: e.message}));
+  alert(r.ok ? `바로가기를 만들었습니다: ${r.desktop}\\CRoCs.lnk`
+             : (r.detail || "만들지 못했습니다"));
+};
+
 el("btn-rollback").onclick = async () => {
   if(!confirm("직전 버전으로 되돌립니다. 계속할까요?")) return;
   const r = await api("/api/update/rollback", {method:"POST"}).catch(() => null);

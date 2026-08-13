@@ -3121,6 +3121,48 @@ def update_apply(req: UpdateApplyReq = Body(default=UpdateApplyReq())):
         return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:300]}
 
 
+@app.post("/api/shortcut")
+def make_shortcut():
+    """바탕화면에 CRoCs 바로가기 — 설치 이후에도 설정에서 만들 수 있게.
+
+    install.bat 의 같은 스텝은 설치/재설치 때만 돌아서, 이미 설치한 사람은
+    이 버튼이 유일한 경로다. Windows 전용 (WSL 개발 환경의 powershell.exe 도
+    허용 — 동작 검증용).
+    """
+    exe = "powershell" if os.name == "nt" else shutil.which("powershell.exe")
+    if not exe:
+        return {"ok": False, "detail": "Windows에서만 만들 수 있습니다"}
+    repo = str(BACKEND_DIR.parent.parent)
+    if os.name != "nt":                        # WSL — 경로만 Windows 식으로
+        r = subprocess.run(["wslpath", "-w", repo], capture_output=True,
+                           encoding="utf-8")
+        if r.returncode == 0:
+            repo = r.stdout.strip()
+    ps = (
+        "$sh=New-Object -ComObject WScript.Shell;"
+        "$d=$sh.SpecialFolders.Item('Desktop');"
+        "if(-not $d){$d=Join-Path $env:USERPROFILE 'Desktop'};"
+        "$s=$sh.CreateShortcut((Join-Path $d 'CRoCs.lnk'));"
+        f"$s.TargetPath='{repo}\\run.bat';"
+        f"$s.WorkingDirectory='{repo}';"
+        f"$s.IconLocation='{repo}\\assets\\crocs.ico,0';"
+        "$s.Save(); Write-Output $d"
+    )
+    try:
+        r = subprocess.run([exe, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                            "-Command", ps],
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+    except Exception as e:                                        # noqa: BLE001
+        return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:200]}
+    if r.returncode != 0:
+        return {"ok": False,
+                "detail": ((r.stderr or r.stdout or "").strip()[:300]
+                           or "만들지 못했습니다")}
+    lines = [l for l in (r.stdout or "").splitlines() if l.strip()]
+    return {"ok": True, "desktop": lines[-1] if lines else ""}
+
+
 @app.post("/api/update/rollback")
 def update_rollback():
     if _busy():

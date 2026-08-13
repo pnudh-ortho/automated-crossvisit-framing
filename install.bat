@@ -154,8 +154,7 @@ popd
 REM -- desktop shortcut (optional) ----------------------------------
 set /p MKSC="Create a desktop shortcut (CRoCs)? (Y/n): "
 if /i "%MKSC%"=="n" goto noshortcut
-powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\CRoCs.lnk'); $s.TargetPath='%DEST%\run.bat'; $s.WorkingDirectory='%DEST%'; $s.IconLocation='%DEST%\assets\crocs.ico'; $s.Save()" >nul 2>&1
-echo       Desktop shortcut created: CRoCs
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $sh=New-Object -ComObject WScript.Shell; $d=$sh.SpecialFolders.Item('Desktop'); if(-not $d){ $d=Join-Path $env:USERPROFILE 'Desktop' }; $s=$sh.CreateShortcut((Join-Path $d 'CRoCs.lnk')); $s.TargetPath='%DEST%\run.bat'; $s.WorkingDirectory='%DEST%'; $s.IconLocation='%DEST%\assets\crocs.ico,0'; $s.Save(); Write-Host ('       Shortcut created: ' + $d) } catch { Write-Host ('       Shortcut failed: ' + $_.Exception.Message); Write-Host '       You can also create it later from the app: Settings' }"
 :noshortcut
 
 echo.
