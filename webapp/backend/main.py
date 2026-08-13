@@ -1990,6 +1990,13 @@ def session_open(req: OpenReq):
         # 기준영상도 그 PPT의 창으로 복원해야 정합이 같은 좌표계에서 이뤄진다.
         seen = Rd.read_all_visits(prs, cfg, PPC, s.slot_windows)
         s.references = Rd.references_for_registration(seen)
+        if not s.references:
+            # PPT 는 찾았는데 기준영상이 0 — 라벨(차수)을 못 읽었거나 십자뷰가
+            # 인식 조건에 안 맞는 것이다. 정합이 왜 안 됐는지 나중에 추적하게 남긴다.
+            S.append_audit(LOG_FILE, {
+                "event": "references_empty", "patient": d.name,
+                "ppt": ppt_path.name, "slides": len(prs.slides._sldIdLst),
+                "cross_slides": len(seen)})
         # 사진 이름에 차수가 없어도 PPT 가 아는 차수는 이력이다 — 다음 차수가
         # 그 뒤로 이어져야 기존 슬라이드와 겹치지 않는다.
         ppt_letters = [vs.visit for vs in seen if vs.visit]
@@ -2297,6 +2304,10 @@ def _frame(s: "Session", slots: list[str] | None = None, *, force: bool = False)
         if not refs:
             # 기준 차수가 없다 — 정합할 대상이 없으니 초진과 같은 처지다.
             photo.ref_visit = None
+            S.append_audit(LOG_FILE, {
+                "event": "register_skipped", "reason": "no_reference_visits",
+                "patient": s.patient_dir.name if s.patient_dir else "",
+                "visit": s.visit, "slot": slot})
             _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
         else:
             # 기준영상은 "이전 차수 PPT에서 보였던 그림"이라 교합면이면 이미
@@ -2304,15 +2315,28 @@ def _frame(s: "Session", slots: list[str] | None = None, *, force: bool = False)
             # 못하므로 신규 사진을 같은 방향으로 맞춰서 넣는다. 그러면 결과
             # 변환이 곧 반전 프레임 기준이라 photo.editor 로 그대로 들어간다.
             arr_reg = cv2.flip(arr, 0) if photo.flip_v else arr
+            audit_base = {"patient": s.patient_dir.name if s.patient_dir else "",
+                          "visit": s.visit, "slot": slot}
             # 정합이 실패하면 아래 else 로 가서 프레이밍 모델이 받는다.
             #
             # pseudo crop: 분할기에 학습 분포(완성본 모습)의 그림을 주고, 매칭도
             # 그 좌표에서 한다 (registration_teeth 독스트링 "좌표계"). 프레이밍
             # 추론은 무반전 원본으로 하고(_auto_frame 과 같은 규약), raw→pseudo 는
             # register 가 마지막에 합성하므로 crop 오차는 전파되지 않는다.
-            pw = Reg.pseudo_frame(arr, framer, photo.label, flip_v=photo.flip_v)
-            best, res, _ = Reg.register_best(arr_reg, refs, thresholds=reg_thr,
-                                             prewarp=pw)
+            try:
+                pw = Reg.pseudo_frame(arr, framer, photo.label, flip_v=photo.flip_v)
+                best, res, _ = Reg.register_best(arr_reg, refs, thresholds=reg_thr,
+                                                 prewarp=pw)
+            except Exception as e:                              # noqa: BLE001
+                # 정합 오류가 검수 진입을 막으면 안 된다 — 남기고 프레이밍으로.
+                S.append_audit(LOG_FILE, {
+                    "event": "register_error", **audit_base,
+                    "error": f"{type(e).__name__}: {e}"[:300]})
+                photo.ref_visit = None
+                _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
+                s.framed[slot] = pid
+                done.append(slot)
+                continue
             if res.ok:
                 photo.editor = registration_to_editor(res.matrix, win, photo.w, photo.h)
                 photo.ref_visit = best
@@ -2321,6 +2345,12 @@ def _frame(s: "Session", slots: list[str] | None = None, *, force: bool = False)
             else:
                 # 정합 실패 → cover-fit 보다 프레이밍 모델이 낫다. 배지는 '수동'을
                 # 유지한다 — 차수 간 정렬이 안 됐다는 사실 자체는 변하지 않는다.
+                # 어느 기준에 몇 개가 대응됐고 잔차가 얼마였는지 수치를 남긴다.
+                S.append_audit(LOG_FILE, {
+                    "event": "register_rejected", **audit_base, "ref": best,
+                    "n_matches": res.n_matches, "n_inliers": res.n_inliers,
+                    "reproj_error_px": round(res.reproj_error_px, 2),
+                    "score": round(res.score, 4)})
                 photo.ref_visit = best
                 _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
         s.framed[slot] = pid
