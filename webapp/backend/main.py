@@ -1530,11 +1530,19 @@ def session_revisit(req: RevisitReq):
     s.ppt_path = ppt_path
 
     # 기준영상 복원
-    prs = T.load_presentation(ppt_path)
+    try:
+        prs = T.load_presentation(ppt_path)
+    except PermissionError:
+        raise HTTPException(409, "PPT가 다른 프로그램(PowerPoint)에서 열려 "
+                                 "있습니다 — 닫은 뒤 다시 시도해 주세요")
     visits = Rd.read_all_visits(prs, cfg, PPC)
     s.references = Rd.references_for_registration(visits)
+    ppt_letters = [vs.visit for vs in visits if vs.visit]
+    if ppt_letters:
+        letters = sorted({*letters, *ppt_letters}, key=N.letter_to_num)
+        s.visit = N.next_visit_letter(letters)
     SESSIONS[s.id] = s
-    return {"session_id": s.id, "visit": visit, "prev_visits": letters,
+    return {"session_id": s.id, "visit": s.visit, "prev_visits": letters,
             "ids": {"name": ids.name, "hospital_id": ids.hospital_id, "ortho_id": ids.ortho_id},
             "patient_dir": str(patient_dir)}
 
@@ -1543,6 +1551,29 @@ def session_revisit(req: RevisitReq):
 # 루트는 평평하다고 가정한다: 환자 폴더가 루트 바로 아래 나열된다.
 # 초진/재진은 사용자가 선언하지 않는다 — 폴더 안에 PPT가 있느냐로 서버가 판정한다.
 IMG_EXT = (".jpg", ".jpeg", ".png")
+
+
+# 환자 목록이 뜰 때마다 모든 PPT 를 여는 건 느리다 — (경로, mtime)로 캐시.
+_VISITS_CACHE: dict[str, tuple[float, list[tuple[str, str | None]]]] = {}
+
+
+def _ppt_visit_letters(path: Path) -> list[tuple[str, str | None]]:
+    """PPT 라벨에서 (차수, 날짜) 목록 — 실패는 빈 목록 (이력은 파일명으로 폴백)."""
+    try:
+        mt = path.stat().st_mtime
+    except OSError:
+        return []
+    hit = _VISITS_CACHE.get(str(path))
+    if hit and hit[0] == mt:
+        return hit[1]
+    try:
+        out = Rd.scan_ppt_visits(T.load_presentation(path), cfg)
+    except Exception:                                   # noqa: BLE001 — 잠금·손상
+        out = []
+    if len(_VISITS_CACHE) > 256:
+        _VISITS_CACHE.clear()
+    _VISITS_CACHE[str(path)] = (mt, out)
+    return out
 
 
 def _scan_patient(d: Path) -> dict | None:
@@ -1557,12 +1588,23 @@ def _scan_patient(d: Path) -> dict | None:
         return None
     entries = _patient_files(d)      # 하위 폴더 정리 환자 — 두 단계까지
     files = [e.name for e in entries]
-    visits = N.scan_visit_letters(files, ids.ortho_id, cfg.naming.visit_regex)
     ppt_name = _find_ppt(files, ids)
+    # 차수 이력의 진실은 PPT 다 — 사진 이름에 차수가 없는(1.jpg …) 환자도
+    # PPT 라벨로 이력이 나온다. 사진으로만 아는 차수도 있어 합집합으로 간다.
+    ppt_visits: list[tuple[str, str | None]] = []
+    if ppt_name:
+        p = next((e for e in entries if e.name == ppt_name), None)
+        if p is not None:
+            ppt_visits = _ppt_visit_letters(p)
+    visits = sorted({*N.scan_visit_letters(files, ids.ortho_id,
+                                           cfg.naming.visit_regex),
+                     *[v for v, _ in ppt_visits]}, key=N.letter_to_num)
 
     # 차수별 날짜. 목록에는 첫 차수와 마지막 차수만 쓰므로 그 둘만 계산한다 —
     # 환자마다 사진 전부를 stat하면 네트워크 드라이브에서 눈에 띄게 느려진다.
     rx = re.compile(cfg.naming.visit_regex.format(ortho_id=re.escape(ids.ortho_id)))
+
+    pdates = {v: dt for v, dt in ppt_visits if dt}
 
     def date_of(letter: str) -> str | None:
         oldest = None
@@ -1571,7 +1613,13 @@ def _scan_patient(d: Path) -> dict | None:
             if m and m.group(1) == letter:
                 t = e.stat().st_mtime
                 oldest = t if oldest is None else min(oldest, t)
-        return datetime.fromtimestamp(oldest).strftime("%Y.%m.%d") if oldest else None
+        if oldest is not None:
+            return datetime.fromtimestamp(oldest).strftime("%Y.%m.%d")
+        if letter in pdates:              # 사진 없이 PPT 로만 아는 차수 — 라벨 날짜
+            nums = re.findall(r"\d+", pdates[letter])
+            if len(nums) >= 3:
+                return f"20{int(nums[0]):02d}.{int(nums[1]):02d}.{int(nums[2]):02d}"
+        return None
 
     wanted = {visits[0], visits[-1]} if visits else set()
     return {
@@ -1655,7 +1703,10 @@ def ppt_preview(folder: str):
     hit = _PV_CACHE.get(key)
     if hit and hit[0] == mt:
         return hit[1]
-    prs = T.load_presentation(path)
+    try:
+        prs = T.load_presentation(path)
+    except OSError:                     # PowerPoint 잠금 등 — 미리보기만 조용히 생략
+        return {"slots": {}, "faces": []}
     slots: dict[str, str] = {}
     for i, slide in enumerate(prs.slides):
         vs = Rd.read_visit_slide(slide, i, cfg, PPC)
@@ -1907,11 +1958,21 @@ def session_open(req: OpenReq):
     s.patient_dir = d
     if has_ppt:
         s.ppt_path = ppt_path
-        prs = T.load_presentation(ppt_path)
+        try:
+            prs = T.load_presentation(ppt_path)
+        except PermissionError:
+            raise HTTPException(409, "PPT가 다른 프로그램(PowerPoint)에서 열려 "
+                                     "있습니다 — 닫은 뒤 다시 시도해 주세요")
         s.slot_windows = _layout_from_ppt(prs)
         # 기준영상도 그 PPT의 창으로 복원해야 정합이 같은 좌표계에서 이뤄진다.
         seen = Rd.read_all_visits(prs, cfg, PPC, s.slot_windows)
         s.references = Rd.references_for_registration(seen)
+        # 사진 이름에 차수가 없어도 PPT 가 아는 차수는 이력이다 — 다음 차수가
+        # 그 뒤로 이어져야 기존 슬라이드와 겹치지 않는다.
+        ppt_letters = [vs.visit for vs in seen if vs.visit]
+        if ppt_letters:
+            visits = sorted({*visits, *ppt_letters}, key=N.letter_to_num)
+            s.visit = N.next_visit_letter(visits)
         s.first_date = _first_visit_date(seen)
         try:
             # 수제 라벨 위치·폰트 상속 — 있으면 좋은 것이라, 어떤 실패도
@@ -2849,6 +2910,17 @@ def commit(sid: str, allow_missing: bool = False):
     date_str = (_photo_date(s) or datetime.now()).strftime(cfg.ppt.info_date_format)
     ppt_name = pl_plan["ppt"]
 
+    # PowerPoint 가 열어 둔 PPT 는 덮어쓸 수 없다 — 무거운 작업 전에 먼저 알린다.
+    if s.mode == "revisit" and s.ppt_path and Path(s.ppt_path).exists():
+        try:
+            with open(s.ppt_path, "rb+"):
+                pass
+        except PermissionError:
+            return JSONResponse(status_code=409, content={
+                "error": "ppt_locked",
+                "detail": "PPT가 다른 프로그램(PowerPoint)에서 열려 있습니다 — "
+                          "닫은 뒤 다시 확정해 주세요"})
+
     try:
         with S.Transaction(s.patient_dir) as tx:
             # 1) PPT 준비
@@ -2989,6 +3061,12 @@ def commit(sid: str, allow_missing: bool = False):
             "files": [p.relative_to(s.patient_dir).as_posix() for p in moved],
             "slots": {k: _photo(s, v).label for k, v in s.slots.items()},
         })
+    except PermissionError as e:
+        S.append_audit(LOG_FILE,
+                       {"event": "commit_failed", "error": str(e)})
+        raise HTTPException(409, "PPT가 다른 프로그램(PowerPoint)에서 열려 있어 "
+                                 "저장하지 못했습니다(롤백됨) — 닫고 다시 확정해 "
+                                 "주세요")
     except Exception as e:
         S.append_audit(LOG_FILE,
                        {"event": "commit_failed", "error": str(e)})

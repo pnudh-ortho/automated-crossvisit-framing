@@ -57,7 +57,7 @@ class VisitSlide:
 # 사람이 적은 라벨은 형태가 흔들린다 — "24. 07. 18(재진)" 처럼 점 뒤 공백이
 # 들어가거나 재진에 차수 글자가 없기도 하다. 날짜는 공백을 허용해 읽고
 # YY.MM.DD 로 정규화하며, 재진의 차수 글자는 없어도 재진으로 인정한다.
-_DATE = re.compile(r"(\d{2})\s*\.\s*(\d{2})\s*\.\s*(\d{2})")
+_DATE = re.compile(r"(\d{2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})")
 _REVISIT = re.compile(r"재진\s*\(?([A-Z]+)?")
 _FIRST = re.compile(r"초진")
 
@@ -66,7 +66,7 @@ _FIRST = re.compile(r"초진")
 # 토큰: {date}=날짜  {vkind}=초진/재진  {visit}=차수글자  (+ 인식 전용 {any} 등)
 _LABEL_RX: list = []
 _TOK = {
-    "date": r"(?P<date>\d{2}\s*\.\s*\d{2}\s*\.\s*\d{2})",
+    "date": r"(?P<date>\d{2}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2})",
     "vkind": r"(?P<vkind>초진|재진)",
     "visit": r"(?P<visit>[A-Z]+)",
 }
@@ -93,12 +93,26 @@ def set_label_patterns(patterns: list[str]) -> None:
                     else:
                         raise ValueError(f)
                     i = j + 1
+                elif pat[i] == " ":
+                    # 리터럴 공백은 "있어도 없어도" — (재진 B)와 (재진C)가 같은
+                    # 양식으로 읽힌다. 쓸 때는 양식 그대로 공백을 붙인다.
+                    out.append(r"\s*")
+                    i += 1
                 else:
                     out.append(re.escape(pat[i]))
                     i += 1
             _LABEL_RX.append(re.compile("".join(out)))
         except (ValueError, re.error):
             continue
+
+
+def _norm_date(raw: str | None) -> str | None:
+    """"26. 1. 5" · "26.01.05" → "26.01.05". 표기가 달라도 같은 날짜는 같은 글."""
+    nums = re.findall(r"\d+", raw or "")
+    if len(nums) < 3:
+        return None
+    y, mo, d = (int(x) for x in nums[:3])
+    return f"{y:02d}.{mo:02d}.{d:02d}"
 
 
 def parse_info_box(text: str) -> tuple[str | None, str | None, str]:
@@ -109,14 +123,14 @@ def parse_info_box(text: str) -> tuple[str | None, str | None, str]:
         if not m:
             continue
         g = m.groupdict()
-        date = re.sub(r"\s+", "", g.get("date") or "") or None
+        date = _norm_date(g.get("date"))
         kind = "first" if g.get("vkind") == "초진" else "revisit"
         visit = g.get("visit") or ("A" if kind == "first" else None)
         return visit, date, kind
     date = None
     m = _DATE.search(text or "")
     if m:
-        date = f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
+        date = _norm_date(".".join(m.groups()))
     if _FIRST.search(text or ""):
         return "A", date, "first"
     m = _REVISIT.search(text or "")
@@ -355,6 +369,30 @@ def assign_letterless_visits(visits: list[VisitSlide]) -> None:
         v.visit = cur
         if v.kind == "unknown":
             v.kind = "revisit"
+
+
+def scan_ppt_visits(prs, cfg) -> list[tuple[str, str | None]]:
+    """슬라이드 라벨만 읽어 (차수 글자, 날짜) 목록을 얻는다 — 픽셀 복원 없이.
+
+    환자 목록처럼 PPT 를 자주 훑는 곳을 위한 가벼운 스캔이다. 사진이 든
+    슬라이드의 라벨만 보고, 글자 없는 재진 라벨은 read_all_visits 와 같은
+    규칙(날짜순)으로 글자를 받는다.
+    """
+    found: list[VisitSlide] = []
+    for i, slide in enumerate(prs.slides):
+        if not any(getattr(sh, "shape_type", None) == 13 for sh in slide.shapes):
+            continue                  # 글만 있는 장(환자정보 등)은 차수가 아니다
+        for sh in slide.shapes:
+            if not getattr(sh, "has_text_frame", False):
+                continue
+            v, date, kind = parse_info_box(sh.text_frame.text or "")
+            if kind != "unknown" and (v or date):
+                vs = VisitSlide(slide_index=i, visit=v, date=date, kind=kind)
+                vs.slots = {"_": None}    # 글자 부여 규칙이 보는 '차수 슬라이드' 표식
+                found.append(vs)
+                break
+    assign_letterless_visits(found)
+    return [(vs.visit, vs.date) for vs in found if vs.visit]
 
 
 def references_for_registration(visits: list[VisitSlide]) -> dict[str, dict[str, np.ndarray]]:
