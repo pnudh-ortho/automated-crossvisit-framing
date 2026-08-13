@@ -90,19 +90,20 @@ def _layout_from_ppt(prs) -> dict[str, WindowCm]:
     최신 것이 이어붙일 슬라이드와 가장 가깝다.
     """
     found: dict[str, WindowCm] = {}
+    ctr = (emu_to_cm(prs.slide_width) / 2, emu_to_cm(prs.slide_height) / 2)
     for slide in prs.slides:
         got = W.read_slot_windows(slide, cfg.ppt.slot_names)
         # 사진이 실제로 들어간 슬라이드만 기준으로 삼는다(빈 앵커뿐인 템플릿 슬라이드 제외)
         if got and any(sh.name.startswith(W.PHOTO_NAME_PREFIX) for sh in slide.shapes):
             found = got
         else:
-            est = _estimate_slot_windows(slide)   # 수제 십자뷰 — 사진 bbox 상속
+            est = _estimate_slot_windows(slide, ctr)   # 수제 십자뷰 — 사진 bbox 상속
             if est:
                 found = est
     return {**SLOT_WINDOWS, **found}
 
 
-def _estimate_slot_windows(slide) -> dict[str, WindowCm]:
+def _estimate_slot_windows(slide, slide_ctr: tuple[float, float]) -> dict[str, WindowCm]:
     """수제 십자뷰(가로 8cm 이상 사진 5장)에서 슬롯 창 = 각 사진의 bbox.
 
     무게중심에 가장 가까운 사진이 정면, 나머지는 정면 기준 상/하/좌/우 —
@@ -115,8 +116,7 @@ def _estimate_slot_windows(slide) -> dict[str, WindowCm]:
         return {}
     ctr = [(emu_to_cm(p.left) + emu_to_cm(p.width) / 2,
             emu_to_cm(p.top) + emu_to_cm(p.height) / 2) for p in pics]
-    gx = sum(c[0] for c in ctr) / len(ctr)
-    gy = sum(c[1] for c in ctr) / len(ctr)
+    gx, gy = slide_ctr        # 정면 = 슬라이드 중앙에 가장 가까운 사진
     fi = min(range(len(pics)),
              key=lambda k: (ctr[k][0] - gx) ** 2 + (ctr[k][1] - gy) ** 2)
     fx, fy = ctr[fi]
@@ -1729,8 +1729,9 @@ def ppt_preview(folder: str):
     except OSError:                     # PowerPoint 잠금 등 — 미리보기만 조용히 생략
         return {"slots": {}, "faces": []}
     slots: dict[str, str] = {}
+    pv_ctr = (emu_to_cm(prs.slide_width) / 2, emu_to_cm(prs.slide_height) / 2)
     for i, slide in enumerate(prs.slides):
-        vs = Rd.read_visit_slide(slide, i, cfg, PPC)
+        vs = Rd.read_visit_slide(slide, i, cfg, PPC, slide_ctr=pv_ctr)
         if vs.slots:                # 덱은 시간순 — 첫 십자 슬라이드가 초진
             slots = {k: _pv_jpeg(ref.image) for k, ref in vs.slots.items()}
             break

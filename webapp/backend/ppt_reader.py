@@ -253,7 +253,8 @@ def _visit_text(slide, cfg) -> str:
 
 
 def read_visit_slide(slide, slide_index: int, cfg, px_per_cm: float,
-                     windows: dict[str, WindowCm] | None = None) -> VisitSlide:
+                     windows: dict[str, WindowCm] | None = None,
+                     slide_ctr: tuple[float, float] | None = None) -> VisitSlide:
     visit, date, kind = parse_info_box(_visit_text(slide, cfg))
     vs = VisitSlide(slide_index=slide_index, visit=visit, date=date, kind=kind)
     st = find_shape(slide, _NOTE_STATUS_BOX)
@@ -287,8 +288,14 @@ def read_visit_slide(slide, slide_index: int, cfg, px_per_cm: float,
         if len(pics) >= 5:
             ctr = [(emu_to_cm(p.left) + emu_to_cm(p.width) / 2,
                     emu_to_cm(p.top) + emu_to_cm(p.height) / 2) for p in pics]
-            gx = sum(c[0] for c in ctr) / len(ctr)
-            gy = sum(c[1] for c in ctr) / len(ctr)
+            # 정면 = 슬라이드 중앙에 가장 가까운 사진 — 실제 덱들은 십자를
+            # 중앙 근처에 두므로, 모서리에 낀 추가 사진에 안 끌려가는 기준이다.
+            # 중앙을 모르면(호출부가 안 줬으면) 사진 중앙값으로 물러난다.
+            if slide_ctr is not None:
+                gx, gy = slide_ctr
+            else:
+                xs, ys = sorted(c[0] for c in ctr), sorted(c[1] for c in ctr)
+                gx, gy = xs[len(xs) // 2], ys[len(ys) // 2]
             fi = min(range(len(pics)),
                      key=lambda k: (ctr[k][0] - gx) ** 2 + (ctr[k][1] - gy) ** 2)
             fx, fy = ctr[fi]
@@ -332,8 +339,9 @@ def read_all_visits(prs, cfg, px_per_cm: float,
     주지 않으면 템플릿 창(전역 캐시)을 쓴다.
     """
     out = []
+    ctr = (emu_to_cm(prs.slide_width) / 2, emu_to_cm(prs.slide_height) / 2)
     for i, slide in enumerate(prs.slides):
-        vs = read_visit_slide(slide, i, cfg, px_per_cm, windows)
+        vs = read_visit_slide(slide, i, cfg, px_per_cm, windows, slide_ctr=ctr)
         if vs.slots:  # 구내 사진이 있는 슬라이드만
             out.append(vs)
     assign_letterless_visits(out)   # "(재진)"처럼 글자 없는 라벨 — 날짜순으로 부여
