@@ -1,0 +1,94 @@
+{
+  "app": "0.4.0",
+  "note": "가중치는 git 에 넣지 않는다 — 바이너리는 델타 압축이 안 돼 이력에 영구히 쌓인다.",
+  "weights": {
+    "segmentation": {
+      "name": "seg",
+      "version": "1.0.0",
+      "date": "20260811",
+      "file": "seg-1.0.0-20260811.onnx",
+      "install_as": "models/_installed/seg.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "65d38c50dd3d7d8d595d5adbd449066cb55b3d29821e5562e9c80c6d29e41bb6",
+      "bytes": 291061611,
+      "min_app": "0.4.0"
+    },
+    "framing_face": {
+      "name": "framing_face",
+      "version": "1.0.0",
+      "date": "20260731",
+      "file": "framing_face-1.0.0-20260731.onnx",
+      "install_as": "models/_installed/framing/framing_FACE_final.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "860a098828cd83b7bddc381f6df742ddca41465de40f3316cabaf47105915f56",
+      "bytes": 16066651,
+      "min_app": "0.4.0"
+    },
+    "framing_io_front": {
+      "name": "framing_io_front",
+      "version": "1.0.0",
+      "date": "20260731",
+      "file": "framing_io_front-1.0.0-20260731.onnx",
+      "install_as": "models/_installed/framing/framing_IO_FRONT_final.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "b74d2f5d3d36e8c7b4fc69428e96311b236d6952c9b652f4d70faf71ff8e8908",
+      "bytes": 16066651,
+      "min_app": "0.4.0"
+    },
+    "framing_io_left": {
+      "name": "framing_io_left",
+      "version": "1.0.0",
+      "date": "20260731",
+      "file": "framing_io_left-1.0.0-20260731.onnx",
+      "install_as": "models/_installed/framing/framing_IO_LEFT_final.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "7757d9a1b28ee289b9f865cfc11c3f52bf383179a3a133eb317e27891b9a534e",
+      "bytes": 16066651,
+      "min_app": "0.4.0"
+    },
+    "framing_io_lower": {
+      "name": "framing_io_lower",
+      "version": "1.0.0",
+      "date": "20260731",
+      "file": "framing_io_lower-1.0.0-20260731.onnx",
+      "install_as": "models/_installed/framing/framing_IO_LOWER_final.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "8ed9ec75e49d91d1f25a06b88b6281324b5a38fbea47228236289452b36211cf",
+      "bytes": 16066651,
+      "min_app": "0.4.0"
+    },
+    "framing_io_right": {
+      "name": "framing_io_right",
+      "version": "1.0.0",
+      "date": "20260731",
+      "file": "framing_io_right-1.0.0-20260731.onnx",
+      "install_as": "models/_installed/framing/framing_IO_RIGHT_final.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "c77ae1f1931e86e718eabffee22172cd6a3d741aaf5f0b962d115d894b6d413d",
+      "bytes": 16066651,
+      "min_app": "0.4.0"
+    },
+    "framing_io_upper": {
+      "name": "framing_io_upper",
+      "version": "1.0.0",
+      "date": "20260731",
+      "file": "framing_io_upper-1.0.0-20260731.onnx",
+      "install_as": "models/_installed/framing/framing_IO_UPPER_final.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "e0318574df69c759bc2087b02456cd8f4e9eb50418b7a30608cd588f9b659d21",
+      "bytes": 16066651,
+      "min_app": "0.4.0"
+    },
+    "classifier": {
+      "name": "classifier",
+      "version": "1.0.0",
+      "date": "20260727",
+      "file": "classifier-1.0.0-20260727.onnx",
+      "install_as": "models/_installed/ortho_classifier.onnx",
+      "drive_url": "TODO_DRIVE_URL",
+      "sha256": "d4bc0f858c293c4b733e3139b920089734e268fdb35e53beff32b887307c7e66",
+      "bytes": 16056065,
+      "min_app": "0.4.0"
+    }
+  }
+}

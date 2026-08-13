@@ -1,0 +1,14 @@
+# 외래 배포용 웹앱 의존성 — CPU only, PyTorch 미포함
+# 오프라인 설치를 위해 원내 반입 시에는 wheel을 미리 받아 두는 것을 권장:
+#   pip download -r requirements.txt -d wheels/   (인터넷 되는 PC에서)
+#   pip install --no-index --find-links wheels/ -r requirements.txt  (원내 PC에서)
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9      # FastAPI 파일 업로드
+python-pptx>=0.6.23
+opencv-python-headless>=4.9
+onnxruntime>=1.17
+Pillow>=10.2
+pydantic>=2.6
+PyYAML>=6.0
+numpy>=1.26,<2.3

@@ -1,0 +1,92 @@
+{
+  "tag": "sep_all",
+  "backbone": "efficientnet_b0",
+  "input_w": 336,
+  "input_h": 224,
+  "mean": [
+    0.48500001430511475,
+    0.4560000002384186,
+    0.4059999883174896
+  ],
+  "std": [
+    0.2290000021457672,
+    0.2240000069141388,
+    0.22499999403953552
+  ],
+  "letterbox": "aspect-preserving, centered, black pad",
+  "crop_aspect": {
+    "FACE": [
+      3,
+      4
+    ],
+    "IO_FRONT": [
+      4,
+      3
+    ],
+    "IO_LEFT": [
+      4,
+      3
+    ],
+    "IO_LOWER": [
+      4,
+      3
+    ],
+    "IO_RIGHT": [
+      4,
+      3
+    ],
+    "IO_UPPER": [
+      4,
+      3
+    ]
+  },
+  "classes": [
+    "FACE",
+    "IO_FRONT",
+    "IO_LEFT",
+    "IO_LOWER",
+    "IO_RIGHT",
+    "IO_UPPER"
+  ],
+  "final": true,
+  "folds": {
+    "FACE": [
+      "final"
+    ],
+    "IO_FRONT": [
+      "final"
+    ],
+    "IO_LEFT": [
+      "final"
+    ],
+    "IO_LOWER": [
+      "final"
+    ],
+    "IO_RIGHT": [
+      "final"
+    ],
+    "IO_UPPER": [
+      "final"
+    ]
+  },
+  "val_corner_med_pct": {
+    "FACE": {
+      "final": 4.845522923411403
+    },
+    "IO_FRONT": {
+      "final": 2.9771266563616807
+    },
+    "IO_LEFT": {
+      "final": 4.320650175383981
+    },
+    "IO_LOWER": {
+      "final": 2.8195502177835734
+    },
+    "IO_RIGHT": {
+      "final": 4.099423318611404
+    },
+    "IO_UPPER": {
+      "final": 2.99662627490999
+    }
+  }
+}

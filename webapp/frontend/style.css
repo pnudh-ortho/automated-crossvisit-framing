@@ -1,0 +1,1015 @@
+/* ══ 토큰 ══════════════════════════════════════════════════════════════════
+   버튼/선택 강조는 SwiFT 계열 블루. 앰버는 "확인이 필요하다"에만 쓴다.      */
+:root[data-theme="light"]{
+  --bg:#f4f6fb; --panel:#ffffff; --panel2:#f7f9fd; --well:#0b0e11;
+  --edge:#dce3ef; --edge-soft:#e8edf6;
+  --ink:#1c2536; --ink2:#66748c; --ink3:#8d9bb2;
+  --accent:#2f6bff; --on-accent:#ffffff; --accent-soft:#2f6bff14;
+  --warn:#b26a00; --warn-soft:#b26a0014;
+  --done:#1eb85f; --bad:#d93a35;
+  --shadow:0 1px 3px rgba(20,40,80,.08);
+}
+/* 다크는 **사이드바·헤더·카드(--panel)** 가 #181817 이고, 페이지 배경은 그보다
+   한 단 어둡다 — 판이 배경 위에 떠 보이게 하려는 것이다.
+   파란기 없는 중성 회색 램프이므로 테두리·글자도 같이 중성으로 간다.
+   각 단계는 종전 팔레트의 명도차(L*)를 옮긴 값이라 위계는 그대로다(패널 아래
+   구간만 눌러 담아, well 이 검정으로 뭉개지지 않게 했다). */
+:root[data-theme="dark"]{
+  --bg:#0e0e0d; --panel:#181817; --panel2:#131312; --well:#050504;
+  --edge:#2b2b2a; --edge-soft:#222221;
+  --ink:#f1f1f0; --ink2:#a4a4a3; --ink3:#7b7b7a;
+  --accent:#3d90f0; --on-accent:#ffffff; --accent-soft:#3d90f024;
+  --warn:#e0a33a; --warn-soft:#e0a33a1f;
+  --done:#2ecc71; --bad:#ec6a63;
+  --shadow:0 1px 3px rgba(0,0,0,.35);
+}
+:root{
+  --f-ui:"Malgun Gothic","맑은 고딕",Pretendard,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:ui-monospace,"Cascadia Mono",Consolas,"D2Coding",monospace;
+  --rail:248px; --ctl-h:32px;   /* 툴바 컨트롤 공통 높이 */
+  /* 활성 탭 색. 테마를 타지 않고 고정한다 — 지금 어느 탭인지가 배경 밝기에
+     따라 흐려지면 안 된다. */
+  --tab-on:#2f6bff;
+}
+
+*{box-sizing:border-box;}
+[hidden]{display:none !important;}
+html,body{height:100%;}
+/* SwiFT 골격: 헤더 / 상태 스트립 / (사이드바+콘텐츠). 크롬은 고정, 콘텐츠만 스크롤. */
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:14px/1.5 var(--f-ui);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+.eyebrow{
+  font:600 12px/1 var(--f-mono); letter-spacing:.13em; text-transform:uppercase;
+  color:var(--ink3);
+}
+.ident{font-family:var(--f-mono); letter-spacing:.02em;}
+
+/* ══ 헤더 = 신원 ═══════════════════════════════════════════════════════════ */
+.head{
+  flex:none; display:flex; align-items:center; gap:12px; padding:6px 16px;
+  background:var(--panel); border-bottom:1px solid var(--edge);
+}
+/* 헤더 버튼은 크롬이지 작업 도구가 아니다 — 한 단계 작게 */
+.head .btn{height:25px; padding:0 10px; font-size:13px; font-weight:600;
+  display:inline-flex; align-items:center;}
+
+/* 워드마크 — PPT(산출물) × CRoCs(십자 배치). 가운데 ×만 힘을 빼 두 낱말을 가른다. */
+.mark{font:700 15px/1 var(--f-ui); letter-spacing:-.01em; user-select:none;}
+.mark i{font-style:normal; font-weight:400; color:var(--ink3); margin:0 1px;}
+/* 풀네임은 흐리게, 약자를 이루는 글자(C·Ro·C·s)만 굵고 진하게 */
+.mark .full{font-weight:400; color:var(--ink3);}
+.mark .full b{font-weight:700; color:var(--ink);}
+.head .sp{flex:1;}
+.pchip{
+  display:flex; align-items:center; gap:9px; padding:3px 10px;
+  background:var(--panel2); border:1px solid var(--edge); border-radius:7px;
+}
+.pchip .nm{font-weight:700;}
+.pchip .id{font-family:var(--f-mono); font-size:13px; color:var(--ink2);}
+.pchip .visit{
+  font:700 13px/1 var(--f-mono); color:var(--accent);
+  background:var(--accent-soft); border:1px solid var(--accent);
+  border-radius:5px; padding:4px 7px;
+}
+
+/* ══ 버튼 (SwiFT) ══════════════════════════════════════════════════════════ */
+.btn{
+  font:inherit; font-weight:600; color:var(--ink); background:var(--panel2);
+  border:1px solid var(--edge); border-radius:8px; padding:6px 12px;
+  cursor:pointer; white-space:nowrap;
+}
+.btn:hover:not(:disabled){border-color:var(--accent);}
+.btn.primary{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}
+.btn:disabled{opacity:.45; cursor:not-allowed;}
+/* 가로 꽉 찬 다음-단계 버튼. 사진이 없으면 회색, 들어오면 강조색으로 살아난다. */
+.btn.wide{
+  width:100%; height:34px; margin-top:10px;
+  display:flex; align-items:center; justify-content:center;
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
+}
+.btn.primary:disabled{
+  background:var(--panel2); color:var(--ink3); border-color:var(--edge); opacity:1;
+}
+.k{font:400 12.5px/1 var(--f-mono); color:var(--ink3); margin-left:6px;}
+.btn.primary .k{color:var(--on-accent); opacity:.7;}
+
+/* ══ 본체 ══════════════════════════════════════════════════════════════════ */
+.main{flex:1; display:grid; grid-template-columns:var(--rail) 1fr; min-height:0;}
+@media (max-width:860px){ .main{grid-template-columns:1fr;} }
+
+/* ── 사이드바: 한글이 먼저, 라틴 코드가 아래 ───────────────────────────────── */
+.rail{
+  background:var(--panel); border-right:1px solid var(--edge);
+  padding:14px 10px; display:flex; flex-direction:column; gap:2px; min-height:0;
+}
+.rail > .eyebrow{display:block; padding:0 10px; margin-bottom:9px;}
+/* 사이드바 하단 로고. JPG 라 배경이 오프화이트다 — 다크에선 반전해 패널색에
+   녹이고, hue-rotate(180)으로 빨강·초록 점의 색상은 되살린다. */
+.rail-logo{margin-top:auto; width:100%; height:auto; display:block;
+  border-radius:8px; border:1px solid var(--edge-soft);}
+:root[data-theme="dark"] .rail-logo{filter:invert(.92) hue-rotate(180deg);}
+.nav{
+  display:grid; grid-template-columns:17px 1fr; gap:1px 9px;
+  padding:8px 12px 8px 11px; border-radius:8px;
+  border:0; border-left:3px solid transparent; width:100%;
+  background:none; font:inherit; color:var(--ink2); text-align:left; cursor:pointer;
+}
+.nav:hover{background:var(--panel2); color:var(--ink);}
+.nav .n{grid-row:1/3; align-self:center; font:600 13px/1 var(--f-mono); color:var(--ink3);}
+.nav .top{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.nav .nm{font-size:14px; font-weight:600;}
+.nav .st{font-size:12.5px; color:var(--ink3); white-space:nowrap;}
+.nav .code{font:600 12px/1.4 var(--f-mono); letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink3);}
+
+.nav[data-state="done"]{color:var(--ink);}
+.nav[data-state="done"] .n,
+.nav[data-state="done"] .st{color:var(--done);}
+.nav[data-state="attn"] .n,
+.nav[data-state="attn"] .st{color:var(--warn);}
+.nav[aria-current="page"]{
+  background:var(--accent-soft); border-left-color:var(--accent); color:var(--ink);
+}
+.nav[aria-current="page"] .nm{font-weight:700;}
+.nav[aria-current="page"] .code{color:var(--accent);}
+
+/* ── 콘텐츠 ──────────────────────────────────────────────────────────────── */
+.content{padding:16px 20px; overflow:auto; min-height:0; display:flex; flex-direction:column;}
+.view{display:none;}
+/* 켜진 뷰가 콘텐츠 칸 높이를 그대로 물려받는다 — 십자가 화면을 꽉 채우기 위한 전제 */
+.view.on{display:flex; flex-direction:column; flex:1; min-height:0;}
+
+/* 카드 = 그 자체로 하나의 대상. 카드 안에 카드를 넣지 않는다.
+   구획이 필요하면 .sec으로 나눈다 — 테두리 대신 헤어라인과 여백으로. */
+.card{
+  background:var(--panel); border:1px solid var(--edge); border-radius:12px;
+  box-shadow:var(--shadow); min-height:0;
+}
+.card.grow{flex:1; display:flex; flex-direction:column;}
+.card.pad{padding:15px 17px;}
+
+.sec{padding:14px 16px; min-height:0;}
+.sec + .sec{border-top:1px solid var(--edge-soft);}
+.sec.grow{flex:1; display:flex; flex-direction:column;}
+.sec > h3{
+  margin:0 0 10px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+  font:600 12px/1 var(--f-mono); letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3);
+}
+.sec > h3 .aux{font:12.5px/1 var(--f-mono); color:var(--ink2); text-transform:none;
+  letter-spacing:0; display:flex; align-items:center; gap:8px; min-width:0;}
+.sec > h3 .aux > span:empty{display:none;}
+
+/* 스테이지 헤더 — 캡션이 아니라 그 화면이 무엇인지 말하는 제목이다.
+   차수 배지가 여기 붙어, 분류·조정 중에도 초진/재진 맥락이 사라지지 않는다. */
+.sec > h3.hd{
+  font:700 14px/1 var(--f-ui); letter-spacing:0; text-transform:none; color:var(--ink);
+  padding-bottom:10px; margin-bottom:12px; border-bottom:1px solid var(--edge-soft);
+}
+.sec > h3.hd .hd-l{display:flex; align-items:center; gap:9px; min-width:0;}
+/* 상단 .pchip .visit와 같은 치수 — 두 곳이 같은 계열로 읽히게 한다 */
+.vbadge{
+  font:700 12.5px/1 var(--f-mono); letter-spacing:0; text-transform:none;
+  border-radius:5px; padding:4px 7px; white-space:nowrap;
+  color:var(--ink2); background:var(--panel2); border:1px solid var(--edge);
+}
+.vbadge[data-tone="revisit"]{color:var(--accent); background:var(--accent-soft); border-color:var(--accent);}
+.vbadge[data-tone="warn"]{color:var(--warn); background:var(--warn-soft); border-color:var(--warn);}
+.vbadge[data-tone="done"]{color:var(--done); background:var(--panel2); border-color:var(--edge);}
+.vbadge[hidden]{display:none;}
+#stage-msg{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#stage-msg[data-kind="err"]{color:var(--bad);}
+#stage-msg[data-kind="busy"]{color:var(--accent);}
+.ph{
+  border:1px dashed var(--edge); border-radius:9px; padding:32px;
+  color:var(--ink3); font-size:14px; text-align:center; line-height:1.7;
+}
+
+.seg{display:inline-flex; border:1px solid var(--edge); border-radius:8px; overflow:hidden;}
+.seg button{
+  font:inherit; font-weight:600; font-size:14px; border:0; border-radius:0;
+  background:var(--panel2); color:var(--ink2); padding:7px 13px; cursor:pointer;
+}
+.seg button + button{border-left:1px solid var(--edge);}
+.seg button:hover:not(:disabled){color:var(--ink);}
+.seg button[aria-pressed="true"]{background:var(--accent); color:var(--on-accent);}
+.seg button:disabled{opacity:.4; cursor:not-allowed;}
+
+/* ── Pre-processing: 상자 6칸 + OTHERS ──────────────────────────────────────
+   점선 상자에 썸네일을 담는다. 세로로 쌓이고 맨 위가 대표. */
+/* 7칸 격자에 상자 6개 — FACE 가 두 칸을 먹고 나머지 5개가 한 칸씩. FACE 는
+   장수가 많은 데다 사람이 슬라이드 자리를 직접 고르는 상자라 넓게 준다. */
+.bins{
+  flex:1; min-height:0; display:grid; grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:10px; margin-bottom:10px;
+}
+.bin.face{grid-column:span 2;}
+@media (max-width:1100px){
+  .bins{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .bin.face{grid-column:1 / -1;}   /* 좁으면 한 줄 통째로 */
+}
+.bin{
+  display:flex; flex-direction:column; min-height:0; min-width:0;
+  border:1.5px dashed var(--edge); border-radius:9px; padding:8px;
+  background:var(--panel2); transition:border-color .15s ease, background .15s ease;
+}
+.bin.over{border-color:var(--accent); background:var(--accent-soft);}
+.bin.wide{flex:none; height:124px; margin-bottom:10px;}
+.bin-h{
+  display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:7px;
+  font:600 12px/1 var(--f-mono); letter-spacing:.1em; color:var(--ink3);
+}
+.bin-h .cnt{font-weight:700; color:var(--ink2);}
+.bin-h .hr{display:flex; align-items:center; gap:7px; flex:none;}
+/* 상자 머리의 작은 동작 버튼 — 제목 줄 높이를 넘기지 않게 납작하게 */
+.minibtn{
+  font:600 11px/1 var(--f-mono); letter-spacing:.06em; padding:4px 7px;
+  color:var(--ink2); background:var(--panel); border:1px solid var(--edge);
+  border-radius:5px; cursor:pointer; text-transform:none;
+}
+.minibtn:hover{color:var(--accent); border-color:var(--accent);}
+.minibtn:disabled{opacity:.45; cursor:default;}
+.bin-body{flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:6px;}
+.bin-body.row{flex-direction:row; overflow-x:auto; overflow-y:hidden; align-items:flex-start;}
+/* FACE 전용 3열. align-content:start 가 없으면 장수가 적을 때 세로로 늘어난다. */
+.bin-body.grid3{
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  align-content:start; overflow-y:auto;
+}
+.bin-body.grid3 .bin-empty{grid-column:1 / -1;}
+.bin-empty{margin:auto; font-size:12.5px; color:var(--ink3);}
+
+/* 사진 카드 — 대표는 강조색 테두리와 PPT 배지 */
+.ph-card{
+  position:relative; margin:0; flex:0 0 auto; border-radius:6px; overflow:hidden;
+  border:1px solid var(--edge); background:var(--well); cursor:grab;
+}
+.bin-body.row .ph-card{height:100%; aspect-ratio:4/3;}
+.bin-body.row .ph-card img{height:calc(100% - 15px);}
+.ph-card img{width:100%; aspect-ratio:4/3; object-fit:cover; display:block;}
+/* 교합면 썸네일은 검수·PPT와 같은 방향으로 보여준다(원본 파일은 그대로). */
+.ph-card img.fv{transform:scaleY(-1);}
+.ph-card figcaption{
+  padding:2px 4px; font:12px/1.5 var(--f-mono); color:var(--ink2);
+  background:var(--panel); text-align:center;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ph-card figcaption.low{color:var(--warn); font-weight:700;}
+.ph-card.primary{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent);}
+.tagp{
+  position:absolute; top:3px; left:3px; padding:1px 5px; border-radius:3px;
+  background:var(--accent); color:var(--on-accent); font:700 11px/1.6 var(--f-mono);
+  letter-spacing:.08em;
+}
+#pre-msg[data-kind="err"]{color:var(--bad);}
+#pre-msg[data-kind="busy"]{color:var(--accent);}
+#pre-msg[data-kind="ok"]{color:var(--done);}
+#pre-msg[data-kind="warn"]{color:var(--warn);}
+
+/* ── Setup: 좌 환자 목록 / 우 상세 ────────────────────────────────────────── */
+.setup{flex:1; min-height:0; display:grid;
+  grid-template-columns:minmax(206px,262px) minmax(0,1fr); gap:14px;}
+@media (max-width:900px){ .setup{grid-template-columns:1fr;} }
+
+/* Setup 툴바 — 왼쪽은 "어디의 목록인가", 오른쪽은 그 목록을 다루는 도구 */
+.toolbar{display:flex; align-items:center; gap:9px; margin-bottom:12px; flex-wrap:wrap;}
+/* 검색은 placeholder가 딱 들어갈 만큼만 — 남는 폭은 경로가 가져간다.
+   툴바의 모든 컨트롤은 --ctl-h로 높이를 맞춘다. */
+.toolbar .find{flex:0 0 300px; min-width:0; height:var(--ctl-h); padding:0 11px;}
+.toolbar > .btn{height:var(--ctl-h); padding:0 12px; display:inline-flex; align-items:center;}
+
+/* 저장 위치 — 남는 폭을 전부 쓰고, 넘칠 때만 앞쪽을 줄인다 */
+.rootbar{
+  flex:1 1 260px; min-width:0; display:flex; align-items:center; gap:9px;
+  height:var(--ctl-h); padding:0 5px 0 10px;
+  border:1px solid var(--edge-soft); border-radius:8px;
+  background:var(--panel2); font-size:13px;
+}
+.rootbar .ident{
+  flex:1 1 auto; min-width:0; color:var(--ink2);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  direction:rtl; text-align:left;
+}
+.rootbar .btn{flex:none; height:23px; padding:0 9px; font-size:13px;
+  display:inline-flex; align-items:center;}
+
+/* 서버 폴더 탐색기 (저장 위치 고르기) */
+.crumb{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:14px 0 10px;}
+.crumb .ident{font-size:13px; color:var(--ink2); word-break:break-all;}
+.drives{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:10px;}
+.dlist{
+  max-height:min(46vh,340px); overflow:auto; border:1px solid var(--edge);
+  border-radius:8px; background:var(--panel2);
+}
+.drow{
+  display:block; width:100%; padding:8px 12px; border:0; border-bottom:1px solid var(--edge-soft);
+  background:none; font:inherit; font-size:14px; color:var(--ink); text-align:left; cursor:pointer;
+}
+.drow:last-child{border-bottom:0;}
+.drow:hover{background:var(--panel);}
+
+.find{
+  font:inherit; font-size:14px; color:var(--ink); background:var(--panel2);
+  border:1px solid var(--edge); border-radius:8px; padding:6px 11px;
+}
+.find:focus{border-color:var(--accent); outline:none;}
+.find::placeholder{color:var(--ink3);}
+
+.plist{overflow:auto; min-height:0;}
+/* 1행: 이름 + 번호 / 2행: 차수 이력 */
+.prow{
+  display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 8px; align-items:baseline;
+  width:100%; padding:8px 11px; border:0; border-left:3px solid transparent;
+  border-bottom:1px solid var(--edge-soft);
+  background:none; font:inherit; color:var(--ink2); text-align:left; cursor:pointer;
+}
+.prow:last-child{border-bottom:0;}
+.prow:hover{background:var(--panel);}
+.prow .who{font-size:14px; font-weight:700; color:var(--ink); white-space:nowrap;}
+.prow .no{font:12.5px/1 var(--f-mono); color:var(--ink3); text-align:left;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.prow .hist{
+  grid-column:1/-1; font:12.5px/1.4 var(--f-mono); color:var(--ink3);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.prow .hist b{color:var(--ink2); font-weight:700;}
+/* 첫 차수와 마지막 차수 사이의 생략 표시. 뚜렷하게 보여야 "사이가 있다"를 읽는다. */
+.mid{color:var(--ink3); letter-spacing:.18em; font-weight:700;}
+
+.prow .hist .none{font-family:var(--f-ui);}
+.prow[aria-pressed="true"]{background:var(--accent-soft); border-left-color:var(--accent);}
+.prow[aria-pressed="true"] .hist b{color:var(--accent);}
+.prow .flag{color:var(--warn); font-size:12.5px; font-family:var(--f-ui);}
+.empty{padding:26px 14px; text-align:center; color:var(--ink3); font-size:13.5px;}
+/* 규칙 밖 폴더는 목록에서 빠진다 — 조용히 사라지면 자료가 없어진 걸로 오해하므로
+   접힌 한 줄만 남기고, 눌렀을 때 어떤 폴더인지 펼친다. */
+.skipnote{border-top:1px solid var(--edge-soft); font-size:12.5px; color:var(--ink3);}
+.skipnote summary{padding:7px 12px; cursor:pointer; list-style:none;}
+.skipnote summary::-webkit-details-marker{display:none;}
+.skipnote summary::before{content:"▸ "; color:var(--ink3);}
+.skipnote[open] summary::before{content:"▾ ";}
+.skipnote summary:hover{color:var(--ink2);}
+.skipnote ul{margin:0; padding:0 12px 0 30px;}
+.skipnote li{margin:2px 0; font-family:var(--f-mono); color:var(--ink2);}
+.skipnote > p{margin:7px 12px 10px; line-height:1.6;}
+
+/* 카드 자체는 스크롤하지 않는다. 남는 높이를 폴더 목록이 흡수하고,
+   넘칠 때만 그 안에서 스크롤한다 — 모니터 높이가 달라도 규칙이 같다. */
+.detail{display:flex; flex-direction:column; overflow:auto; min-height:0;}
+.detail > .sec{flex:none;}
+.detail > .sec-folder{flex:1 1 auto; min-height:0; display:flex; flex-direction:column;}
+.detail .panel + .panel{margin-top:0;}
+/* 첫 섹션: 왼쪽은 글, 오른쪽은 PPT 슬라이드 미리보기.
+   높이는 환자 목록 4줄과 맞춰 두 칸이 나란히 자리를 잡게 한다. */
+.idsec{display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;}
+/* 글은 제 내용만큼만 — 늘어나면 미리보기가 오른쪽 끝으로 밀려난다 */
+.idmain{flex:0 1 auto; min-width:0;}
+/* 미리보기는 폭으로 크기가 정해진다. 넓으면 max-width에서 멈추고(환자 목록
+   4줄 높이), 좁으면 둘이 함께 줄어든다 — 어떤 모니터에서도 가로 스크롤 없이
+   두 장이 다 보인다. */
+/* 우측 정렬 — 미리보기는 환자 이름표의 보조 정보라 오른쪽 끝에 붙인다 */
+.slides{flex:1 1 240px; min-width:0; max-width:600px; display:flex; gap:9px;
+  margin-left:auto; justify-content:flex-end;}
+.pv{
+  flex:1 1 0; min-width:0; max-width:280px;
+  aspect-ratio:4/3;                      /* 슬라이드 25.40×19.05cm = 4:3 */
+  background:var(--well); border:1px solid #000; border-radius:6px;
+  overflow:hidden; display:flex;
+}
+.pv.face{gap:2px;}
+.pv.face img{flex:1 1 0; min-width:0; object-fit:cover;}
+/* 십자 미니 그리드 — 검수 화면 십자뷰와 같은 배치 (SLOTS 의 grid-area 재사용) */
+.pvgrid{flex:1; display:grid; gap:2px;
+  grid-template-areas:". u ." "l f r" ". b .";
+  grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr;}
+.pvgrid img{width:100%; height:100%; object-fit:cover; min-width:0; min-height:0;}
+
+/* 이름과 번호는 한 줄 — 둘이 합쳐 한 사람을 가리키는 하나의 이름표다 */
+.idline{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
+.detail .who{font-size:19px; font-weight:700; letter-spacing:-.01em;}
+.detail .no{font:13px var(--f-mono); color:var(--ink2);}
+
+/* 세로 타임라인 — 위가 첫 진료, 아래가 마지막 진료. 사이는 눌러서 펼친다. */
+.tl{margin:14px 0 0; padding-left:12px; border-left:2px solid var(--edge);}
+.tl-node{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; padding:3px 0;}
+.tl-node b{font:700 14px/1 var(--f-mono); color:var(--accent);}
+.tl-date{font:14px/1 var(--f-mono); color:var(--ink);}
+.tl-ago{font:13px/1 var(--f-mono); color:var(--ink3);}
+.tl-more{
+  display:block; margin:5px 0; padding:4px 10px;
+  border:1px solid var(--edge); border-radius:7px; background:var(--panel2);
+  font:inherit; font-size:13px; color:var(--ink2); cursor:pointer;
+}
+.tl-more:hover{border-color:var(--accent); color:var(--ink);}
+.tl-none{margin:14px 0 0; font-size:13.5px; color:var(--ink3);}
+
+/* 재진 이력 창 */
+.histlist{
+  max-height:min(46vh,320px); overflow:auto; margin-top:12px;
+  border:1px solid var(--edge); border-radius:8px; background:var(--panel2);
+}
+.hrow{
+  display:grid; grid-template-columns:26px 82px 1fr auto; gap:10px; align-items:baseline;
+  padding:8px 12px; border-bottom:1px solid var(--edge-soft); font-size:13.5px;
+}
+.hrow:last-child{border-bottom:0;}
+.hrow b{font:700 14px/1 var(--f-mono); color:var(--accent);}
+.hrow .hd{font-family:var(--f-mono); color:var(--ink);}
+.hrow .ha{color:var(--ink3); font:13px/1 var(--f-mono);}
+.hrow .hn{font:12.5px/1 var(--f-mono); color:var(--ink3);}
+/* 이번 차수에 무슨 일이 일어나는지 — 목록에도 폴더에도 없는 유일한 정보 */
+.plan{
+  display:inline-block; margin:12px 0 0; padding:10px 12px; border-radius:8px;
+  background:var(--accent-soft); border:1px solid var(--accent);
+  font-size:13.5px; line-height:1.7; color:var(--ink);
+}
+.plan .vbig{
+  font:700 14px/1 var(--f-mono); color:var(--on-accent); background:var(--accent);
+  border-radius:5px; padding:4px 8px; margin-right:7px;
+}
+.plan .ident{color:var(--ink2);}
+.plan .mid{color:var(--ink3);}
+.facts{display:grid; grid-template-columns:auto 1fr; gap:9px 14px;
+  margin:16px 0; align-items:baseline; font-size:14px;}
+.facts dt{font:600 12px/1.6 var(--f-mono); letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3);}
+.facts dd{margin:0; color:var(--ink);}
+.vchips{display:flex; gap:4px; flex-wrap:wrap; align-items:center;}
+.vchip{font:700 12.5px/1 var(--f-mono); padding:4px 7px; border-radius:5px;
+  border:1px solid var(--edge); background:var(--panel2); color:var(--ink2);}
+.vchip.next{background:var(--accent-soft); border-color:var(--accent); color:var(--accent);}
+.arrow{color:var(--ink3); font-size:13px; margin:0 2px;}
+.note{
+  border-radius:8px; padding:9px 12px; font-size:13.5px; line-height:1.6;
+  background:var(--warn-soft); border:1px solid var(--warn); color:var(--ink);
+}
+.note b{color:var(--warn);}
+
+/* ── 모달 ────────────────────────────────────────────────────────────────── */
+.modal{
+  border:1px solid var(--edge); border-radius:12px; padding:20px 22px;
+  background:var(--panel); color:var(--ink); font:14px/1.5 var(--f-ui);
+  width:min(92vw,392px); box-shadow:0 12px 44px rgba(0,0,0,.32);
+}
+.modal::backdrop{background:rgba(6,10,16,.52);}
+.modal > h3{margin:0; font-size:17px; font-weight:700; letter-spacing:-.01em;}
+.modal.wide{width:min(94vw,470px);}
+.modal .sec{padding:14px 0;}
+.modal .sec:last-of-type{padding-bottom:4px;}
+.modal .sec > h4{
+  margin:0 0 9px; font:600 12px/1 var(--f-mono); letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3);
+}
+/* 왼쪽 = 제목+한 줄 설명, 오른쪽 = 컨트롤 하나. 컨트롤에는 글을 달지 않는다 —
+   두 줄로 감기면 어떤 행도 훑어 읽을 수 없게 된다. */
+.setrow{display:flex; align-items:center; justify-content:space-between; gap:12px;
+  font-size:14px; padding:4px 0;}
+.setrow .settl{display:flex; flex-direction:column; gap:1px; min-width:0;}
+.setrow .settl .sub{margin:0; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis;}
+.setrow > input[type="checkbox"]{width:16px; height:16px; flex:none;}
+.setrow .nsz{width:48px; padding:3px 6px; font-size:14px; border:1px solid var(--edge);
+  border-radius:6px; background:var(--panel); color:var(--ink);}
+/* 오른쪽 컨트롤 묶음(숫자칸 셋)은 플렉스로 묶는다 — 좁아져도 줄바꿈되지 않게.
+   왼쪽 설명이 대신 말줄임된다. */
+.setrow > .row{display:flex; align-items:center; flex:none;}
+#set-picker{margin-top:10px;}
+.modal .sub{margin:3px 0 0; font-size:13px; color:var(--ink2);}
+
+/* 폴더 이름 형식 — 블록 조립. 칩을 ‹ › 로 움직이고 × 로 뺀다 */
+.patrow{display:flex; flex-wrap:wrap; gap:4px; min-height:34px; padding:6px;
+  border:1px dashed var(--edge); border-radius:8px; margin-bottom:6px;}
+.patchip{display:inline-flex; align-items:center; gap:2px; font-size:13px;
+  padding:3px 6px; border:1px solid var(--edge); border-radius:6px;
+  background:var(--panel2);}
+.patchip.sep{font-family:monospace; font-weight:700;}
+.patchip button{border:0; background:none; cursor:pointer; font-size:12px;
+  color:var(--ink2); padding:0 2px;}
+.patpal{display:flex; flex-wrap:wrap; gap:4px;}
+.patpal button{font-size:13px; padding:3px 8px; border:1px solid var(--edge);
+  border-radius:6px; background:var(--panel); cursor:pointer;}
+/* 폴더 이름 형식 — 평소에는 접어 둔다 (자주 만질 설정이 아니다) */
+.fold > summary{cursor:pointer; list-style:none; font-size:14px; font-weight:700;
+  color:var(--ink2); text-transform:none;}
+.fold > summary::-webkit-details-marker{display:none;}
+.fold > summary::before{content:"▸ "; font-size:12.5px;}
+.fold[open] > summary{margin-bottom:8px;}
+.fold[open] > summary::before{content:"▾ ";}
+
+/* 기간(Tx/Rx/App) 기준 선택 — 상태 4개를 세그먼트로 한눈에 */
+.pseg-wrap{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:4px;}
+.pseg button{font-size:12.5px; padding:3px 8px;}
+
+/* 등록된 형식 목록 — ★ 첫 번째가 생성용, ▲ 로 올리고 × 로 뺀다 */
+.patsaved{display:flex; flex-direction:column; gap:3px; margin-bottom:8px;}
+.patsaved div{display:flex; gap:6px; align-items:center; font-size:13px;
+  padding:3px 8px; border:1px solid var(--edge); border-radius:6px;
+  background:var(--panel2);}
+.patsaved .ex{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.patsaved button{border:0; background:none; cursor:pointer; color:var(--ink2);}
+.patsaved button:disabled{opacity:.35; cursor:default;}
+
+/* 이 형식으로 잡히는 실제 폴더 목록 — ✓ 인식 · ↩ 옛 형식 · ✗ 미인식 */
+.patlist{max-height:140px; overflow-y:auto; margin-top:6px; font-size:13px;
+  border:1px solid var(--edge); border-radius:6px; padding:4px 8px;}
+.patlist div{display:flex; gap:6px; padding:1px 0; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis;}
+.patlist .ok{color:var(--done);} .patlist .old{color:var(--warn);}
+.patlist .no{color:var(--bad);}
+
+/* 업데이트 로그 · F&Q — 항목마다 네모 박스, 세로 스크롤, <details> 토글 */
+.doclist{max-height:min(62vh,540px); overflow-y:auto; display:flex;
+  flex-direction:column; gap:8px; padding:12px 2px 4px;}
+.doclist details{border:1px solid var(--edge); border-radius:8px;
+  background:var(--panel2);}
+.doclist summary{cursor:pointer; padding:9px 12px; font-weight:600;
+  font-size:14px; list-style:none; display:flex; gap:8px; align-items:baseline;}
+.doclist summary::-webkit-details-marker{display:none;}
+.doclist summary::before{content:"▸"; font-size:12.5px; color:var(--ink2);}
+.doclist details[open] summary::before{content:"▾";}
+.doclist .when{margin-left:auto; font-size:12.5px; color:var(--ink2);
+  font-weight:400; white-space:nowrap;}
+.doclist .body{padding:0 12px 10px 27px; font-size:14px; line-height:1.55;
+  white-space:pre-wrap; color:var(--ink);}
+.modal menu{display:flex; justify-content:flex-end; gap:8px; margin:16px 0 0; padding:0;}
+
+/* ── 폴더 내용 (파일탐색기) ───────────────────────────────────────────────── */
+.flist{
+  flex:1 1 auto; min-height:96px; overflow:auto;
+  border:1px solid var(--edge-soft); border-radius:8px; background:var(--panel2);
+}
+.frow{
+  display:grid; grid-template-columns:20px minmax(0,1fr) 26px 62px;
+  gap:8px; align-items:center; padding:5px 10px;
+  border-bottom:1px solid var(--edge-soft); font-size:13px;
+}
+.frow:last-child{border-bottom:0;}
+.frow .ic{text-align:center;}
+.frow .fn{font-family:var(--f-mono); color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.frow .fv{font:700 12.5px/1 var(--f-mono); color:var(--ink3); text-align:center;}
+.frow .fs{font:12.5px/1 var(--f-mono); color:var(--ink3); text-align:right;}
+.frow[data-kind="ppt"] .fn{color:var(--accent); font-weight:600;}
+
+/* ── 사진 투입 ───────────────────────────────────────────────────────────
+   표적을 십자로 그린다 — 채워야 할 5칸이 곧 이 앱의 산출물이고, 사진을 끌고
+   오면 칸이 차례로 물든다. 로고를 장식으로 쓰는 게 아니라 목적을 그린 것. */
+/* 높이를 고정한다 — 사진이 들어와도 상자가 커지거나 줄지 않아 아래 버튼이
+   제자리에 있다. 많이 들어오면 상자 안에서 가로로 스크롤한다. */
+.dropzone{
+  height:128px; padding:10px; display:flex; align-items:center; justify-content:center;
+  border:1.5px dashed var(--edge); border-radius:10px;
+  text-align:center; cursor:pointer; background:var(--panel2);
+  transition:border-color .15s ease, background .15s ease;
+}
+.dropzone.filled{justify-content:flex-start; text-align:left;}
+/* 빈 상태에선 트레이가 폭을 잡지 않아야 안내문이 가운데 그대로 선다 */
+.dropzone:not(.filled) .thumbs{display:none;}
+.dz-empty{width:100%;}
+.dropzone:hover{border-color:var(--ink3);}
+.dropzone.over{border-color:var(--accent); background:var(--accent-soft);}
+
+.dz-mark{width:34px; height:34px; display:block; margin:0 auto 10px;}
+.dz-mark rect{fill:var(--edge); transition:fill .18s ease;}
+.dropzone:hover .dz-mark rect{fill:var(--ink3);}
+.dropzone.over .dz-mark rect{fill:var(--accent);}
+/* 가운데에서 바깥으로 번지게 — 십자가 채워지는 순서 그대로 */
+.dz-mark rect:nth-child(3){transition-delay:0s;}
+.dz-mark rect:nth-child(1),
+.dz-mark rect:nth-child(5){transition-delay:.05s;}
+.dz-mark rect:nth-child(2),
+.dz-mark rect:nth-child(4){transition-delay:.1s;}
+
+.dz-main{margin:0; font-size:14px; color:var(--ink2);}
+.dropzone.over .dz-main{color:var(--ink);}
+.dz-sub{
+  margin:7px 0 0; font:600 12px/1 var(--f-mono); letter-spacing:.14em;
+  color:var(--ink3); display:flex; align-items:center; justify-content:center; gap:9px;
+}
+.dz-sub i{font-style:normal; color:var(--edge);}
+.dz-sub button{
+  font:inherit; letter-spacing:inherit; border:0; padding:0; background:none;
+  color:var(--accent); cursor:pointer; border-bottom:1px solid transparent;
+}
+.dz-sub button:hover{border-bottom-color:var(--accent);}
+
+/* 한 줄로만 늘어놓고 넘치면 가로 스크롤 — 상자 높이가 흔들리지 않는다 */
+.thumbs{display:flex; flex-wrap:nowrap; gap:7px; width:100%; height:100%;
+  align-items:center; overflow-x:auto; overflow-y:hidden;}
+.th{position:relative; margin:0; flex:0 0 auto; height:100%; width:auto;
+  aspect-ratio:4/3; border-radius:5px; overflow:hidden;
+  border:1px solid var(--edge); background:var(--well);}
+.th img{width:100%; height:100%; object-fit:cover; display:block;}
+.th .x{
+  position:absolute; top:2px; right:2px; width:16px; height:16px; border:0; padding:0;
+  border-radius:3px; background:rgba(8,10,12,.72); color:#e6ecf5;
+  font:700 13px/16px var(--f-mono); cursor:pointer;
+}
+.th .x:hover{background:var(--bad);}
+/* 마지막 칸은 "더 넣기" — 트레이 안에서 흐름이 끊기지 않는다 */
+.th.add{
+  display:flex; align-items:center; justify-content:center; padding:0;
+  border:1.5px dashed var(--edge); background:none; color:var(--ink3);
+  font:400 22px/1 var(--f-ui); cursor:pointer;
+}
+.th.add:hover{border-color:var(--accent); color:var(--accent);}
+#staged-n{color:var(--ink2); font-family:var(--f-mono);}
+
+/* 새 환자 폼 */
+.fields{display:grid; gap:12px; max-width:330px; margin:14px 0 0;}
+.fld{display:flex; flex-direction:column; gap:4px;}
+.fld > span{font:600 12px/1 var(--f-mono); letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3);}
+.fld input{
+  font:inherit; font-size:14px; color:var(--ink); background:var(--panel2);
+  border:1px solid var(--edge); border-radius:8px; padding:8px 11px;
+}
+.fld input:focus{border-color:var(--accent); outline:none;}
+.preview{
+  margin:14px 0 0; padding:10px 12px; border-radius:8px;
+  background:var(--panel2); border:1px solid var(--edge-soft);
+  font:13px/1.6 var(--f-mono); color:var(--ink2);
+}
+.preview b{color:var(--ink); font-weight:600;}
+.err{color:var(--bad); font-size:13.5px; margin:12px 0 0; min-height:18px;}
+
+/* ── Process (User): 십자가 콘텐츠 높이를 끝까지 쓴다 ─────────────────────── */
+/* 헤더 탭 — 브라우저 탭처럼, 활성 탭이 아래 내용과 이어져 보이게 한다.
+   음수 margin으로 헤더의 아래 여백만큼 내려앉히고, 활성 탭 밑변의 헤어라인을
+   패널색 그림자로 덮어 '탭과 본문이 한 판'으로 읽히게 만든다. */
+.tabs{display:inline-flex; gap:3px; align-items:flex-end; margin-bottom:-11px;}
+.tabs button{
+  font:700 13px/1 var(--f-ui); letter-spacing:0; text-transform:none;
+  color:var(--ink3); background:transparent;
+  border:1px solid transparent; border-bottom:0;
+  border-radius:7px 7px 0 0; padding:8px 14px 9px; cursor:pointer;
+}
+.tabs button:hover:not([aria-selected="true"]):not(:disabled){color:var(--ink);}
+.tabs button[aria-selected="true"]{
+  color:#fff; background:var(--tab-on); border-color:var(--tab-on);
+  box-shadow:0 1px 0 0 var(--tab-on);
+}
+.tabs button:disabled{opacity:.4; cursor:not-allowed;}
+
+/* dock 머리 밑에 붙는 한 줄 설명 — 지금 무엇을 고치고 있는지 알린다 */
+.dsub{margin:0 0 9px; font:400 12.5px/1.5 var(--f-ui); color:var(--ink3);}
+
+.nfields{display:flex; flex-direction:column; gap:9px;}
+.nfields label{display:flex; flex-direction:column; gap:4px;
+  font:600 12px/1 var(--f-mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink3);}
+.nfields input, .nfields textarea{
+  font:13px/1.5 var(--f-mono); color:var(--ink); background:var(--panel2);
+  border:1px solid var(--edge); border-radius:6px; padding:6px 8px; width:100%;
+  text-transform:none; letter-spacing:0; resize:vertical;
+}
+.nfields input:focus, .nfields textarea:focus{outline:none; border-color:var(--accent);}
+
+/* 탭이 가리키는 판. 하나만 보인다. */
+/* 감춤만 여기서 책임진다. 보일 때의 배치는 .work(좌 판 / 우 상자)가 정한다 —
+   여기서 display를 강제하면 선택자가 더 강해 .work의 그리드를 덮어버린다. */
+.pane:not(.on){display:none;}
+.pane.on{flex:1; min-height:0;}
+
+/* ── FACE 배치 ────────────────────────────────────────────────────────────────
+   한 번에 한 슬라이드만 상대한다 — 슬라이드는 우측 상단 번호로 넘긴다. 판은
+   슬라이드의 축소판이라 자리가 실제 위치·크기 그대로 놓이고, 고른 자리는
+   오른쪽 dock에서 move/crop/rotate 한다.
+
+   판 자체는 가운데 정렬 래퍼일 뿐이다. 높이를 flex로 정해 놓고 sheet에
+   aspect-ratio를 걸면 폭이 컨테이너를 넘어 삐져나가므로, 크기 제한은
+   sheet의 max-* 가 맡는다. */
+.fboard{
+  flex:1; min-width:0; min-height:0; display:flex;
+  align-items:center; justify-content:center;
+  color:var(--ink3); font:600 13px/1.5 var(--f-mono);
+}
+/* 슬라이드 축소판 — 비율·자리 좌표 모두 template.pptx 에서 온 값.
+   크기 규칙은 IntraOral .board 와 **똑같이** 높이 기준이다(높이를 꽉 채우고 폭이
+   비율로 따라온다). 폭 기준으로 두면 탭을 오갈 때 판 크기가 널뛴다. */
+.fsheet{
+  height:100%; max-width:100%; margin:0 auto; position:relative;
+  background:var(--well); border-radius:9px; overflow:hidden;
+  /* 양식 글자 크기를 판 폭에 비례시키기 위한 컨테이너 (.board 와 같은 규약) */
+  container-type:inline-size;
+}
+/* ── 양식 첫 장(환자정보)의 텍스트 ────────────────────────────────────────────
+   확정 뒤 실제로 적힐 글을 그 자리에 그대로 얹는다. 채울 수 있는 박스만 누를 수
+   있고, 누르면 오른쪽 dock 이 칸 입력으로 바뀐다. */
+.finfo{position:absolute; inset:0; z-index:3;}
+.fnote{
+  position:absolute; margin:0; padding:2px 4px; text-align:left;
+  background:transparent; border:1px dashed transparent; border-radius:4px;
+  white-space:pre-wrap; word-break:break-word; overflow:hidden;
+  font:12.5px/1.25 var(--f-ui);
+  /* 슬라이드 폭 25.4cm = 720pt — .board 의 노트 오버레이와 같은 환산이다 */
+  font-size:calc(var(--nt-pt, 18) * 100cqw / 720);
+  font-weight:var(--nt-w, 400);
+  color:var(--nt-ink, #eef3fa);
+  pointer-events:none;
+}
+.fnote.on{
+  pointer-events:auto; cursor:pointer;
+  border-color:rgba(61,144,240,.45); background:rgba(8,10,12,.28);
+}
+.fnote.on:hover{border-color:rgba(61,144,240,.9); background:rgba(8,10,12,.5);}
+/* 양식 도형이 사진을 덮는 자리 — 여기 걸린 부분은 슬라이드에서 안 보인다.
+   양식의 띠는 텍스트 없는 검은 사각형이므로 그대로 검게 칠한다. */
+.fmask{position:absolute; pointer-events:none; z-index:2; background:#000;}
+
+/* 양식의 계측선 — 슬라이드 좌표(cm)를 viewBox 로 써서 판 크기와 무관하게 맞는다 */
+.flines{position:absolute; inset:0; width:100%; height:100%; z-index:4; overflow:visible;}
+.fline{pointer-events:auto; cursor:grab;}
+.fline .hit{stroke:transparent; stroke-width:.5; stroke-linecap:round;}
+.fline .vis{stroke:#ffef5a; stroke-width:.06; stroke-linecap:round; pointer-events:none;}
+.fline:hover .vis{stroke:var(--accent);}
+.fline.moved .vis{stroke:#5ad1ff;}
+.fline.drag{cursor:grabbing;}
+.fline.drag .vis{stroke:var(--accent);}
+/* 자리는 슬라이드에서의 실제 위치에 절대배치된다(left/top/width/height는 JS가 %로) */
+.fcell{
+  position:absolute; padding:0; overflow:hidden; cursor:pointer;
+  background:#000; border:0;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--ink3); font:600 12.5px/1.5 var(--f-mono);
+}
+/* 파생 자리는 볼 수만 있다 */
+.fcell.derived{cursor:default;}
+.fcell.derived .tag{background:var(--accent); color:var(--on-accent);}
+/* 캔버스는 자리 비율(세로로 긴 0.725)이라 contain으로 넣어야 안 늘어난다 */
+.fcell canvas{width:100%; height:100%; object-fit:contain; display:block;}
+.fcell.empty{background:repeating-linear-gradient(45deg,
+  var(--panel2) 0 9px, var(--panel) 9px 18px);}
+.fcell .tag{
+  position:absolute; left:5px; top:5px; padding:2px 6px; border-radius:3px;
+  background:rgba(8,10,12,.72); color:#cfd8e2; font:12.5px/1.4 var(--f-mono);
+}
+.fcell.empty .tag{background:var(--panel); color:var(--ink3); border:1px solid var(--edge);}
+.fcell.on{outline:2px solid var(--accent); outline-offset:-2px;}
+.fcell.on .tag{background:var(--accent); color:var(--on-accent);}
+.fcell.over{outline:2px dashed var(--accent); outline-offset:-2px;}
+
+/* 얼굴 편집 캔버스 — 비율은 자리에서 온 값을 JS가 인라인으로 넣는다.
+   max-height + object-fit 으로 가두지 않는다: 그림이 요소 폭보다 좁아지면서
+   드래그 환산(cv.width / cv.clientWidth)이 어긋나기 때문이다. 세로가 길어지는
+   만큼은 dock 이 스크롤로 받는다. */
+#face-canvas{
+  width:100%; display:block; margin:0 auto 11px; background:var(--well);
+  border-radius:6px; cursor:move; touch-action:none;
+}
+/* ── 십자뷰 판 위의 노트 오버레이 ─────────────────────────────────────────────
+   양식 텍스트박스 자리에 그대로 얹는다. 절대배치의 기준은 .board 의 padding box
+   이고 그게 곧 슬라이드 전체이므로, %가 슬라이드 좌표로 바로 환산된다. */
+.noteov{position:absolute; inset:0; pointer-events:none; z-index:3;}
+.noteov .nbox{position:absolute; pointer-events:auto; display:flex; min-width:0;}
+/* 미리보기와 입력칸은 **같은 자리에 같은 상자 모양**으로 겹쳐 둔다.
+   여백·줄간격·글꼴이 어긋나면 고치는 순간 글이 튀어 보인다. */
+.noteov .nbox textarea, .noteov .nbox .nprev{
+  position:absolute; inset:0; padding:3px 18px 3px 5px;
+  border:1px dashed transparent; border-radius:4px;
+  font:12.5px/1.35 var(--f-mono); text-indent:20px;
+  /* 양식의 pt를 판 폭에 비례해 옮긴다: 슬라이드 폭 25.4cm = 720pt.
+     컨테이너 쿼리를 못 쓰는 브라우저는 위의 11px 로 남는다. */
+  font-size:calc(var(--nt-pt, 11) * 100cqw / 720);
+  font-weight:var(--nt-w, 400);
+  color:var(--nt-ink, #eef3fa);
+}
+.noteov .nbox textarea{
+  width:100%; height:100%; resize:none; overflow:auto;
+  border-color:rgba(61,144,240,.45);
+  background:rgba(8,10,12,.42);
+}
+/* 양식의 줄 끝 날짜(9pt). 본문과 함께 판 폭에 비례한다. */
+.noteov .nbox .sm{font-size:calc(var(--nt-sm, 9) * 100cqw / 720);}
+.noteov .nbox .nprev{
+  pointer-events:none; overflow:hidden; white-space:pre-wrap; word-break:break-word;
+  z-index:1;
+}
+/* 평소에는 그려 둔 미리보기(15pt 본문 + 9pt 날짜)를 보여주고, 고치는 동안에만
+   textarea 의 글자를 드러낸다 — 상자 하나에 글자 크기는 하나뿐이기 때문이다. */
+.noteov .nbox:not(.editing) textarea{color:transparent;}
+.noteov .nbox.editing .nprev{visibility:hidden;}
+.nbox textarea::placeholder{color:rgba(238,243,250,.4);}
+.nbox textarea:hover{border-color:rgba(61,144,240,.8);}
+.noteov .nbox textarea:focus{
+  background:rgba(8,10,12,.86); border-style:solid; outline:none;
+}
+/* 번호표·되돌리기 단추는 겹쳐 둔 두 층보다 항상 위에 — 고치는 동안에도
+   "몇 번 박스인지"가 보여야 한다. */
+.noteov .nbox .nnum, .noteov .nbox .nrst{z-index:4;}
+/* 서식이 아니라 사람이 통째로 고쳐 쓴 박스 */
+.nbox.edited textarea{border-color:var(--warn); border-style:solid;}
+/* 번호표 — 박스 좌상단 모서리의 네모. 사람이 "3번 박스"라고 부르게 한다 */
+.nnum{
+  position:absolute; left:0; top:0; min-width:16px; height:16px; padding:0 3px;
+  background:var(--accent); color:var(--on-accent); cursor:pointer;
+  font:700 12px/16px var(--f-mono); text-align:center; border-radius:4px 0 4px 0;
+}
+.nnum.sm{position:static; border-radius:3px; margin-right:6px; display:inline-block;}
+.nrst{
+  position:absolute; top:2px; right:2px; width:15px; height:15px; padding:0;
+  border:0; border-radius:3px; background:rgba(8,10,12,.6); color:#cfd8e2;
+  font:12.5px/15px var(--f-mono); text-align:center; cursor:pointer; opacity:0;
+}
+.nbox:hover .nrst, .nbox.edited .nrst{opacity:1;}
+.nrst:hover{background:var(--accent); color:var(--on-accent);}
+
+.btn.tiny{height:24px; margin-top:6px; padding:0 9px; font-size:12.5px;}
+#nt-reset, #nt-back{width:100%; margin-top:10px; height:30px; font-size:13px;}
+
+/* dock 안에서 구역을 가르는 소제목 */
+.dock > h3.sep{margin-top:15px; padding-top:12px; border-top:1px solid var(--edge-soft);}
+
+/* 슬라이드 선택 버튼에 채움 상태를 표시한다 */
+#face-seg button{position:relative;}
+#face-seg button.done::before{content:""; position:absolute; top:3px; right:3px;
+  width:5px; height:5px; border-radius:50%; background:var(--done);}
+#face-seg button[aria-pressed="true"].done::before{background:var(--on-accent);}
+
+.facebox{display:flex; flex-direction:column; gap:0; min-height:0; overflow:auto;}
+.facebox > h3{margin:0 0 8px; font:600 12px/1 var(--f-mono); letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3); display:flex;
+  justify-content:space-between; align-items:center;}
+.facebox > h3 + *{margin-bottom:12px;}
+
+/* 파생 자리(10·11)는 조작할 수 없다 — 한 줄로 알리기만 한다. */
+.mirrornote{display:flex; align-items:center; gap:7px;
+  border:1px dotted var(--edge); border-radius:6px; padding:5px 7px; background:var(--panel2);
+  font:600 12px/1.4 var(--f-mono); color:var(--ink3); margin-bottom:12px;}
+.mirrornote img{width:22px; height:30px; object-fit:cover; border-radius:3px; flex:none;}
+.mirrornote .sw{width:22px; height:30px; border-radius:3px; flex:none;
+  background:repeating-linear-gradient(45deg,var(--panel2) 0 4px,var(--panel) 4px 8px);
+  border:1px dashed var(--edge);}
+.mirrornote b{color:var(--accent);}
+
+/* 사진 풀 2열 — 정면과 45도를 가려내려면 썸네일이 커야 한다.
+   가리키면 살짝 키워 얼굴 각도를 확인할 수 있게 한다. */
+.pool{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px;
+  min-height:74px; border:1.5px dashed var(--edge); border-radius:8px; padding:7px;
+  background:var(--panel2); align-content:start;}
+.pool.over{border-color:var(--accent); background:var(--accent-soft);}
+.pool .empty{grid-column:1/-1; margin:auto; font-size:12.5px; color:var(--ink3);}
+.pool figure{position:relative; margin:0; border-radius:5px; overflow:hidden;
+  border:1px solid var(--edge); background:var(--well); cursor:grab; aspect-ratio:3/4;
+  transition:transform .12s ease, box-shadow .12s ease;}
+.pool figure img{width:100%; height:100%; object-fit:cover; display:block;}
+.pool figure:hover{transform:scale(1.35); z-index:3; box-shadow:var(--shadow);
+  border-color:var(--accent);}
+.pool figure.used{opacity:.4;}
+.pool figure.used::after{content:attr(data-at); position:absolute; left:0; right:0; bottom:0;
+  background:rgba(0,0,0,.62); color:#fff; font:700 11px/1.9 var(--f-mono); text-align:center;}
+.pool figure.sel{outline:2px solid var(--accent); outline-offset:-2px; cursor:pointer;}
+
+.work{flex:1; min-height:0; display:grid;
+  /* 344 = 종전 316 + dock 패딩(13*2) + 테두리(1*2). dock에 배경을 준 뒤에도
+     편집 캔버스 폭이 종전과 같도록 맞춘 값이다. */
+  grid-template-columns:minmax(0,1fr) 344px; gap:14px;}
+.board-wrap{min-width:0; min-height:0; display:flex;}
+.board{
+  position:relative;   /* 노트 오버레이(.noteov)의 기준 */
+  /* 노트 글자 크기를 판 폭에 비례시키기 위한 컨테이너. 100cqw = 판 폭이라
+     JS가 px를 계산할 필요가 없다(숨겨져 있을 때 0이 되는 문제를 피한다). */
+  container-type:inline-size;
+  display:grid; grid-template-areas:". u ." "l f r" ". b .";
+  grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); gap:5px;
+  background:var(--well); padding:5px; border-radius:9px;
+  /* 높이를 먼저 꽉 채우고 폭은 4:3로 따라온다 */
+  height:100%; aspect-ratio:4/3; max-width:100%; margin:0 auto;
+}
+.cell{
+  position:relative; background:var(--well); padding:0;
+  border:1px solid var(--edge-soft); overflow:hidden; cursor:pointer;
+}
+.cell img{width:100%; height:100%; object-fit:cover; display:block;}
+/* 셀 썸네일은 <canvas>(840×630 고정)다. 이 규칙이 없으면 캔버스가 제 픽셀크기
+   그대로 깔려 .cell의 overflow:hidden에 잘려 좌상단만 보인다. contain이라
+   셀 비율이 4:3에서 미세하게 어긋나도 사진이 늘어나지 않는다. */
+.cell canvas{width:100%; height:100%; object-fit:contain; display:block;}
+.cell[aria-pressed="true"]{outline:2px solid var(--accent); outline-offset:-2px;}
+.cell.void{
+  border-style:dashed; border-color:var(--bad); cursor:default;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--bad); font:13px var(--f-ui);
+}
+.cell .hk{
+  position:absolute; top:5px; right:5px; width:17px; height:17px; border-radius:3px;
+  background:rgba(8,10,12,.72); color:#cfd8e2; font:700 12px/17px var(--f-mono); text-align:center;
+}
+.cell[aria-pressed="true"] .hk{background:var(--accent); color:var(--on-accent);}
+.cell .tag{
+  position:absolute; left:5px; bottom:5px; padding:2px 6px; border-radius:3px;
+  background:rgba(8,10,12,.72); color:#cfd8e2; font:12.5px/1.4 var(--f-mono);
+}
+.cell .tag.attn{background:var(--warn); color:#fff; font-weight:700;}
+
+/* 좌측 보드(어두운 --well)와 우측 조작부의 경계를 만든다. --panel2는 두 테마
+   모두에서 카드(--panel)보다 한 단 들어가 보이는 값이라 그대로 쓴다. */
+.dock{
+  overflow:auto; min-height:0;
+  background:var(--panel2); border:1px solid var(--edge-soft);
+  border-radius:10px; padding:12px 13px;
+}
+.dock > h3{margin:0 0 9px; display:flex; align-items:center; justify-content:space-between;
+  gap:8px; font:600 12px/1 var(--f-mono); letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink3);}
+.saved{font:12.5px/1 var(--f-mono); color:var(--done); text-transform:none; letter-spacing:0;}
+/* 편집 캔버스 — 슬롯 창과 같은 4:3, 검은 바탕 위에서 사진을 판단한다 */
+#ed-canvas{
+  width:100%; aspect-ratio:4/3; display:block; margin-bottom:11px;
+  background:var(--well); border-radius:6px; cursor:move; touch-action:none;
+}
+#ed-reset, #fed-reset{width:100%; margin-top:10px; height:30px; font-size:13px;
+  display:flex; align-items:center; justify-content:center;}
+/* dock 소제목의 부가 정보 — 원래 .sec > h3 에만 걸려 있어 dock에서는 무색이었다 */
+.dock > h3 .aux{font:12.5px/1 var(--f-mono); color:var(--ink2);
+  text-transform:none; letter-spacing:0; margin-left:auto;}
+.knobs{display:grid; grid-template-columns:50px minmax(0,1fr) 44px; gap:11px 9px;
+  align-items:center; font-size:13px; color:var(--ink2);}
+.knobs input{width:100%; accent-color:var(--accent);}
+.knobs input:disabled{opacity:.4; cursor:not-allowed;}
+.knobs .v{text-align:right; font-family:var(--f-mono); color:var(--ink);}
+.readout{
+  margin:13px 0 0; padding:9px 11px; background:var(--panel2);
+  border:1px solid var(--edge-soft); border-radius:7px;
+  font:12.5px/1.65 var(--f-mono); color:var(--ink2);
+}
+.readout b{color:var(--accent); font-weight:600;}
+.tip{color:var(--ink3); font-size:12.5px; margin:10px 0 0; line-height:1.6;}
+.tip b{color:var(--ink2); font-family:var(--f-mono);}
+
+@media (prefers-reduced-motion:reduce){ *{transition:none !important;} }
+
+/* ══ Finalize — 저장 전 검토 ═══════════════════════════════════════════════
+   무엇이 어떤 이름으로 생기는지 훑어보는 화면이라, 파일명(mono)이 눈에 먼저
+   들어오고 슬롯 이름은 왼쪽 고정폭 기둥으로 정렬해 세로로 스캔되게 한다. */
+.finwrap{flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px;}
+.finsec{
+  display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+  padding:9px 11px; border:1px solid var(--edge); border-radius:9px;
+}
+.finsec code{font-family:var(--f-mono); font-size:13px; word-break:break-all;}
+.finlist{list-style:none; margin:0; padding:0; border:1px solid var(--edge); border-radius:9px;}
+.finlist li{
+  display:flex; align-items:baseline; gap:10px;
+  padding:7px 11px; border-top:1px solid var(--edge); font-size:13.5px;
+}
+.finlist li:first-child{border-top:0;}
+.finlist li code{font-family:var(--f-mono); word-break:break-all;}
+.finlist .k{
+  flex:0 0 3.6em; color:var(--ink3);
+  font:600 12px/1.6 var(--f-mono); letter-spacing:.08em; text-transform:uppercase;
+}
+.finlist li.sub{padding-left:26px; opacity:.72;}
+.finlist li.miss{color:var(--warn); background:var(--warn-soft);}
+.finlist li .aux{margin-left:auto; color:var(--ink3); white-space:nowrap;}
+
+
+/* ── 알림 배너 ─────────────────────────────────────────────────────────────
+   헤더 바로 아래. 업데이트와 가중치 누락을 알린다. 모달로 막지 않는 이유:
+   가중치가 없어도 초진 작업은 되고, 업데이트는 급한 일이 아니다. */
+.banner{padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+        font-size:14px;border-bottom:1px solid var(--line)}
+.banner.info{background:#eef4ff;color:#1a3d7c}
+.banner.warn{background:#fff6e5;color:#7a4a00}
+.banner .grow{flex:1}
+.banner .lst{font-size:13px;opacity:.8;width:100%;margin:2px 0 0;padding-left:16px}
+.banner button{padding:4px 12px;font-size:13px}
+@media (prefers-color-scheme:dark){
+  .banner.info{background:#16233d;color:#bcd4ff}
+  .banner.warn{background:#33260f;color:#ffd89a}
+}
+
+/* ── 구내 한 장짜리 슬라이드(12~16)의 미리보기 ────────────────────────────────
+   배정하는 자리가 아니라 **보여주는 자리**다 — 구내 검수에서 정한 것이 그대로
+   온다. 그래서 .fcell 과 달리 커서도 안 바뀌고 눌리지도 않는다. */
+.iocell{
+  position:absolute; overflow:hidden; background:#000;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--ink3); font:600 12.5px/1.5 var(--f-mono);
+}
+.iocell canvas{width:100%; height:100%; object-fit:contain; display:block;}
+.iocell.empty{background:repeating-linear-gradient(45deg,
+  var(--panel2) 0 9px, var(--panel) 9px 18px);}
+.iocell .tag{
+  position:absolute; left:5px; top:5px; padding:2px 6px; border-radius:3px;
+  background:rgba(8,10,12,.72); color:#cfd8e2; font:12.5px/1.4 var(--f-mono);
+}
+
+/* ── 기준 겹쳐보기 ────────────────────────────────────────────────────────────
+   기준=빨강 / 현재=청록. 맞는 곳은 회색으로 사라지고 어긋난 곳만 색이 남는다. */
+.ovbar{
+  display:flex; align-items:center; gap:10px; margin:6px 0 2px;
+  font:13px/1.5 var(--f-ui); color:var(--ink2);
+}
+.ovkey{display:inline-flex; align-items:center; gap:4px; color:var(--ink3);}
+.ovkey i{width:9px; height:9px; border-radius:2px; display:inline-block; margin-left:6px;}
+.ovkey i.r{background:#e04a4a;}
+.ovkey i.c{background:#3ad0d0;}
+.ovsel{
+  margin-left:auto; font:13px var(--f-ui); padding:3px 6px; border-radius:6px;
+  background:var(--panel2); color:var(--ink); border:1px solid var(--edge);
+}

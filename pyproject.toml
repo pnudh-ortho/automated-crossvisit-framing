@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orthoreg"
+dynamic = ["version"]
+description = "교정 차수 간 사진 정합 — 치아 중심점 기반 추론 코어"
+requires-python = ">=3.10"
+# 런타임 의존은 **최소**로 둔다. torch/sam2 는 연구용(체크포인트 직접 로드)에만
+# 필요하고, 배포본은 onnxruntime 으로 돈다. 그래서 둘 다 선택 의존이다.
+dependencies = ["numpy>=1.26", "opencv-python-headless>=4.9"]
+
+[project.optional-dependencies]
+onnx = ["onnxruntime>=1.17"]
+torch = ["torch>=2.2"]
+
+[tool.setuptools.dynamic]
+# 코드 버전의 출처는 version.json 하나다 (orthoreg.__version__ 이 그걸 읽는다).
+version = {attr = "orthoreg._version.__version__"}
+
+[tool.setuptools]
+packages = ["orthoreg"]

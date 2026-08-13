@@ -1,0 +1,34 @@
+# ── 가중치 — git 에 넣지 않는다 ──────────────────────────────────────────────
+# 바이너리는 델타 압축이 안 돼서 갱신할 때마다 이력에 영구히 쌓인다. 모델 하나가
+# 15~291MB 이고 여섯 개다. 구글 드라이브로 배포하고 `weightstore` 가 검증한다.
+models/*
+!models/읽어주세요.txt
+# 프레이밍 설정은 **텍스트 1.3KB** 이고 입력 크기·정규화값이라 코드와 짝이 맞아야
+# 한다. 가중치와 달리 git 으로 나른다.
+!models/_installed/
+models/_installed/*
+!models/_installed/framing/
+models/_installed/framing/*
+!models/_installed/framing/framing_meta.json
+
+# ── 사용자 데이터 — 애초에 저장소 밖이지만 이중 안전장치 ────────────────────
+# 환자 정보가 저장소에 들어가면 이력에서 지우기 어렵다.
+data/
+*.pptx
+!templates/*.pptx
+settings.json
+
+# ── 파이썬 ──────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 빌드 산출물
+*.egg-info/
+.update_state.json
+
+# PPT 양식은 git 으로 나른다. 둘 다 코드와 짝이 맞아야 하고 합쳐서 150KB 다.
+#   intraoral_template  main.py 가 여기서 십자뷰 슬롯 좌표를 읽는다. 없으면 기동 불가
+#   case_template       초진 덱의 앞 16장(진료 서식). 원래 30장이었고 17~29장에
+#                       실제 환자 진료기록이 들어 있어 뺐었다 — 지금은 없다
