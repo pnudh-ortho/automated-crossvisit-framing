@@ -2817,7 +2817,12 @@ def _build_plan(s) -> dict:
         "patient_dir": str(s.patient_dir),
         "visit": s.visit,
         "mode": s.mode,
-        "ppt": N.ppt_filename(ids, _ppt_pattern()),
+        # 기존 PPT 를 알아봤으면 **그 파일에** 이어 쓴다 — 이름이 옛 형식이거나
+        # 하위 폴더에 있어도 원본 위치가 진실이다. 루트에 현재 양식 이름으로 또
+        # 만들면 어느 쪽이 진짜인지 다투는 사본이 남는다. 새 PPT 만 생성 이름.
+        "ppt": (Path(s.ppt_path).relative_to(s.patient_dir).as_posix()
+                if s.ppt_path and Path(s.ppt_path).exists()
+                else N.ppt_filename(ids, _ppt_pattern())),
         "ppt_exists": bool(s.ppt_path and Path(s.ppt_path).exists()),
         "slots": slots,
         "faces": faces,

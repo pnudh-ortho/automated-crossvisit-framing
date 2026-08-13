@@ -82,6 +82,7 @@ class Transaction:
 
     def stage_pptx(self, prs, final_name: str) -> Path:
         dst = self._tmp / final_name
+        dst.parent.mkdir(parents=True, exist_ok=True)   # 하위 폴더의 기존 PPT 갱신 허용
         prs.save(str(dst))
         self._staged.append((dst, final_name))
         return dst

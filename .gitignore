@@ -5,11 +5,7 @@ models/*
 !models/읽어주세요.txt
 # 프레이밍 설정은 **텍스트 1.3KB** 이고 입력 크기·정규화값이라 코드와 짝이 맞아야
 # 한다. 가중치와 달리 git 으로 나른다.
-!models/_installed/
-models/_installed/*
-!models/_installed/framing/
-models/_installed/framing/*
-!models/_installed/framing/framing_meta.json
+# _installed 이하도 전부 — 프레이밍 메타는 이제 webapp/backend/ 로 나른다.
 
 # ── 사용자 데이터 — 애초에 저장소 밖이지만 이중 안전장치 ────────────────────
 # 환자 정보가 저장소에 들어가면 이력에서 지우기 어렵다.

@@ -307,11 +307,17 @@ def _fail(reason: str) -> FramingResult:
 
 
 # ── 로딩 ─────────────────────────────────────────────────────────────────────────
+# 코드와 함께 배포되는 메타 사본. models/ 쪽 사본은 가중치 번들을 붙여넣을 때
+# 덮어써질 수 있어 git 추적에서 뺐다 — 번들 메타가 있으면 그쪽이 이기고,
+# 없으면 이 사본이 쓰인다. 어느 쪽이든 코드와 짝이 맞는 값이 존재한다.
+SHIPPED_META = Path(__file__).with_name("framing_meta.json")
+
+
 def find_framing_dir(models_dir: str | Path) -> Path | None:
-    """`framing_meta.json` 이 있는 폴더를 찾는다 (models_dir 자체 또는 그 아래 framing/)."""
+    """프레이밍 모델이 있는 폴더 — 메타 또는 framing_*.onnx 가 있는 곳."""
     base = Path(models_dir)
     for d in (base / "framing", base):
-        if (d / "framing_meta.json").is_file():
+        if (d / "framing_meta.json").is_file() or any(d.glob("framing_*.onnx")):
             return d
     return None
 
@@ -325,8 +331,11 @@ def load_framer(cfg) -> FramingModel | None:
     d = find_framing_dir(cfg.resolve(cfg.paths.models_dir))
     if d is None:
         return None
+    meta_p = d / "framing_meta.json"
+    if not meta_p.is_file():
+        meta_p = SHIPPED_META            # 번들에 메타가 없으면 배포 사본
     try:
-        meta = json.loads((d / "framing_meta.json").read_text(encoding="utf-8"))
+        meta = json.loads(meta_p.read_text(encoding="utf-8"))
     except Exception:
         return None
     th = getattr(cfg.thresholds, "framing", None)
