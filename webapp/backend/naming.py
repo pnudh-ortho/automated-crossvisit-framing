@@ -63,11 +63,14 @@ def validate_identifiers(
         raise NamingError(
             f"이름 형식 오류: '{name}' — 한글/영문 1~40자, "
             "공백·마침표·하이픈만 함께 쓸 수 있습니다 (숫자·밑줄 불가)")
+    # 번호는 "숫자 N자리 + 선택적 대문자 한 글자" — 20000A 같은 관행을 허용한다.
     if (hospital_id or require_hospital) and not re.fullmatch(
-            rf"\d{{{hospital_digits}}}", hospital_id):
-        raise NamingError(f"병원 환자번호는 {hospital_digits}자리 숫자여야 합니다: '{hospital_id}'")
-    if not re.fullmatch(rf"\d{{{ortho_digits}}}", ortho_id):
-        raise NamingError(f"교정과 환자번호는 {ortho_digits}자리 숫자여야 합니다: '{ortho_id}'")
+            rf"\d{{{hospital_digits}}}[A-Z]?", hospital_id):
+        raise NamingError(f"병원 환자번호는 {hospital_digits}자리 숫자"
+                          f"(끝에 영문 대문자 하나 허용)여야 합니다: '{hospital_id}'")
+    if not re.fullmatch(rf"\d{{{ortho_digits}}}[A-Z]?", ortho_id):
+        raise NamingError(f"교정과 환자번호는 {ortho_digits}자리 숫자"
+                          f"(끝에 영문 대문자 하나 허용)여야 합니다: '{ortho_id}'")
     return Identifiers(name, hospital_id, ortho_id)
 
 
@@ -90,8 +93,8 @@ def default_field_regex(hospital_digits: int = 9, ortho_digits: int = 5,
                         name_regex: str | None = None) -> dict[str, str]:
     return {
         "name": _bare(name_regex) if name_regex else NAME_DEFAULT,
-        "hospital_id": rf"\d{{{hospital_digits}}}",
-        "ortho_id": rf"\d{{{ortho_digits}}}",
+        "hospital_id": rf"\d{{{hospital_digits}}}[A-Z]?",
+        "ortho_id": rf"\d{{{ortho_digits}}}[A-Z]?",
         "visit": r"[A-Z]+",
         "index": r"\d+",
         "n": r"\d+",

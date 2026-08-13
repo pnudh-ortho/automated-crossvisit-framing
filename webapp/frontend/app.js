@@ -1132,8 +1132,8 @@ function openNewDialog(){
   el("new-rules").textContent =
     `한글·영문 이름 · 병원 ${RULES.hospital_digits}자리` +
     (needH ? "" : "(선택)") + ` · 교정과 ${RULES.ortho_digits}자리`;
-  el("f-hosp").maxLength  = RULES.hospital_digits;
-  el("f-ortho").maxLength = RULES.ortho_digits;
+  el("f-hosp").maxLength  = RULES.hospital_digits + 1;   // 20000A 꼬리 글자 허용
+  el("f-ortho").maxLength = RULES.ortho_digits + 1;
   el("f-hosp").placeholder  = `${RULES.hospital_digits}자리 숫자` +
     (needH ? "" : " — 없으면 비워두세요");
   el("f-ortho").placeholder = `${RULES.ortho_digits}자리 숫자`;
