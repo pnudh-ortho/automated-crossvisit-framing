@@ -31,7 +31,10 @@ naming:
   # 환자 폴더명
   folder_pattern: "{name}_{hospital_id}_{ortho_id}"
   # PPT 파일명 (초진 생성 시 사용 / 재진 시 파싱 대상)
-  ppt_pattern: "{name}_{hospital_id}_{ortho_id}.pptx"
+  ppt_pattern: "{name}({ortho_id}).pptx"
+  # 기본 양식이 바뀌어도 옛 기본형 파일은 계속 알아본다 — 등록 목록이 비어
+  # 있을 때만 기본과 함께 인식 폴백으로 쓰인다.
+  ppt_patterns_legacy: ["{name}_{hospital_id}_{ortho_id}.pptx"]
   # 사진 파일명.  visit=차수 알파벳(A,B,...), index=슬롯 순번(1~)
   photo_pattern: "{ortho_id}_{visit} ({index}).jpg"
   # 같은 자리의 추가 촬영본. 대표 사진 이름 뒤에 -2, -3...  n은 2부터.

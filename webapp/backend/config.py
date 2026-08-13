@@ -26,6 +26,7 @@ class Paths(BaseModel):
 class NamingCfg(BaseModel):
     folder_pattern: str
     ppt_pattern: str
+    ppt_patterns_legacy: list[str] = []   # 옛 기본형 — 빈 목록일 때 인식 폴백
     photo_pattern: str
     photo_extra_pattern: str = "{ortho_id}_{visit} ({index})-{n}.jpg"
     visit_regex: str

@@ -255,6 +255,7 @@ def photo_extra_filename(ortho_id: str, visit: str, index: int, n: int, pattern:
 # 수 있고, 확장자가 내용과 다르면 나중에 못 여는 파일이 된다.
 RAW_SUFFIX = "_raw"
 RAW_DIR = "raw"     # 원본 사본이 모이는 하위 폴더 — 환자 폴더가 두 배로 안 붐빈다
+PROCESSED_DIR = "processed"   # 잘린 완성본이 모이는 하위 폴더 (raw 와 대칭)
 
 
 def raw_filename(final_name: str, src_name: str) -> str:

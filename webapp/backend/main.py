@@ -984,7 +984,8 @@ def _patient_files(d: Path) -> list[Path]:
             if f.name.startswith("."):
                 continue
             if f.is_dir():
-                if depth < 2 and (deep or (depth == 0 and f.name == N.RAW_DIR)):
+                if depth < 2 and (deep or (depth == 0 and
+                                           f.name in (N.RAW_DIR, N.PROCESSED_DIR))):
                     walk(f, depth + 1, out)
             elif f.is_file():
                 out.append(f)
@@ -2876,6 +2877,10 @@ def _output_dir(s: "Session") -> str:
     for f in _patient_files(d):
         if f.suffix.lower() in IMG_EXT and not N.is_raw(f.name):
             rel = f.parent.relative_to(d).as_posix()
+            # 우리가 만든 processed/ 안의 사진은 그 부모가 "사진의 집"이다 —
+            # 안 벗기면 다음 차수가 processed/processed/ 로 파고든다.
+            if rel.split("/")[-1] == N.PROCESSED_DIR:
+                rel = "/".join(rel.split("/")[:-1]) or "."
             dirs.add("" if rel == "." else rel)
     if not dirs or "" in dirs:
         return ""
@@ -2894,9 +2899,11 @@ def _build_plan(s) -> dict:
     ids = s.ids
     index_by_class = cfg.index_by_class
     raw = _save_raw()
-    # 기존 사진 폴더를 따라간다 — raw/ 도 그 옆에 붙어 짝이 흩어지지 않는다
+    # 기존 사진 폴더를 따라간다 — raw/·processed/ 가 그 옆에 나란히 생겨
+    # 원본과 완성본 짝이 흩어지지 않는다.
     outdir = _output_dir(s)
     pre = f"{outdir}/" if outdir else ""
+    ppre = f"{pre}{N.PROCESSED_DIR}/"     # 잘린 완성본이 들어가는 곳
     slots = []
     for slot in cfg.ppt.slot_names:
         members = s.bins.get(slot, [])
@@ -2909,21 +2916,21 @@ def _build_plan(s) -> dict:
         slots.append({
             "slot": slot, "empty": False, "cls": cls, "index": idx,
             "label": _photo(s, members[0]).label,
-            "file": pre + base,
+            "file": ppre + base,
             # 원본 사본. 추가 촬영본에는 없다 — 편집값이 없어 자를 것이 없고,
             # 그쪽은 지금도 원본 그대로 저장된다.
             "raw": (pre + N.raw_filename(base, _photo(s, members[0]).path.name)
                     if raw else None),
             "extras": [
                 {"label": _photo(s, pid).label,
-                 "file": pre + N.photo_extra_filename(ids.ortho_id, s.visit, idx, n,
-                                                      cfg.naming.photo_extra_pattern)}
+                 "file": ppre + N.photo_extra_filename(ids.ortho_id, s.visit, idx, n,
+                                                       cfg.naming.photo_extra_pattern)}
                 for n, pid in enumerate(members[1:], start=2)],
         })
     faces, fidx = [], cfg.face.start_index
     for pid in s.face:
         base = N.photo_filename(ids.ortho_id, s.visit, fidx, cfg.naming.photo_pattern)
-        faces.append({"label": _photo(s, pid).label, "file": pre + base,
+        faces.append({"label": _photo(s, pid).label, "file": ppre + base,
                       "raw": (pre + N.raw_filename(base, _photo(s, pid).path.name)
                               if raw else None)})
         fidx += 1
@@ -3355,7 +3362,8 @@ def _ppt_patterns() -> list[str]:
     (2026-08-13 결정). 옛 형식 파일을 계속 읽으려면 그 형식을 목록에 남겨 둔다.
     """
     out = []
-    for p in _saved_patterns("ppt_patterns") or [cfg.naming.ppt_pattern]:
+    for p in (_saved_patterns("ppt_patterns")
+              or [cfg.naming.ppt_pattern, *cfg.naming.ppt_patterns_legacy]):
         if p and p not in out:
             out.append(p)
     return out
