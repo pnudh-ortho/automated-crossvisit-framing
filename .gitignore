@@ -32,3 +32,6 @@ __pycache__/
 #   intraoral_template  main.py 가 여기서 십자뷰 슬롯 좌표를 읽는다. 없으면 기동 불가
 #   case_template       초진 덱의 앞 16장(진료 서식). 원래 30장이었고 17~29장에
 #                       실제 환자 진료기록이 들어 있어 뺐었다 — 지금은 없다
+
+# 강제 업데이트가 만든 로컬 수정 백업
+_update_backup_*/

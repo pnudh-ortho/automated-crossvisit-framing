@@ -971,22 +971,29 @@ def _scan_subdirs() -> bool:
 
 
 def _patient_files(d: Path) -> list[Path]:
-    """환자 폴더의 파일들. 설정이 켜져 있으면 한 단계 하위 폴더까지 본다.
+    """환자 폴더의 파일들. 설정이 켜져 있으면 **두 단계** 하위 폴더까지 본다.
 
     raw/ 는 설정과 무관하게 본다 — 원본 사본을 목록에 보여야 한다. 장수 집계는
-    `_raw` 접미가 걸러 주므로 두 배로 세이지 않는다.
+    `_raw` 접미가 걸러 주므로 두 배로 세이지 않는다. (설정 파일을 폴더마다 다시
+    읽지 않도록 플래그는 한 번만 얻는다.)
     """
-    out = []
-    for f in sorted(d.iterdir(), key=lambda x: x.name.lower()):
-        if f.name.startswith("."):
-            continue
-        if f.is_dir():
-            if _scan_subdirs() or f.name == N.RAW_DIR:
-                out += [g for g in sorted(f.iterdir(), key=lambda x: x.name.lower())
-                        if g.is_file() and not g.name.startswith(".")]
-            continue
-        out.append(f)
+    deep = _scan_subdirs()
+
+    def walk(base: Path, depth: int, out: list[Path]) -> None:
+        for f in sorted(base.iterdir(), key=lambda x: x.name.lower()):
+            if f.name.startswith("."):
+                continue
+            if f.is_dir():
+                if depth < 2 and (deep or (depth == 0 and f.name == N.RAW_DIR)):
+                    walk(f, depth + 1, out)
+            elif f.is_file():
+                out.append(f)
+
+    out: list[Path] = []
+    walk(d, 0, out)
     return out
+
+
 LEGACY_SETTINGS = Path.home() / "ortho-webapp" / "settings.json"
 
 
@@ -1548,12 +1555,7 @@ def _scan_patient(d: Path) -> dict | None:
             name_regex=cfg.identifiers.name.allow_regex, label="폴더명")
     except N.NamingError:
         return None
-    entries = [e for e in os.scandir(d) if e.is_file()]
-    if _scan_subdirs():
-        # 원본/편집본처럼 하위 폴더에 정리해 둔 환자도 알아본다
-        entries += [e for sub in os.scandir(d)
-                    if sub.is_dir() and not sub.name.startswith(".")
-                    for e in os.scandir(sub.path) if e.is_file()]
+    entries = _patient_files(d)      # 하위 폴더 정리 환자 — 두 단계까지
     files = [e.name for e in entries]
     visits = N.scan_visit_letters(files, ids.ortho_id, cfg.naming.visit_regex)
     ppt_name = _find_ppt(files, ids)
@@ -1644,13 +1646,9 @@ def ppt_preview(folder: str):
                             label="폴더명")
     except N.NamingError:
         raise HTTPException(404, "폴더명이 규칙에 맞지 않습니다")
-    cand = [e for e in os.scandir(d) if e.is_file()]
-    if _scan_subdirs():
-        cand += [e for sub in os.scandir(d)
-                 if sub.is_dir() and not sub.name.startswith(".")
-                 for e in os.scandir(sub.path) if e.is_file()]
+    cand = _patient_files(d)
     name = _find_ppt([e.name for e in cand], ids)
-    path = next((Path(e.path) for e in cand if e.name == name), None) if name else None
+    path = next((e for e in cand if e.name == name), None) if name else None
     if path is None:
         return {"slots": {}, "faces": []}
     key, mt = str(path), path.stat().st_mtime
@@ -2746,6 +2744,32 @@ def reference_list(sid: str):
 
 
 # ── 확정 (원자적 저장) ────────────────────────────────────────────────────────
+def _output_dir(s: "Session") -> str:
+    """새 잘린 사진이 들어갈 곳 — 기존 사진이 모여 있는 하위 폴더를 따른다.
+
+    하위 폴더 탐색이 꺼져 있으면 환자 폴더 바로 아래(종전 그대로). 켜져 있으면
+    기존 사진(원본 사본 제외)이 든 폴더들의 **공통 조상**을 고른다:
+      사진/ 에 모두 있다      → 사진/
+      사진/날짜별/ 로 나뉜다  → 사진/  (새 차수를 옛 날짜 폴더에 섞지 않는다)
+      루트에 하나라도 있다    → 루트
+    이름 규칙 없는 1.jpg 같은 사진도 센다 — 옛 정리 방식 그대로인 폴더를
+    따라가는 것이 목적이라서.
+    """
+    d = s.patient_dir
+    if not _scan_subdirs() or not d or not d.is_dir():
+        return ""
+    dirs: set[str] = set()
+    for f in _patient_files(d):
+        if f.suffix.lower() in IMG_EXT and not N.is_raw(f.name):
+            rel = f.parent.relative_to(d).as_posix()
+            dirs.add("" if rel == "." else rel)
+    if not dirs or "" in dirs:
+        return ""
+    common = (os.path.commonpath(sorted(dirs)) if len(dirs) > 1
+              else next(iter(dirs)))
+    return common.replace(os.sep, "/")
+
+
 def _build_plan(s) -> dict:
     """
     확정하면 **무엇이 어떤 이름으로 어디에 생기는지** 계산한다. 부수효과 없음.
@@ -2756,6 +2780,9 @@ def _build_plan(s) -> dict:
     ids = s.ids
     index_by_class = cfg.index_by_class
     raw = _save_raw()
+    # 기존 사진 폴더를 따라간다 — raw/ 도 그 옆에 붙어 짝이 흩어지지 않는다
+    outdir = _output_dir(s)
+    pre = f"{outdir}/" if outdir else ""
     slots = []
     for slot in cfg.ppt.slot_names:
         members = s.bins.get(slot, [])
@@ -2764,25 +2791,27 @@ def _build_plan(s) -> dict:
             continue
         cls = _slot_to_class(slot)
         idx = index_by_class[cls]
-        name = N.photo_filename(ids.ortho_id, s.visit, idx, cfg.naming.photo_pattern)
+        base = N.photo_filename(ids.ortho_id, s.visit, idx, cfg.naming.photo_pattern)
         slots.append({
             "slot": slot, "empty": False, "cls": cls, "index": idx,
             "label": _photo(s, members[0]).label,
-            "file": name,
+            "file": pre + base,
             # 원본 사본. 추가 촬영본에는 없다 — 편집값이 없어 자를 것이 없고,
             # 그쪽은 지금도 원본 그대로 저장된다.
-            "raw": N.raw_filename(name, _photo(s, members[0]).path.name) if raw else None,
+            "raw": (pre + N.raw_filename(base, _photo(s, members[0]).path.name)
+                    if raw else None),
             "extras": [
                 {"label": _photo(s, pid).label,
-                 "file": N.photo_extra_filename(ids.ortho_id, s.visit, idx, n,
-                                                cfg.naming.photo_extra_pattern)}
+                 "file": pre + N.photo_extra_filename(ids.ortho_id, s.visit, idx, n,
+                                                      cfg.naming.photo_extra_pattern)}
                 for n, pid in enumerate(members[1:], start=2)],
         })
     faces, fidx = [], cfg.face.start_index
     for pid in s.face:
-        name = N.photo_filename(ids.ortho_id, s.visit, fidx, cfg.naming.photo_pattern)
-        faces.append({"label": _photo(s, pid).label, "file": name,
-                      "raw": N.raw_filename(name, _photo(s, pid).path.name) if raw else None})
+        base = N.photo_filename(ids.ortho_id, s.visit, fidx, cfg.naming.photo_pattern)
+        faces.append({"label": _photo(s, pid).label, "file": pre + base,
+                      "raw": (pre + N.raw_filename(base, _photo(s, pid).path.name)
+                              if raw else None)})
         fidx += 1
     return {
         "patient_dir": str(s.patient_dir),
@@ -3074,15 +3103,20 @@ def update_check():
     return _safe_check().to_json()
 
 
+class UpdateApplyReq(BaseModel):
+    force: bool = False      # 직접 수정한 파일을 백업하고 강제 진행
+
+
 @app.post("/api/update/apply")
-def update_apply():
+def update_apply(req: UpdateApplyReq = Body(default=UpdateApplyReq())):
     st = _safe_check()
     if not st.has_update:
         return {"ok": False, "detail": st.reason or "이미 최신입니다"}
-    if st.blocked:
+    # 확정하지 않은 작업(busy) 차단은 강제로도 못 넘는다 — 작업이 날아간다.
+    if st.blocked and not (req.force and "직접 수정" in st.blocked):
         return {"ok": False, "detail": st.blocked}
     try:
-        return Up.apply_update()
+        return Up.apply_update(force=req.force)
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:300]}
 

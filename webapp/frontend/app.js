@@ -2537,10 +2537,17 @@ async function checkUpdate(){
   banner("info",
     `<b>새 버전이 있습니다</b> <span>${ver}</span>
      ${blocked || '<span class="grow"></span>'}
-     ${u.blocked ? "" : '<button class="btn" id="btn-upd">업데이트</button>'}
+     ${u.blocked ? (/직접 수정/.test(u.blocked)
+        ? '<button class="btn" id="btn-upd-force">백업 후 업데이트</button>' : "")
+        : '<button class="btn" id="btn-upd">업데이트</button>'}
      <ul class="lst">${u.log.slice(0,5).map(l => `<li>${l}</li>`).join("")}${wt}</ul>`);
   const b = el("btn-upd");
-  if(b) b.onclick = doUpdate;
+  if(b) b.onclick = () => doUpdate(false);
+  const bf = el("btn-upd-force");
+  if(bf) bf.onclick = () => {
+    if(confirm("직접 수정한 파일을 백업 폴더로 옮기고 원본으로 되돌린 뒤 " +
+               "업데이트합니다. 계속할까요?")) doUpdate(true);
+  };
   // 배너 자체도 누르면 업데이트 — 버튼이 작아서 지나치기 쉽다. 차단 사유가
   // 있을 때는 달지 않는다 (누를 수 있는 것처럼 보이면 안 된다).
   if(!u.blocked){
@@ -2551,12 +2558,14 @@ async function checkUpdate(){
   }
 }
 
-async function doUpdate(){
+async function doUpdate(force){
   if(doUpdate.busy) return;      // 배너와 버튼 양쪽에 달려 있다 — 중복 실행 방지
   doUpdate.busy = true;
-  const b = el("btn-upd");
+  const b = el("btn-upd") || el("btn-upd-force");
   if(b){ b.disabled = true; b.textContent = "받는 중..."; }
-  const r = await api("/api/update/apply", {method:"POST"}).catch(() => null);
+  const r = await api("/api/update/apply", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({force: !!force})}).catch(() => null);
   if(!r || !r.ok){
     banner("warn", `<b>업데이트 실패</b> <span class="grow">${(r&&r.detail)||"알 수 없는 오류"}</span>`);
     doUpdate.busy = false;

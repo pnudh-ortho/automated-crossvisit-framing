@@ -26,8 +26,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -141,12 +143,45 @@ def check(*, busy: bool = False) -> UpdateStatus:
     return st
 
 
-def apply_update() -> dict:
+def _backup_local_changes() -> str | None:
+    """추적 파일의 로컬 수정을 백업 폴더로 복사하고 원본 상태로 되돌린다.
+
+    강제 업데이트에서만 쓴다 — 사용자 수정을 밀어내되 버리지는 않는다.
+    반환: 백업 폴더 이름 (수정이 없었으면 None). 백업 폴더는 .gitignore 에
+    올라 있어 다음 업데이트 확인을 다시 막지 않는다.
+    """
+    changed: set[str] = set()
+    for args in (("diff", "--name-only"), ("diff", "--cached", "--name-only")):
+        code, out = _git(*args)
+        if code == 0:
+            changed |= {l.strip() for l in out.splitlines() if l.strip()}
+    if not changed:
+        return None
+    bdir = REPO / f"_update_backup_{time.strftime('%Y%m%d-%H%M%S')}"
+    for rel in sorted(changed):
+        src = REPO / rel
+        if src.is_file():
+            dst = bdir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    _git("reset", "--hard", "HEAD")
+    return bdir.name
+
+
+def apply_update(force: bool = False) -> dict:
     """`git pull` → 의존성 갱신 → 재시작 요청.
 
     가중치는 받지 않는다 — 용량이 크고, `weightstore` 가 기동 때 확인해서
     `models/` 에 넣으라고 안내한다. 코드와 다른 속도로 바뀌는 것이라 분리한다.
+
+    force 는 직접 수정한 파일이 있어도 진행한다 — 수정본을 백업 폴더로 옮기고
+    원본으로 되돌린 뒤 받는다.
     """
+    steps: list[str] = []
+    if force:
+        bak = _backup_local_changes()
+        if bak:
+            steps.append(f"직접 수정한 파일을 {bak} 폴더에 백업했습니다")
     before = _git("rev-parse", "HEAD")[1]
     req_before = _git("hash-object", "webapp/requirements.txt")[1]
 
@@ -157,7 +192,7 @@ def apply_update() -> dict:
     STATE_FILE.write_text(json.dumps({"previous": before, "current": after}),
                           encoding="utf-8")
 
-    steps = ["코드를 받았습니다"]
+    steps.append("코드를 받았습니다")
     if _git("hash-object", "webapp/requirements.txt")[1] != req_before:
         r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r",
                             str(REPO / "webapp" / "requirements.txt")],

@@ -74,6 +74,7 @@ class Transaction:
 
     def stage_bytes(self, data: bytes, final_name: str) -> Path:
         dst = self._tmp / final_name
+        dst.parent.mkdir(parents=True, exist_ok=True)   # "사진/…" 같은 하위 경로 허용
         with open(dst, "wb") as f:
             f.write(data)
         self._staged.append((dst, final_name))
