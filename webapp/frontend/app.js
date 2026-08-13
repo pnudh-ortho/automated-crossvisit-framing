@@ -790,7 +790,7 @@ function drawList(){
     b.setAttribute("aria-pressed", picked?.folder === p.folder);
     b.innerHTML =
       `<span class="who">${esc(p.name)}</span>` +
-      `<span class="no">${p.hospital_id} · ${p.ortho_id}</span>` +
+      `<span class="no">${[p.hospital_id, p.ortho_id].filter(Boolean).join(" · ")}</span>` +
       `<span class="hist">${visitLine(p)}</span>`;
     b.onclick = () => {
       if(STAGED.length && picked && picked.folder !== p.folder &&
@@ -841,7 +841,7 @@ function drawDetail(){
        <div class="idmain">
          <div class="idline">
            <span class="who">${esc(p.name)}</span>
-           <span class="no">${p.hospital_id} · ${p.ortho_id}</span>
+           <span class="no">${[p.hospital_id, p.ortho_id].filter(Boolean).join(" · ")}</span>
          </div>
          ${timeline(p)}
          <div class="plan">
@@ -1108,11 +1108,14 @@ function drawStaged(){
 /* 새 환자 — 모달. 취소하면 보던 목록이 그대로 남는다. */
 const dlg = () => el("dlg-new");
 function openNewDialog(){
+  const needH = ((RULES && RULES.folder_pattern) || "").includes("{hospital_id}");
   el("new-rules").textContent =
-    `한글·영문 이름 · 병원 ${RULES.hospital_digits}자리 · 교정과 ${RULES.ortho_digits}자리`;
+    `한글·영문 이름 · 병원 ${RULES.hospital_digits}자리` +
+    (needH ? "" : "(선택)") + ` · 교정과 ${RULES.ortho_digits}자리`;
   el("f-hosp").maxLength  = RULES.hospital_digits;
   el("f-ortho").maxLength = RULES.ortho_digits;
-  el("f-hosp").placeholder  = `${RULES.hospital_digits}자리 숫자`;
+  el("f-hosp").placeholder  = `${RULES.hospital_digits}자리 숫자` +
+    (needH ? "" : " — 없으면 비워두세요");
   el("f-ortho").placeholder = `${RULES.ortho_digits}자리 숫자`;
   for(const id of ["f-name","f-hosp","f-ortho"]) el(id).value = "";
   el("new-err").textContent = "";
@@ -1124,7 +1127,8 @@ const newIds = () => ({name: el("f-name").value.trim(),
                        hospital_id: el("f-hosp").value.trim(),
                        ortho_id: el("f-ortho").value.trim()});
 function syncPreview(){
-  const v = newIds(), full = v.name && v.hospital_id && v.ortho_id;
+  const needH = ((RULES && RULES.folder_pattern) || "").includes("{hospital_id}");
+  const v = newIds(), full = v.name && v.ortho_id && (v.hospital_id || !needH);
   // 서버가 실제로 쓸 형식(★ 맨 위 등록 형식)으로 미리 보여준다 — 하드코딩하면
   // 설정에서 형식을 바꿨을 때 미리보기와 실제 폴더 이름이 갈라진다.
   const pat = (RULES && RULES.folder_pattern) || "{name}_{hospital_id}_{ortho_id}";
@@ -1174,7 +1178,7 @@ function startSession(r){
   SESSION = r;
   el("pchip").innerHTML =
     `<span class="nm">${esc(r.ids.name)}</span>` +
-    `<span class="id">${r.ids.hospital_id} · ${r.ids.ortho_id}</span>` +
+    `<span class="id">${[r.ids.hospital_id, r.ids.ortho_id].filter(Boolean).join(" · ")}</span>` +
     `<span class="visit" title="차수 ${r.visit}">${r.visit}</span>`;
   el("pchip").hidden = false;
 
@@ -1996,6 +2000,9 @@ function drawNoteDock(key){
   box.innerHTML = "";
   for(const k of keys){
     const f = byKey(k); if(!f) continue;
+    // 병원번호 칸은 폴더명에서 못 읽은 환자에게만 보인다 — 있는 값을 또 묻지 않는다
+    if(f.key === "hospital_id" && SESSION && SESSION.ids && SESSION.ids.hospital_id)
+      continue;
     box.appendChild(noteFieldRow(f));
   }
   // 직접 고쳐 쓴 박스는 칸을 바꿔도 글이 안 바뀐다 — 그 사실을 알리고 되돌릴 길을 준다
@@ -2232,11 +2239,12 @@ const patKey = () => PAT.kind === "ppt" ? "ppt_patterns"
 const patNoun = () => PAT.kind === "ppt" ? "PPT"
                     : PAT.kind === "label" ? "라벨" : "폴더";
 
-const patRecog = (pat) => /\{(any|[dc]\d+-\d+)\}/.test(pat);  // 인식 전용 형식인가
+const patRecog = (pat) => /\{(any|all|[dc]\d+-\d+)\}/.test(pat);  // 인식 전용 형식인가
 const RECOG_LABEL = v => v === "any" ? "*아무거나"
+  : v === "all" ? "**전부(구분자 포함)"
   : (v[0] === "d" ? "숫자" : "문자") + v.slice(1).replace("-", "~");
 const patExample = (pat) => pat
-  .replace(/\{any\}/g, "…").replace(/\{d\d+-\d+\}/g, "12")
+  .replace(/\{any\}/g, "…").replace(/\{all\}/g, "…").replace(/\{d\d+-\d+\}/g, "12")
   .replace(/\{c\d+-\d+\}/g, "ab")
   .replace("{date}", "26.08.12").replace("{vkind}", "초진")
   .replace("{visit}", "A")
@@ -2298,7 +2306,7 @@ const patFields = () => PAT.kind === "label" ? LABEL_FIELDS : PAT_FIELDS;
 
 function patTokens(pattern){
   const out = [];
-  const re = /\{(name|hospital_id|ortho_id|date|vkind|visit)\}|\{(any|[dc]\d+-\d+)\}|([^{]+)/g;
+  const re = /\{(name|hospital_id|ortho_id|date|vkind|visit)\}|\{(any|all|[dc]\d+-\d+)\}|([^{]+)/g;
   let m;
   while((m = re.exec(pattern))){
     if(m[1]) out.push({t: "f", k: m[1]});
@@ -2410,6 +2418,9 @@ async function patLoad(){
     const br1 = document.createElement("button");
     br1.textContent = "* 이후 아무거나"; br1.onclick = () => addR("any");
     pal.appendChild(br1);
+    const br2 = document.createElement("button");
+    br2.textContent = "** 전부(구분자 포함)"; br2.onclick = () => addR("all");
+    pal.appendChild(br2);
     for(const [c, nm] of [["d", "숫자"], ["c", "문자"]]){
       const b = document.createElement("button");
       b.textContent = `+ ${nm} n~m자리`;

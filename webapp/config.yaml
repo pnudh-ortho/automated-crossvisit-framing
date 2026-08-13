@@ -192,6 +192,8 @@ notes:
     # 이름·병원번호·교정과번호는 환자를 고를 때 이미 받았으므로 묻지 않는다.
     # 여기 없는 값(성별·나이·C/C)만 받아서 양식의 머리말 뒤에 채운다.
     - {key: sex,        label: "성별",        hint: "M / F",        group: patient}
+    - {key: hospital_id, label: "병원번호",   hint: "폴더명에 없을 때만 입력",
+       group: patient}
     - {key: age,        label: "나이",        hint: "24y 3m",       group: patient}
     - {key: cc,         label: "C/C",         hint: "주소(chief complaint)",
        lines: 2, group: patient}

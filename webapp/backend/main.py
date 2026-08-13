@@ -824,9 +824,14 @@ def _render_info_line(tpl: str, fields: dict[str, str]) -> str:
 
 
 def _info_fields(s: "Session") -> dict[str, str]:
-    """환자정보 줄이 쓸 수 있는 값 = 노트 칸 + 환자를 고를 때 이미 받은 식별자."""
-    return {**_note_values(s), "name": s.ids.name,
-            "hospital_id": s.ids.hospital_id, "ortho_id": s.ids.ortho_id}
+    """환자정보 줄이 쓸 수 있는 값 = 노트 칸 + 환자를 고를 때 이미 받은 식별자.
+
+    폴더명에서 못 얻은 식별자(빈 값)는 덮어쓰지 않는다 — 병원번호가 폴더명에
+    없는 환자는 노트의 병원번호 칸에 사람이 적은 값이 슬라이드로 간다.
+    """
+    ids = {"name": s.ids.name, "hospital_id": s.ids.hospital_id,
+           "ortho_id": s.ids.ortho_id}
+    return {**_note_values(s), **{k: v for k, v in ids.items() if v}}
 
 
 def _info_preview(s: "Session") -> dict[str, str]:
@@ -1847,7 +1852,13 @@ def session_open(req: OpenReq):
             raise HTTPException(400, str(e))
     else:
         try:
-            ids = N.validate_identifiers(req.name, req.hospital_id, req.ortho_id, **dig)
+            # ★ 생성 양식이 병원번호를 쓰지 않으면 비워 둘 수 있다 — 폴더명에
+            # 들어가지 않는 값을 강요할 이유가 없다. 나중에 검수 화면의
+            # 환자정보 칸으로 채울 수 있다.
+            need_h = ("{hospital_id}" in _folder_pattern()
+                      or "{hospital_id}" in _ppt_pattern())
+            ids = N.validate_identifiers(req.name, req.hospital_id, req.ortho_id,
+                                         require_hospital=need_h, **dig)
         except N.NamingError as e:
             raise HTTPException(400, str(e))
         d = root / N.folder_name(ids, _folder_pattern())
@@ -3268,9 +3279,9 @@ def prefs_set(req: PrefsReq):
             if not pat or pat in pats:
                 continue
             if (set('\\/:*?"<>|') & set(pat)) or any(
-                    k not in pat for k in ("{name}", "{hospital_id}", "{ortho_id}")):
-                raise HTTPException(400, '형식에는 {name} {hospital_id} {ortho_id} 가 '
-                                         '모두 있어야 하고 \\ / : * ? " < > | 는 못 씁니다')
+                    k not in pat for k in ("{name}", "{ortho_id}")):
+                raise HTTPException(400, '형식에는 {name} {ortho_id} 가 있어야 하고 '
+                                         '(병원번호는 선택) \\ / : * ? " < > | 는 못 씁니다')
             if not N.is_recognition_only(pat):
                 # 역파싱 라운드트립 — 만들 수 있어도 못 읽으면 환자 목록이 깨진다.
                 # 인식 전용 형식(*·숫자/문자 범위 포함)은 만들 일이 없으니 건너뛴다.
@@ -3305,9 +3316,9 @@ def prefs_set(req: PrefsReq):
                 continue
             if set(chr(92) + '/:?"<>|') & set(pat):
                 raise HTTPException(400, 'PPT 이름에 \\ / : ? " < > | 는 못 씁니다')
-            if any(k not in pat for k in ("{name}", "{hospital_id}", "{ortho_id}")):
-                raise HTTPException(400, "형식에는 {name} {hospital_id} {ortho_id} 가 "
-                                         "모두 있어야 합니다")
+            if "{ortho_id}" not in pat:
+                raise HTTPException(400, "형식에는 {ortho_id} 가 있어야 합니다 "
+                                         "(이름·병원번호는 선택)")
             if not N.is_recognition_only(pat):
                 try:
                     N.parse_ppt_filename(

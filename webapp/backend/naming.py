@@ -47,15 +47,24 @@ def validate_identifiers(
     hospital_digits: int = 9,
     ortho_digits: int = 5,
     name_regex: str | None = None,
+    require_name: bool = True,
+    require_hospital: bool = True,
 ) -> Identifiers:
+    """식별자 검증. 교정번호만 절대 필수다 — 파일명·차수·PPT 매칭의 키라서.
+
+    이름·병원번호는 요구(require_*)가 꺼져 있으면 비워 둘 수 있고, 값이
+    있을 때는 요구 여부와 무관하게 형식을 검사한다.
+    """
     name = (name or "").strip()
     hospital_id = (hospital_id or "").strip()
     ortho_id = (ortho_id or "").strip()
-    if not re.fullmatch(_bare(name_regex or NAME_DEFAULT), name):
+    if (name or require_name) and not re.fullmatch(
+            _bare(name_regex or NAME_DEFAULT), name):
         raise NamingError(
             f"이름 형식 오류: '{name}' — 한글/영문 1~40자, "
             "공백·마침표·하이픈만 함께 쓸 수 있습니다 (숫자·밑줄 불가)")
-    if not re.fullmatch(rf"\d{{{hospital_digits}}}", hospital_id):
+    if (hospital_id or require_hospital) and not re.fullmatch(
+            rf"\d{{{hospital_digits}}}", hospital_id):
         raise NamingError(f"병원 환자번호는 {hospital_digits}자리 숫자여야 합니다: '{hospital_id}'")
     if not re.fullmatch(rf"\d{{{ortho_digits}}}", ortho_id):
         raise NamingError(f"교정과 환자번호는 {ortho_digits}자리 숫자여야 합니다: '{ortho_id}'")
@@ -63,7 +72,7 @@ def validate_identifiers(
 
 
 # ── 템플릿 포맷/파싱 ──────────────────────────────────────────────────────────
-RECOG_ONLY = re.compile(r"\{(any|[dc]\d+-\d+)\}")
+RECOG_ONLY = re.compile(r"\{(any|all|[dc]\d+-\d+)\}")
 
 
 def is_recognition_only(pattern: str) -> bool:
@@ -105,13 +114,17 @@ def compile_pattern(pattern: str, field_regex: dict[str, str]) -> re.Pattern:
                 # 인식 전용 토큰 — 폴더를 '읽을' 때만 쓴다 (이름 생성엔 못 쓴다).
                 #   {any}    이후 아무거나        {d1-3}  숫자 1~3자리
                 #   {c2-5}   아무 글자 2~5자리
-                mr = re.fullmatch(r"any|([dc])(\d+)-(\d+)", field)
+                mr = re.fullmatch(r"any|all|([dc])(\d+)-(\d+)", field)
                 if mr:
                     if field == "any":
                         # 중간의 *는 구분자(- _ . 공백 괄호)를 먹지 않는다 — 먹으면
                         # 구분이 무의미해진다. 맨 끝의 *만 "이후 전부 무시"다.
                         out.append(r".*" if j == len(pattern) - 1
                                    else r"[^-_.() ]*")
+                    elif field == "all":
+                        # {all} 은 위치와 무관하게 구분자까지 통째로 받는다 —
+                        # 자유 기입 구간(메모 등)이 구분자를 품고 있을 때 쓴다.
+                        out.append(r".*")
                     else:
                         base = r"\d" if mr.group(1) == "d" else r"."
                         out.append(f"{base}{{{mr.group(2)},{mr.group(3)}}}")
@@ -145,9 +158,12 @@ def parse_pattern(
         )
     g = m.groupdict()
     return validate_identifiers(
-        g["name"], g["hospital_id"], g["ortho_id"],
+        g.get("name"), g.get("hospital_id"), g.get("ortho_id"),
         hospital_digits=hospital_digits, ortho_digits=ortho_digits,
         name_regex=name_regex,
+        # 패턴에 없는 필드는 빈 값으로 통과한다 — 교정번호만 절대 필수
+        require_name="{name}" in pattern,
+        require_hospital="{hospital_id}" in pattern,
     )
 
 
