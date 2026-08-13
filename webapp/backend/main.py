@@ -1576,6 +1576,21 @@ def _ppt_visit_letters(path: Path) -> list[tuple[str, str | None]]:
     return out
 
 
+def _ppt_reject_reason(name: str, ids) -> str:
+    """이 파일을 왜 그 환자의 PPT 로 안 봤는가 — 화면에 보일 한 줄."""
+    if name.startswith("~$"):
+        return "PowerPoint 임시 파일입니다"
+    if name.lower().endswith(".ppt"):
+        return "구형 .ppt — .pptx 로 다시 저장해야 인식됩니다"
+    try:
+        got = _parse_ppt_name(name)
+    except N.NamingError:
+        return "등록된 PPT 이름 양식과 맞지 않습니다"
+    if got.ortho_id != ids.ortho_id:
+        return f"교정번호가 다릅니다 ({got.ortho_id})"
+    return "인식 가능"
+
+
 def _scan_patient(d: Path) -> dict | None:
     """환자 폴더 하나 → 목록 한 줄. 폴더명이 명명 규칙에 안 맞으면 None."""
     try:
@@ -1631,6 +1646,12 @@ def _scan_patient(d: Path) -> dict | None:
         # `_raw` 는 짝이 있는 같은 사진이다 — 세면 장수가 두 배로 보인다.
         "photos": sum(1 for f in files
                       if f.lower().endswith(IMG_EXT) and not N.is_raw(f)),
+        # PPT 를 못 찾았을 때: 폴더의 PPT 파일마다 못 알아본 이유 한 줄.
+        # 왜 안 붙는지 아무도 모르는 채 새 PPT 가 생기는 것을 막는다.
+        "ppt_diag": ([] if ppt_name else
+                     [{"name": f, "why": _ppt_reject_reason(f, ids)}
+                      for f in files
+                      if f.lower().endswith((".pptx", ".ppt"))][:5]),
         "updated": datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d"),
     }
 

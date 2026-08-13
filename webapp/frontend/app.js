@@ -852,7 +852,7 @@ function drawDetail(){
   const V = p.next_visit;
   const n = RULES.slots || 5;
   const first = shotName(p.ortho_id, V, 1), last = shotName(p.ortho_id, V, n);
-  const lost = p.visits.length && !p.ppt;
+  const lost = (p.visits.length || (p.ppt_diag || []).length) && !p.ppt;
 
   d.innerHTML =
     `<div class="sec idsec">
@@ -868,8 +868,10 @@ function drawDetail(){
          사진 <span class="ident">${esc(first)}</span><span class="mid"> … </span><span class="ident">${esc(last)}</span>
          </div>
          ${lost ? `<div class="note" style="margin-top:10px"><b>PPT가 없습니다.</b>
-           사진은 ${p.visits.join(", ")}차수까지 있지만 PPT를 찾을 수 없어 새로 만듭니다.
-           이전 차수 사진은 겹쳐보기에 쓸 수 없습니다.</div>` : ""}
+           ${p.visits.length ? `사진은 ${p.visits.join(", ")}차수까지 있지만 PPT를 찾을 수 없어 새로 만듭니다.
+           이전 차수 사진은 겹쳐보기에 쓸 수 없습니다.` : "PPT를 찾을 수 없어 새로 만듭니다."}
+           ${(p.ppt_diag || []).map(g =>
+             `<br>· <span class="ident">${esc(g.name)}</span> — ${esc(g.why)}`).join("")}</div>` : ""}
        </div>
        ${p.ppt ? `<div class="slides" id="pv-slides">
          <div class="pv face" title="Face" hidden></div>
