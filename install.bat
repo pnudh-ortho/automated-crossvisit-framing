@@ -14,6 +14,8 @@ REM  ASCII only, CRLF endings -- cmd reads .bat in the system code page,
 REM  so Korean here would be parsed as commands.
 REM ---------------------------------------------------------------
 
+REM /r means this run was auto-restarted once to pick up a fresh PATH.
+set "ACF_RESTARTED=%~1"
 set "REPO=https://github.com/pnudh-ortho/automated-crossvisit-framing.git"
 set "NAME=automated-crossvisit-framing"
 
@@ -31,12 +33,10 @@ if errorlevel 1 goto manualgit
 echo       Installing Git...
 winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto manualgit
-echo.
-echo       Git installed.  Close this window and run this file again
-echo       so the new PATH takes effect.
-echo.
-pause
-goto done
+call :refreshpath
+git --version >nul 2>&1
+if not errorlevel 1 goto hasgit
+goto relaunch
 :manualgit
 echo.
 echo       Please install Git manually:  https://git-scm.com/download/win
@@ -63,12 +63,12 @@ if errorlevel 1 goto manualpy
 echo       Installing Python 3.12...
 winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto manualpy
-echo.
-echo       Python installed.  Close this window and run this file again
-echo       so the new PATH takes effect.
-echo.
-pause
-goto done
+call :refreshpath
+py -3 --version >nul 2>&1
+if not errorlevel 1 goto haspy
+python --version >nul 2>&1
+if not errorlevel 1 goto haspy
+goto relaunch
 :manualpy
 echo.
 echo       Please install Python 3.10+ manually:
@@ -178,3 +178,23 @@ pause
 
 :done
 endlocal
+goto :eof
+
+REM -- helpers ------------------------------------------------------
+:relaunch
+REM The tool was installed but this window still cannot see it.
+if "%ACF_RESTARTED%"=="/r" (
+  echo       Still not on PATH.  Close this window and run install.bat
+  echo       once more.
+  pause
+  goto done
+)
+echo       Restarting the installer so the new PATH takes effect...
+start "" "%~f0" /r
+goto done
+
+:refreshpath
+REM Re-read PATH from the registry - winget updated it for new
+REM processes, but this window still holds the old value.
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"`) do set "PATH=%%p"
+exit /b
