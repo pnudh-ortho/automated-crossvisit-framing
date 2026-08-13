@@ -439,6 +439,12 @@ def style_note_box(slide, name: str, style: dict) -> bool:
     return False
 
 
+# Tx/Rx/App 상자의 줄 앞 간격 — 글자 크기의 20%(PowerPoint 본문 기본값이자 실제
+# 덱들이 쓰는 값). 재진은 직전 상자를 통째로 복사해 제 간격이 따라오지만, 초진은
+# 물려받을 원본이 없어 세 줄이 붙어 나왔다. 사람에게 물을 값이 아니라 기본으로 둔다.
+STATUS_SPACE_PCT = "20000"
+
+
 def add_note_box(slide, name: str, win: dict, size_pt: float = 12.0,
                  color_rgb: str = "FFFFFF", bold: bool = False) -> bool:
     """빈 노트 텍스트박스를 새로 만든다 (양식에 없는 칸용).
@@ -455,6 +461,8 @@ def add_note_box(slide, name: str, win: dict, size_pt: float = 12.0,
     box.name = name
     tf = box.text_frame
     tf.word_wrap = True
+    if name == NOTE_STATUS:
+        set_para_space_pct(tf, STATUS_SPACE_PCT)
     p = tf.paragraphs[0]
     _apply_para(p, None)          # 글머리 점 없음 — 양식의 노트 칸과 같게
     r = p.add_run()
@@ -581,12 +589,42 @@ def _base_font(tf) -> dict:
     return {"size_pt": None, "bold": None, "rgb": None, "theme": None}
 
 
-def set_note_text(slide, box_name: str, text: str, small_pt: float | None = None) -> bool:
+def set_para_space_pct(tf, pct: str | int) -> None:
+    """상자의 **문단 앞 간격**을 목록서식(lstStyle)에 새긴다.
+
+    실제 덱은 이 값을 문단마다 두지 않고 상자의 `lvl1pPr/spcBef/spcPct` 에 둔다 —
+    글자 크기에 대한 백분율이라 크기를 바꿔도 비율이 유지된다. 여기 새겨 두면
+    `set_note_text` 가 글을 갈아끼워도(문단을 새로 만들어도) 간격이 남는다.
+    """
+    body = tf._txBody
+    lst = body.find(qn("a:lstStyle"))
+    if lst is None:
+        lst = body.makeelement(qn("a:lstStyle"), {})
+        body.insert(1, lst)                 # a:bodyPr 다음 자리
+    lvl = lst.find(qn("a:lvl1pPr"))
+    if lvl is None:
+        lvl = lst.makeelement(qn("a:lvl1pPr"), {})
+        lst.append(lvl)
+    old = lvl.find(qn("a:spcBef"))
+    if old is not None:
+        lvl.remove(old)
+    spc = lvl.makeelement(qn("a:spcBef"), {})
+    spc.append(spc.makeelement(qn("a:spcPct"), {"val": str(pct)}))
+    lvl.insert(0, spc)                      # lvl1pPr 안에서 앞자리 (lnSpc 다음)
+
+
+def set_note_text(slide, box_name: str, text: str, small_pt: float | None = None,
+                  space_pt: float | None = None) -> bool:
     """노트 박스의 텍스트를 통째로 갈아끼운다. 원래 글꼴을 되살려 쓴다.
 
     `small_pt` 를 주면 **줄 끝 괄호**(예: "Rx. Period: 23 month (24.08.12)" 의
     날짜)만 그 크기로 줄여 쓴다 — 양식이 그렇게 돼 있다(본문 15pt, 날짜 9pt).
     괄호만 있는 줄은 본문이 없으니 건드리지 않는다.
+
+    `space_pt` 는 **줄 앞 간격**이다. 수제 덱(.ppt 를 변환한 것)은 상자 안에 이
+    간격이 구워져 있어 Tx/Rx/App 이 떨어져 보이는데, 앱이 새로 만드는 상자에는
+    그런 게 없다. 원본에 제 간격이 있으면 그쪽이 이긴다 — 상속을 덮지 않는다.
+    첫 줄에는 넣지 않는다: 넣으면 글 전체가 상자 안에서 아래로 밀린다.
     """
     for sh in slide.shapes:
         if sh.name != box_name or not sh.has_text_frame:
@@ -594,10 +632,13 @@ def set_note_text(slide, box_name: str, text: str, small_pt: float | None = None
         tf = sh.text_frame
         base = _base_font(tf)
         base_p = _base_para(tf)
+        own_spc = base_p is not None and base_p.find(qn("a:spcBef")) is not None
         tf.clear()
         for i, ln in enumerate((text or "").split("\n")):
             para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             _apply_para(para, base_p)
+            if space_pt and i and not own_spc:
+                para.space_before = Pt(space_pt)
             head, tail = ln, ""
             if small_pt:
                 m = _TAIL_PAREN.search(ln)

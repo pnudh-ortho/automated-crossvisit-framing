@@ -8,7 +8,6 @@ import naming as N  # noqa: E402
 
 PPT_PAT = "{name}_{hospital_id}_{ortho_id}.pptx"
 PHOTO_PAT = "{ortho_id}_{visit} ({index}).jpg"
-VISIT_RX = "{ortho_id}_([A-Z]+)"
 
 
 def expect_error(fn):
@@ -97,16 +96,34 @@ def test_next_visit_increment():
     assert N.next_visit_letter(["A", "Z", "C"]) == "AA"  # 최대값 기준
 
 
-def test_scan_visit_letters():
-    files = [
-        "12345_A (1).jpg", "12345_A (2).jpg",
-        "12345_B (1).jpg", "12345_C (3).jpg",
-        "홍길동_123456789_12345.pptx",   # 매칭 안 됨
-        "99999_D (1).jpg",              # 다른 환자
-    ]
-    letters = N.scan_visit_letters(files, "12345", VISIT_RX)
-    assert letters == ["A", "B", "C"]
-    assert N.next_visit_letter(letters) == "D"
+def test_seq_token_recognition():
+    """{seq} = 순번(숫자 1~3자리) — 인식 전용 블록."""
+    rx = N.compile_pattern("{seq}_{name}_{ortho_id}", N.default_field_regex())
+    assert rx.match("12_홍길동_20001")
+    assert not rx.match("1234_홍길동_20001")
+    assert N.is_recognition_only("{seq}_{name}_{ortho_id}")
+
+
+def test_strip_recognition():
+    """생성 때는 인식 전용 블록을 없는 셈 친다 — 겹친 구분자도 함께 정리."""
+    assert N.strip_recognition("{seq}_{name}_{ortho_id}") == "{name}_{ortho_id}"
+    assert N.strip_recognition("{name}_{seq}_{ortho_id}") == "{name}_{ortho_id}"
+    assert N.strip_recognition("{name}_{ortho_id}{any}") == "{name}_{ortho_id}"
+    assert N.strip_recognition("{name}_{ortho_id}_{d1-3}") == "{name}_{ortho_id}"
+    # extra: 병원번호가 비었을 때 그 블록도 함께 뺀다
+    assert N.strip_recognition("{name}_{hospital_id}_{ortho_id}",
+                               {"hospital_id"}) == "{name}_{ortho_id}"
+
+
+def test_strip_roundtrip():
+    """생성형으로 만든 폴더명은 같은 생성형으로 되읽힌다 (병원번호 없이)."""
+    gen = N.strip_recognition("{seq}_{name}_{hospital_id}_{ortho_id}",
+                              {"hospital_id"})
+    ids = N.validate_identifiers("홍길동", "", "12345", require_hospital=False)
+    folder = N.folder_name(ids, gen)
+    assert folder == "홍길동_12345"
+    back = N.parse_pattern(folder, gen, label="폴더명")
+    assert back.ortho_id == "12345" and back.hospital_id == ""
 
 
 # ── 파일명 생성 ───────────────────────────────────────────────────────────────

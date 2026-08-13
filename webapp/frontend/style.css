@@ -51,22 +51,22 @@ body{
 
 /* ══ 헤더 = 신원 ═══════════════════════════════════════════════════════════ */
 .head{
-  flex:none; display:flex; align-items:center; gap:12px; padding:6px 16px;
+  flex:none; display:flex; align-items:center; gap:12px; padding:12px 18px;
   background:var(--panel); border-bottom:1px solid var(--edge);
 }
 /* 헤더 버튼은 크롬이지 작업 도구가 아니다 — 한 단계 작게 */
-.head .btn{height:25px; padding:0 10px; font-size:13px; font-weight:600;
+.head .btn{height:29px; padding:0 12px; font-size:13px; font-weight:600;
   display:inline-flex; align-items:center;}
 
 /* 워드마크 — PPT(산출물) × CRoCs(십자 배치). 가운데 ×만 힘을 빼 두 낱말을 가른다. */
-.mark{font:700 15px/1 var(--f-ui); letter-spacing:-.01em; user-select:none;}
+.mark{font:700 16px/1 var(--f-ui); letter-spacing:-.01em; user-select:none;}
 .mark i{font-style:normal; font-weight:400; color:var(--ink3); margin:0 1px;}
 /* 풀네임은 흐리게, 약자를 이루는 글자(C·Ro·C·s)만 굵고 진하게 */
 .mark .full{font-weight:400; color:var(--ink3);}
 .mark .full b{font-weight:700; color:var(--ink);}
 .head .sp{flex:1;}
 .pchip{
-  display:flex; align-items:center; gap:9px; padding:3px 10px;
+  display:flex; align-items:center; gap:9px; padding:5px 11px;
   background:var(--panel2); border:1px solid var(--edge); border-radius:7px;
 }
 .pchip .nm{font-weight:700;}
@@ -194,6 +194,7 @@ body{
 .seg button{
   font:inherit; font-weight:600; font-size:14px; border:0; border-radius:0;
   background:var(--panel2); color:var(--ink2); padding:7px 13px; cursor:pointer;
+  white-space:nowrap;
 }
 .seg button + button{border-left:1px solid var(--edge);}
 .seg button:hover:not(:disabled){color:var(--ink);}
@@ -281,6 +282,9 @@ body{
 /* 검색은 placeholder가 딱 들어갈 만큼만 — 남는 폭은 경로가 가져간다.
    툴바의 모든 컨트롤은 --ctl-h로 높이를 맞춘다. */
 .toolbar .find{flex:0 0 300px; min-width:0; height:var(--ctl-h); padding:0 11px;}
+.toolbar .sort{flex:0 0 auto; height:var(--ctl-h); padding:0 9px; font:inherit;
+  font-size:13.5px; color:var(--ink); background:var(--panel2);
+  border:1px solid var(--edge); border-radius:8px;}
 .toolbar > .btn{height:var(--ctl-h); padding:0 12px; display:inline-flex; align-items:center;}
 
 /* 저장 위치 — 남는 폭을 전부 쓰고, 넘칠 때만 앞쪽을 줄인다 */
@@ -321,17 +325,16 @@ body{
 .find::placeholder{color:var(--ink3);}
 
 .plist{overflow:auto; min-height:0;}
-/* 1행: 이름 + 번호 / 2행: 차수 이력 */
+/* 1행: 폴더 이름 / 2행: 차수 이력 */
 .prow{
-  display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 8px; align-items:baseline;
+  display:grid; grid-template-columns:minmax(0,1fr); gap:3px 8px; align-items:baseline;
   width:100%; padding:8px 11px; border:0; border-left:3px solid transparent;
   border-bottom:1px solid var(--edge-soft);
   background:none; font:inherit; color:var(--ink2); text-align:left; cursor:pointer;
 }
 .prow:last-child{border-bottom:0;}
 .prow:hover{background:var(--panel);}
-.prow .who{font-size:14px; font-weight:700; color:var(--ink); white-space:nowrap;}
-.prow .no{font:12.5px/1 var(--f-mono); color:var(--ink3); text-align:left;
+.prow .f_name{font:700 13.5px/1.35 var(--f-mono); color:var(--ink);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .prow .hist{
   grid-column:1/-1; font:12.5px/1.4 var(--f-mono); color:var(--ink3);
@@ -393,6 +396,10 @@ body{
 .idline{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
 .detail .who{font-size:19px; font-weight:700; letter-spacing:-.01em;}
 .detail .no{font:13px var(--f-mono); color:var(--ink2);}
+/* 폴더 이름 — 이름표의 마지막 자리. 탐색기에서 찾을 때 쓰는 값이라 눈에 띌
+   필요는 없지만, 화면과 디스크가 같은 것을 가리키는지 여기서 바로 확인된다. */
+.detail .f_name{font:12.5px var(--f-mono); color:var(--ink3);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;}
 
 /* 세로 타임라인 — 위가 첫 진료, 아래가 마지막 진료. 사이는 눌러서 펼친다. */
 .tl{margin:14px 0 0; padding-left:12px; border-left:2px solid var(--edge);}
@@ -472,9 +479,19 @@ body{
 .setrow .settl{display:flex; flex-direction:column; gap:1px; min-width:0;}
 .setrow .settl .sub{margin:0; white-space:nowrap; overflow:hidden;
   text-overflow:ellipsis;}
+/* 설명이 길어 한 줄에 안 담기는 항목 — 말줄임 대신 흐르게 둔다 */
+.setrow .settl.wrap{flex:1 1 auto;}
+.setrow .settl.wrap .sub{white-space:normal; overflow:visible; line-height:1.45;}
+/* 선택지 글이 길어 옆에 못 두는 항목 — 설명 아래로 내려 놓는다.
+   좁은 칸에 밀어 넣으면 설명이든 버튼이든 한쪽이 접혀 줄이 세로로 늘어난다. */
+.setrow.stack{flex-direction:column; align-items:stretch; gap:7px;}
+.setrow.stack .seg{align-self:center;}
 .setrow > input[type="checkbox"]{width:16px; height:16px; flex:none;}
 .setrow .nsz{width:48px; padding:3px 6px; font-size:14px; border:1px solid var(--edge);
   border-radius:6px; background:var(--panel); color:var(--ink);}
+.setrow .lbcolor{width:44px; height:26px; flex:none; padding:2px;
+  border:1px solid var(--edge); border-radius:6px; background:var(--panel);
+  cursor:pointer;}
 /* 오른쪽 컨트롤 묶음(숫자칸 셋)은 플렉스로 묶는다 — 좁아져도 줄바꿈되지 않게.
    왼쪽 설명이 대신 말줄임된다. */
 .setrow > .row{display:flex; align-items:center; flex:none;}
@@ -486,7 +503,11 @@ body{
   border:1px dashed var(--edge); border-radius:8px; margin-bottom:6px;}
 .patchip{display:inline-flex; align-items:center; gap:2px; font-size:13px;
   padding:3px 6px; border:1px solid var(--edge); border-radius:6px;
-  background:var(--panel2);}
+  background:var(--panel2); cursor:grab;}
+/* 드래그 재배치 — 잡은 칩은 흐려지고, 놓일 자리는 좌/우 가장자리 선으로 */
+.patchip.drag{opacity:.35;}
+.patchip.ins-l{box-shadow:-3px 0 0 var(--accent);}
+.patchip.ins-r{box-shadow:3px 0 0 var(--accent);}
 .patchip.sep{font-family:monospace; font-weight:700;}
 .patchip button{border:0; background:none; cursor:pointer; font-size:12px;
   color:var(--ink2); padding:0 2px;}
@@ -536,7 +557,34 @@ body{
   font-weight:400; white-space:nowrap;}
 .doclist .body{padding:0 12px 10px 27px; font-size:14px; line-height:1.55;
   white-space:pre-wrap; color:var(--ink);}
+/* 본문 속 표 — 고정폭이라야 칸이 맞는다. 넓으면 이 블록만 가로로 스크롤된다. */
+.doclist .body pre.mono{margin:6px 0; padding:8px 10px; overflow-x:auto;
+  font:12.5px/1.6 var(--f-mono); white-space:pre; color:var(--ink);
+  background:var(--panel); border:1px solid var(--edge-soft); border-radius:6px;}
 .modal menu{display:flex; justify-content:flex-end; gap:8px; margin:16px 0 0; padding:0;}
+
+/* ── 차수 확인 줄 — 자동분류 전에 사람이 한 번 보는 곳 ─────────────────────── */
+/* 이름표(왼쪽)와 미리보기(오른쪽) **아래** 한 줄을 통째로 쓴다 — 이 줄이
+   이름표 안에 있으면 그 칸이 넓어져 미리보기가 다음 줄로 밀려난다. */
+.idsec > .vconfirm{flex:1 1 100%;}
+.vconfirm{margin-top:10px; padding:8px 11px; border:1px solid var(--edge-soft);
+  border-radius:8px; background:var(--panel2); font-size:13px; color:var(--ink2);
+  display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center;}
+.vconfirm .vc-known{flex:1 1 100%;}
+.vconfirm .vc-known b{color:var(--ink);}
+.vconfirm .vc-known i{font:11.5px var(--f-mono); color:var(--ink3); font-style:normal;}
+.vconfirm .vc-warn{flex:1 1 100%; color:var(--warn);}
+.vconfirm label{display:inline-flex; gap:7px; align-items:center; white-space:nowrap;}
+.vconfirm input{width:64px; font:inherit; font-family:var(--f-mono); color:var(--ink);
+  background:var(--panel); border:1px solid var(--edge); border-radius:6px;
+  padding:3px 7px;}
+.vconfirm input:disabled{opacity:.55;}
+.vconfirm .vc-err{color:var(--bad); font-size:12.5px;}
+.vconfirm .vc-aux{color:var(--ink3); font-size:12.5px;}
+/* 진행 전 미리 일러두는 한 줄. 경고(vc-warn)와 색을 나눈다 — 늘 떠 있는 안내라
+   경고색을 쓰면 정작 이상할 때의 경고가 묻힌다. */
+.vconfirm .vc-note{flex:1 1 100%; color:var(--ink3); font-size:12.5px; line-height:1.5;}
+.vconfirm .vc-note b{color:var(--ink2);}
 
 /* ── 폴더 내용 (파일탐색기) ───────────────────────────────────────────────── */
 .flist{
@@ -544,7 +592,7 @@ body{
   border:1px solid var(--edge-soft); border-radius:8px; background:var(--panel2);
 }
 .frow{
-  display:grid; grid-template-columns:20px minmax(0,1fr) 26px 62px;
+  display:grid; grid-template-columns:20px minmax(0,1fr) 62px;
   gap:8px; align-items:center; padding:5px 10px;
   border-bottom:1px solid var(--edge-soft); font-size:13px;
 }
@@ -552,7 +600,10 @@ body{
 .frow .ic{text-align:center;}
 .frow .fn{font-family:var(--f-mono); color:var(--ink);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.frow .fv{font:700 12.5px/1 var(--f-mono); color:var(--ink3); text-align:center;}
+/* 이 환자의 PPT 로 자동 선택된 파일 표시 */
+.frow .sel{font:700 11px/1 var(--f-ui); color:var(--done); white-space:nowrap;}
+/* 열 수 없는 구형 .ppt — 할 일은 위 안내가 말하고, 여기는 어느 파일인지만 */
+.frow .old{font:700 11px/1 var(--f-ui); color:var(--warn); white-space:nowrap;}
 .frow .fs{font:12.5px/1 var(--f-mono); color:var(--ink3); text-align:right;}
 .frow[data-kind="ppt"] .fn{color:var(--accent); font-weight:600;}
 
@@ -1001,15 +1052,21 @@ body{
 
 /* ── 기준 겹쳐보기 ────────────────────────────────────────────────────────────
    기준=빨강 / 현재=청록. 맞는 곳은 회색으로 사라지고 어긋난 곳만 색이 남는다. */
+/* 켜기 · 차수 · 색 범례 한 줄. 좁아지면 **줄을 바꾼다** — 예전에는 줄바꿈을
+   막아 두어 칸이 좁아지면 "기준/현재" 글자가 한 자씩 세로로 접혔다. */
 .ovbar{
-  display:flex; align-items:center; gap:10px; margin:6px 0 2px;
+  display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; margin:6px 0 2px;
   font:13px/1.5 var(--f-ui); color:var(--ink2);
 }
-.ovkey{display:inline-flex; align-items:center; gap:4px; color:var(--ink3);}
+.ovsw{display:inline-flex; align-items:center; gap:6px; flex:none;
+  white-space:nowrap; cursor:pointer;}
+.ovkey{display:inline-flex; align-items:center; gap:4px; flex:none;
+  white-space:nowrap; color:var(--ink3); margin-left:auto;}
 .ovkey i{width:9px; height:9px; border-radius:2px; display:inline-block; margin-left:6px;}
 .ovkey i.r{background:#e04a4a;}
 .ovkey i.c{background:#3ad0d0;}
 .ovsel{
-  margin-left:auto; font:13px var(--f-ui); padding:3px 6px; border-radius:6px;
-  background:var(--panel2); color:var(--ink); border:1px solid var(--edge);
+  flex:0 1 auto; min-width:0; font:13px var(--f-ui); padding:3px 6px;
+  border-radius:6px; background:var(--panel2); color:var(--ink);
+  border:1px solid var(--edge);
 }

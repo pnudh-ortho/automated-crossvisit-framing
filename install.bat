@@ -33,6 +33,8 @@ if errorlevel 1 goto manualgit
 echo       Installing Git...
 winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto manualgit
+REM -- remember that WE installed it, so uninstall can offer to remove it
+set "ADDGIT=1"
 call :refreshpath
 git --version >nul 2>&1
 if not errorlevel 1 goto hasgit
@@ -63,6 +65,7 @@ if errorlevel 1 goto manualpy
 echo       Installing Python 3.12...
 winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto manualpy
+set "ADDPY=1"
 call :refreshpath
 py -3 --version >nul 2>&1
 if not errorlevel 1 goto haspy
@@ -122,6 +125,11 @@ if errorlevel 1 (
   pause
   goto done
 )
+
+REM -- record what this installer added, so uninstall can undo just that.
+REM    Tools that were already on the machine are never listed here.
+if defined ADDGIT echo Git.Git>>"%DEST%\.installed_tools"
+if defined ADDPY echo Python.Python.3.12>>"%DEST%\.installed_tools"
 
 REM -- [4/4] virtual environment ------------------------------------
 :venv

@@ -50,7 +50,7 @@ function coverDraw(c, img, W, H){
    반전을 사진 쪽(scale/rotate 안쪽)에 걸어야 st의 dx·dy·angle이 화면에서 본
    그대로의 뜻을 유지한다(드래그 아래 = dy 증가, Q/E = 화면 기준 회전). */
 function drawComposite(c, W, H, img, st, border, flipV){
-  c.clearRect(0, 0, W, H); c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+  c.clearRect(0, 0, W, H); c.fillStyle = LETTERBOX; c.fillRect(0, 0, W, H);
   if(img){
     c.save(); c.translate(W / 2 + st.dx, H / 2 + st.dy);
     c.rotate(st.angle * Math.PI / 180); c.scale(st.scale, st.scale);
@@ -142,11 +142,13 @@ async function renderSlot(key){
   drawComposite(cv.getContext("2d"), w, h, img, p.editor, false, p.flip_v);
 }
 
-/* 슬롯의 기준영상 — 편집 중인 슬롯은 선택된 차수, 나머지는 직전 차수. */
+/* 슬롯의 기준영상 — 고른 차수를 **다섯 칸 모두**에 적용한다.
+   한 칸만 바뀌면 나머지 넷은 다른 차수와 겹쳐 보이게 되어, 무엇과 비교하고
+   있는지가 칸마다 달라진다. 그 차수가 없는 칸만 그 칸의 마지막 차수로 물러난다. */
 async function boardRefImg(slot){
   const list = OV.list[slot] || [];
   if(!list.length || !SESSION) return null;
-  const visit = (slot === OV.slot && OV.visit && list.includes(OV.visit))
+  const visit = (OV.visit && list.includes(OV.visit))
               ? OV.visit : list[list.length - 1];
   const c = OV.board[slot];
   if(c && c.visit === visit) return c.img;
@@ -187,10 +189,10 @@ el("ov-on").onchange = async e => {
 };
 el("ov-visit").onchange = async e => {
   OV.visit = e.target.value; OV.img = null;
-  delete OV.board[ED.slot];    // 이 슬롯의 판 캐시도 새 차수로
+  OV.board = {};               // 다섯 칸 전부 새 차수로 다시 받는다
   if(OV.on) await loadOverlayImg();
   renderEditor();
-  if(OV.on) renderSlot(ED.slot);
+  if(OV.on) redrawBoardSlots();
 };
 
 /* 어느 슬롯에 어느 차수를 겹쳐볼 수 있나. 세션마다 한 번만 물어본다. */
@@ -211,6 +213,10 @@ async function loadRefList(){
    합성은 화면에서 한다 — 서버로 보내면 드래그를 못 따라가고, 따라가지 못하는
    겹쳐보기는 맞추는 도구가 아니라 그림일 뿐이다. */
 const OV = {on: false, visit: "", img: null, slot: null, list: {}, board: {}};
+
+/* 회전·축소로 드러나는 빈 자리 색. 서버 설정에서 받아 화면도 같은 값을 쓴다 —
+   검수 화면과 결과물이 달라 보이면 안 된다. 받기 전 잠깐은 검정이다. */
+let LETTERBOX = "#000";
 
 function equalize(d){                     // 8비트 그레이 히스토그램 평활화
   const n = d.length / 4, hist = new Uint32Array(256);
@@ -698,7 +704,21 @@ el("btn-uninstall").onclick = async () => {
   if(!v){ alert("정보를 읽지 못했습니다"); return; }
   el("uninst-inv").innerHTML =
     `지워짐 — 프로그램 <b>${v.program_dir}</b> (${MB(v.program_bytes)}, 모델 ${MB(v.weights_bytes)} 포함)<br>` +
+    `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;바탕화면 바로가기<br>` +
     `남음 &nbsp;— 환자 자료 <b>${v.data_dir}</b> (${MB(v.data_bytes)}, 환자 ${v.patients}명)`;
+  // 이 PC 에 있는 도구는 **항상 묻는다.** 기록이 생기기 전에 설치한 사람이 더
+  // 많아서, 기록이 있을 때만 물으면 그 사람들은 영영 못 지운다. 대신 이 프로그램이
+  // 깐 것만 기본으로 체크한다.
+  const opts = v.tool_options || [];
+  const box = el("uninst-tools-row");
+  box.hidden = !opts.length;
+  box.innerHTML = opts.map(t =>
+    `<label class="row" style="margin-top:4px">` +
+    `<input type="checkbox" class="uninst-tool" value="${esc(t.id)}"${t.ours ? " checked" : ""}>` +
+    `<span>${esc(t.name)} 도 제거` +
+    (t.ours ? ` <span class="aux">— 이 프로그램이 설치했습니다</span>`
+            : ` <span class="aux">— 원래 있던 것일 수 있습니다</span>`) +
+    `</span></label>`).join("");
   el("uninst").hidden = false;
 };
 
@@ -707,10 +727,18 @@ el("btn-uninstall-cancel").onclick = () => { el("uninst").hidden = true; };
 
 el("btn-uninstall-go").onclick = async () => {
   const drop = el("uninst-data").checked;
-  const body = {drop_data: drop, confirm: el("uninst-word").value.trim()};
+  const tools = [...document.querySelectorAll(".uninst-tool:checked")]
+                  .map(x => x.value);
+  const names = [...document.querySelectorAll(".uninst-tool:checked")]
+                  .map(x => x.parentElement.textContent.split(" 도 제거")[0].trim());
+  const body = {drop_data: drop, drop_tools: tools,
+                confirm: el("uninst-word").value.trim()};
   if(drop && body.confirm !== "삭제"){ alert("확인 문구를 정확히 입력하세요"); return; }
-  if(!confirm(drop ? "환자 자료까지 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?"
-                   : "프로그램을 지웁니다. 환자 자료는 남습니다. 계속할까요?")) return;
+  if(!confirm((drop ? "환자 자료까지 모두 지웁니다. 되돌릴 수 없습니다."
+                    : "프로그램을 지웁니다. 환자 자료는 남습니다.") +
+              (tools.length ? `\n${names.join(" · ")} 도 제거합니다 — 다른 프로그램이 ` +
+                              "쓰고 있다면 그쪽이 동작하지 않게 됩니다." : "") +
+              "\n\n계속할까요?")) return;
   const r = await api("/api/uninstall/prepare",
                       {method:"POST", headers:{"Content-Type":"application/json"},
                        body: JSON.stringify(body)}).catch(() => null);
@@ -726,12 +754,16 @@ async function syncPrefs(){
   const r = await api("/api/prefs").catch(() => null);
   const cur = (r && r.months_unit) || "int";
   for(const b of el("set-unit").children) b.setAttribute("aria-pressed", b.dataset.u === cur);
+  const lf = (r && r.label_format) || "tight";
+  for(const b of el("set-label").children) b.setAttribute("aria-pressed", b.dataset.f === lf);
+  const cs = (r && r.copy_shapes) || "lines";
+  for(const b of el("set-shapes").children) b.setAttribute("aria-pressed", b.dataset.c === cs);
   el("set-raw").checked = !!(r && r.save_raw);
-  el("set-subdirs").checked = !!(r && r.scan_subdirs);
   const ns = (r && r.note_sizes) || {};
   el("nsz-soap").value = ns.NOTE_SOAP || "";
   el("nsz-ll").value = ns.NOTE_LL || "";
   el("nsz-next").value = ns.NOTE_NEXT || "";
+  el("set-letterbox").value = LETTERBOX;
 }
 for(const [id, key] of [["nsz-soap", "NOTE_SOAP"], ["nsz-ll", "NOTE_LL"],
                         ["nsz-next", "NOTE_NEXT"]]){
@@ -742,14 +774,36 @@ for(const [id, key] of [["nsz-soap", "NOTE_SOAP"], ["nsz-ll", "NOTE_LL"],
     if(NOTES) loadNotes();     // 판 위 오버레이 글자 크기도 바로 따라온다
   };
 }
-el("set-subdirs").onchange = async e => {
-  await setPref({scan_subdirs: e.target.checked});
-  if(typeof loadPatients === "function") loadPatients();  // 목록이 바로 다시 잡힌다
-};
 for(const b of el("set-unit").children) b.onclick = async () => {
   await setPref({months_unit: b.dataset.u});
   syncPrefs();
   if(NOTES) loadNotes();
+};
+/* 여백 색 — 화면·저장 사진·PPT 가 같은 값을 쓴다. 바꾸면 판을 다시 그린다. */
+el("set-letterbox").onchange = async e => {
+  const v = (e.target.value || "").replace("#", "");
+  if(!/^[0-9A-Fa-f]{6}$/.test(v)) return;
+  const p = await setPref({letterbox_color: v});
+  if(p && p.letterbox_color){
+    LETTERBOX = "#" + p.letterbox_color;
+    renderEditor(); redrawBoardSlots();
+  }
+};
+
+/* 날짜/차수 표기 — 새 PPT 를 만들 때만 쓰인다. 기존 PPT 는 제 형식을 따른다. */
+for(const b of el("set-label").children) b.onclick = async () => {
+  await setPref({label_format: b.dataset.f});
+  syncPrefs();
+};
+/* 직전 차수 슬라이드의 도형을 새 슬라이드로 가져올지 — 확정할 때 적용된다 */
+for(const b of el("set-shapes").children) b.onclick = async () => {
+  if(b.dataset.c === "all" &&
+     !confirm("직전 차수 슬라이드의 선·화살표·텍스트 박스를 글 내용까지 " +
+              "그대로 가져옵니다.\n\n지난 차수 내용을 이어서 고쳐 쓰는 방식이라, " +
+              "그 차수에만 해당하는 주석도 따라옵니다. 확정 전에 검수 화면에서 " +
+              "확인해 주세요.")) return;
+  await setPref({copy_shapes: b.dataset.c});
+  syncPrefs();
 };
 /* 끄면 원본은 어디에도 남지 않는다 — 확정과 함께 업로드 임시본이 지워진다.
    되돌릴 수 없는 선택이라 켤 때가 아니라 **끌 때** 한 번 확인한다. */
@@ -793,10 +847,22 @@ async function loadPatients(){
   }catch(e){ el("plist").innerHTML = `<p class="empty">목록을 불러오지 못했습니다<br>${esc(e.message)}</p>`; }
 }
 
+/* 목록 정렬 — 폴더 이름/폴더 수정 시각 기준. 선택은 브라우저에 남는다. */
+function sortRows(rows){
+  const mode = (el("sort") && el("sort").value) || "new";
+  const byName = (a, b) => a.folder.localeCompare(b.folder, "ko");
+  const byDate = (a, b) => (a.updated || "").localeCompare(b.updated || "") || byName(a, b);
+  const cmp = mode === "old" ? byDate
+            : mode === "az"  ? byName
+            : mode === "za"  ? (a, b) => byName(b, a)
+            : (a, b) => byDate(b, a);          // 최신순(기본)
+  return rows.slice().sort(cmp);
+}
+
 function drawList(){
   const terms = el("find").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = p => `${p.name} ${p.hospital_id} ${p.ortho_id}`.toLowerCase();
-  const rows = PATIENTS.filter(p => terms.every(t => hay(p).includes(t)));
+  const hay = p => p.folder.toLowerCase();
+  const rows = sortRows(PATIENTS.filter(p => terms.every(t => hay(p).includes(t))));
   const box = el("plist"); box.innerHTML = "";
   if(!rows.length){
     box.innerHTML = `<p class="empty">${PATIENTS.length ? "검색 결과가 없습니다" : "등록된 환자가 없습니다"}<br>새 환자로 시작하세요</p>`;
@@ -807,8 +873,7 @@ function drawList(){
     b.className = "prow";
     b.setAttribute("aria-pressed", picked?.folder === p.folder);
     b.innerHTML =
-      `<span class="who">${esc(p.name)}</span>` +
-      `<span class="no">${[p.hospital_id, p.ortho_id].filter(Boolean).join(" · ")}</span>` +
+      `<span class="f_name">${esc(p.folder)}</span>` +
       `<span class="hist">${visitLine(p)}</span>`;
     b.onclick = () => {
       if(STAGED.length && picked && picked.folder !== p.folder &&
@@ -824,7 +889,7 @@ function drawList(){
     n.innerHTML =
       `<summary>표시하지 않은 폴더 ${SKIPPED.length}개</summary>` +
       `<ul>${SKIPPED.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` +
-      `<p>폴더 이름이 <span class="ident">{이름}_{병원번호}_{교정번호}</span> 형식이 아님.</p>`;
+      `<p>폴더 이름이 등록된 이름 형식과 맞지 않음 — 설정에서 형식을 추가할 수 있습니다.</p>`;
     box.appendChild(n);
   }
 }
@@ -860,6 +925,7 @@ function drawDetail(){
          <div class="idline">
            <span class="who">${esc(p.name)}</span>
            <span class="no">${[p.hospital_id, p.ortho_id].filter(Boolean).join(" · ")}</span>
+           <span class="f_name" title="환자 폴더 이름">${esc(p.folder)}</span>
          </div>
          ${timeline(p)}
          <div class="plan">
@@ -867,16 +933,13 @@ function drawDetail(){
                                                : p.visits.length ? "PPT를 새로 만들어 기록" : "초진 — PPT를 새로 만듭니다"}<br>
          사진 <span class="ident">${esc(first)}</span><span class="mid"> … </span><span class="ident">${esc(last)}</span>
          </div>
-         ${lost ? `<div class="note" style="margin-top:10px"><b>PPT가 없습니다.</b>
-           ${p.visits.length ? `사진은 ${p.visits.join(", ")}차수까지 있지만 PPT를 찾을 수 없어 새로 만듭니다.
-           이전 차수 사진은 겹쳐보기에 쓸 수 없습니다.` : "PPT를 찾을 수 없어 새로 만듭니다."}
-           ${(p.ppt_diag || []).map(g =>
-             `<br>· <span class="ident">${esc(g.name)}</span> — ${esc(g.why)}`).join("")}</div>` : ""}
+         ${lost ? pptLostNote(p) : ""}
        </div>
        ${p.ppt ? `<div class="slides" id="pv-slides">
          <div class="pv face" title="Face" hidden></div>
          <div class="pv" title="Intraoral" hidden><div class="pvgrid"></div></div>
        </div>` : ""}
+       ${visitConfirm(p, V)}
      </div>
 
      <div class="sec sec-folder">
@@ -906,7 +969,83 @@ function drawDetail(){
 
   loadFolder(p.folder);
   bindDrop();
+  bindVisitConfirm(p);
   drawStaged();
+}
+
+/* ── 차수 확인 줄 — 자동분류 전에 사람이 한 번 보는 곳 ─────────────────────
+   값이 맞으면 그냥 진행(클릭 추가 없음), 고치면 그 값으로 세션이 열린다.
+   서버가 확정 때 한 번 더 검증한다. */
+function visitConfirm(p, V){
+  // 같은 차수가 여러 장일 수 있다 — 글이 많아 슬라이드를 복제해 쓰는 관행.
+  // 한 줄로 묶고 슬라이드 번호만 모아 적는다 (차수가 두 번 보이면 버그로 읽힌다).
+  const by = new Map();
+  for(const v of (p.visit_slides || [])){
+    const cur = by.get(v.visit);
+    if(cur) cur.slides.push(v.slide_no);
+    else by.set(v.visit, {date: v.date, slides: [v.slide_no]});
+  }
+  const known = [...by].map(([L, v]) =>
+    `<b>${L}</b> ${v.date || "—"} <i>s${v.slides.join(",")}</i>`).join(" · ");
+  const ex = p.label_excluded || [];
+  return `<div class="vconfirm">
+    <div class="vc-known">인식된 차수&nbsp; ${known || "없음"}</div>
+    ${ex.length ? `<div class="vc-warn">⚠ 십자뷰 없는 라벨 슬라이드 ${ex.length}장` +
+      `(슬라이드 ${ex.map(x => x.slide_no).join(", ")}) — 차수에서 제외했습니다</div>` : ""}
+    ${p.label_fallback ? `<div class="vc-warn">⚠ 십자뷰를 인식하지 못해 라벨만으로 차수를 세었습니다</div>` : ""}
+    <label>이번 차수 <input id="v-letter" maxlength="2" value="${V}" autocomplete="off"></label>
+    ${p.ppt && p.suggest_after ? `<label>새 슬라이드는
+      <input id="v-pos" type="number" min="0" max="${p.ppt_slides || 999}"
+             value="${p.suggest_after}">번 뒤에
+      <span class="vc-aux">(전체 ${p.ppt_slides || "?"}장)</span></label>` : ""}
+    <span class="vc-err" id="vc-err"></span>
+    ${p.ppt ? `<div class="vc-note">이 환자 PPT가 <b>PowerPoint에서 열려 있으면</b>
+      읽고 저장하지 못합니다 — 진행 전에 닫아 주세요</div>` : ""}
+  </div>`;
+}
+
+function bindVisitConfirm(p){
+  const L = el("v-letter"); if(!L) return;
+  const check = () => {
+    const v = L.value.trim().toUpperCase();
+    L.value = v;
+    const msg = !/^[A-Z]{1,2}$/.test(v) ? "차수는 영문 대문자 1~2글자입니다"
+              : (p.visits || []).includes(v) ? `${v} 는 이미 있는 차수입니다` : "";
+    el("vc-err").textContent = msg;
+  };
+  L.oninput = check;
+  check();
+}
+
+/* 확인 줄의 값 — 세션을 열 때 서버로 넘어간다 */
+function visitOverride(){
+  const out = {};
+  const L = el("v-letter"), P = el("v-pos");
+  if(L && /^[A-Z]{1,2}$/.test(L.value.trim().toUpperCase()))
+    out.visit = L.value.trim().toUpperCase();
+  if(P && P.value !== "" && +P.value >= 0) out.insert_after = +P.value;
+  return out;
+}
+
+/* PPT 를 못 찾았을 때의 **단 하나의** 안내.
+   예전에는 상세 패널과 폴더 목록이 같은 사실을 따로 말했는데, 둘 다 "왜"만
+   알려주고 "그래서 뭘 해야 하나"는 어느 쪽도 말하지 않았다. 구형 .ppt 만 있는
+   흔한 경우를 따로 떼어 **할 일과 그 결과**를 적는다. */
+function pptLostNote(p){
+  const diag = p.ppt_diag || [];
+  // 구형 .ppt 뿐이고 **그 이름 그대로 .pptx 로 저장하면 인식되는** 경우 —
+  // 가장 흔하고, 할 일이 한 줄로 끝난다.
+  const old = diag.filter(g => /\.ppt$/i.test(g.name));
+  if(old.length && old.length === diag.length && old.every(g => g.convertible))
+    return `<div class="note" style="margin-top:10px">
+      <b>⚠ 구형 .ppt 파일만 있습니다.</b> 이 프로그램은 <b>.pptx</b> 만 열 수 있습니다.<br>
+      PowerPoint 에서 열어 <b>[다른 이름으로 저장] → PowerPoint 프레젠테이션(.pptx)</b> 으로 저장해 주세요<br>
+      그 파일을 찾으면 <b>새로 만들지 않고 이어서 씁니다.</b> 원본 .ppt 는 그대로 두어도 됩니다.${old.map(g =>
+        `<br>· <span class="ident">${esc(g.name)}</span>`).join("")}</div>`;
+  return `<div class="note" style="margin-top:10px">
+    <b>PPT를 찾을 수 없어 새로 만듭니다.</b>
+    ${diag.map(g => `<br>· <span class="ident">${esc(g.name)}</span> — ${esc(g.why)}`).join("")}
+    </div>`;
 }
 
 /* 첫 진료 → (이력 펼치기) → 마지막 진료. 세로로 놓아 시간축이 그대로 읽히게. */
@@ -938,14 +1077,14 @@ function ago(date){
   return mm ? `${yy}Y ${mm}M 전` : `${yy}Y 전`;
 }
 
+/* 차수 이력 — PPT 라벨에서 온 차수·날짜만 쓴다 (사진 파일은 보지 않는다) */
 function openHist(){
-  const v = FOLDER?.visits || [];
+  const v = picked?.visits || [], dt = picked?.visit_dates || {};
   el("hist-sub").textContent = `${esc(picked.name)} · 총 ${v.length}차수`;
-  el("hist-list").innerHTML = v.map(x =>
-    `<div class="hrow"><b>${x.visit}</b>` +
-    `<span class="hd">${x.date}</span>` +
-    `<span class="ha">${ago(x.date)}</span>` +
-    `<span class="hn">사진 ${x.photos}</span></div>`).join("")
+  el("hist-list").innerHTML = v.map(L =>
+    `<div class="hrow"><b>${L}</b>` +
+    `<span class="hd">${dt[L] || "—"}</span>` +
+    `<span class="ha">${ago(dt[L])}</span></div>`).join("")
     || `<p class="empty">차수 기록이 없습니다</p>`;
   el("dlg-hist").showModal();
 }
@@ -963,15 +1102,14 @@ const shotName = (ortho, visit, i) => (RULES.photo_pattern || "{ortho_id}_{visit
   .replace("{ortho_id}", ortho).replace("{visit}", visit).replace("{index}", i);
 
 /* 시작 화면 미리보기 — 슬라이드에 실린 그림이 진실이다. 서버가 PPT에서 첫
-   차수 십자 5장 + 얼굴 2장을 복원해 준다(완성본 번호 규칙이 다른 옛 폴더에서도
-   맞다). PPT를 읽지 못하면 종전대로 완성본 JPG 의 (1)~(n) 번호로 물러난다. */
-async function fillSlidePreviews(folder, items){
+   차수 십자 5장 + 얼굴 2장을 복원해 준다. PPT를 읽지 못하면 미리보기는 없다 —
+   폴더의 사진 파일을 직접 읽는 일은 하지 않는다. */
+async function fillSlidePreviews(folder){
   const box = el("pv-slides"); if(!box) return;
   try{
     const d = await api("/api/ppt_preview?folder=" + encodeURIComponent(folder));
-    if(pvRender(box, d)) return;
-  }catch(e){ /* 폴백으로 */ }
-  pvRenderFromFiles(box, folder, items);
+    pvRender(box, d);
+  }catch(e){ /* PPT 를 못 읽으면 미리보기 생략 */ }
 }
 
 function pvRender(box, d){
@@ -996,38 +1134,6 @@ function pvRender(box, d){
   return any;
 }
 
-function pvRenderFromFiles(box, folder, items){
-  const idx = n => { const m = n.match(/\((\d+)\)/); return m ? +m[1] : 0; };
-  const ph = items.filter(i => i.kind === "photo" && !i.raw && i.visit && idx(i.name));
-  if(!ph.length) return;
-  const visit = ph.map(i => i.visit).sort()[0];               // 초진 차수
-  const vis = ph.filter(i => i.visit === visit);
-  const src = i => `/api/file/${encodeURIComponent(folder)}/${encodeURIComponent(i.name)}`;
-  const nIO = (RULES && RULES.slots) || 5;
-
-  const faces = vis.filter(i => idx(i.name) > nIO)
-                   .sort((a, b) => idx(a.name) - idx(b.name)).slice(0, 2);
-  const fb = box.querySelector(".pv.face");
-  if(fb && faces.length){
-    fb.innerHTML = faces.map(i => `<img src="${src(i)}" alt="">`).join("");
-    fb.hidden = false;
-  }
-
-  const grid = box.querySelector(".pvgrid");
-  if(grid){
-    grid.innerHTML = "";
-    for(const [ix, slot] of Object.entries((RULES && RULES.io_slots) || {})){
-      const it = vis.find(i => idx(i.name) === +ix);
-      const meta = SLOTS.find(s => s.key === slot);
-      if(!it || !meta) continue;
-      const im = document.createElement("img");
-      im.src = src(it); im.alt = ""; im.style.gridArea = meta.area;
-      grid.appendChild(im);
-    }
-    if(grid.children.length) grid.parentElement.hidden = false;
-  }
-}
-
 /* 폴더 내용 — 파일탐색기처럼 있는 그대로 */
 async function loadFolder(folder){
   const box = el("flist"); if(!box) return;
@@ -1035,17 +1141,15 @@ async function loadFolder(folder){
     const d = await api("/api/folder?folder=" + encodeURIComponent(folder));
     FOLDER = d;
     const hb = el("btn-hist"); if(hb) hb.onclick = openHist;
-    fillSlidePreviews(folder, d.items);
+    fillSlidePreviews(folder);
     if(!d.items.length){ box.innerHTML = `<p class="empty">폴더가 비어 있습니다</p>`; return; }
-    // 구형 .ppt 는 코드로 열 수 없다 — 발견되면 F&Q 의 변환 안내를 가리킨다
-    const oldPpt = d.items.some(i => i.name.toLowerCase().endsWith(".ppt"));
-    box.innerHTML = (oldPpt ? `<div class="note">⚠ 구형 .ppt 파일이 있습니다 — ` +
-      `이 프로그램에서는 열 수 없습니다. 방법은 F&Q를 참고해주세요.</div>` : "") +
-      d.items.map(it =>
+    // 구형 .ppt 는 그 줄에만 표시한다 — 무엇을 해야 하는지는 위 안내가 말한다
+    box.innerHTML = d.items.map(it =>
       `<div class="frow" data-kind="${it.kind}">` +
         `<span class="ic">${it.kind === "ppt" ? "📄" : it.kind === "photo" ? "🖼" : "▫"}</span>` +
-        `<span class="fn">${esc(it.name)}</span>` +
-        `<span class="fv">${it.visit || ""}</span>` +
+        `<span class="fn">${esc(it.name)}${it.selected ?
+          ` <span class="sel">✓ 선택됨</span>` : ""}${
+          /\.ppt$/i.test(it.name) ? ` <span class="old">구형</span>` : ""}</span>` +
         `<span class="fs">${fmtSize(it.size)}</span>` +
       `</div>`).join("");
   }catch(e){
@@ -1075,8 +1179,11 @@ function bindDrop(){
 
 async function ensureSession(){
   if(SESSION && SESSION.folder === picked.folder) return SESSION;
+  const err = el("vc-err");
+  if(err && err.textContent) throw new Error(err.textContent);
   const r = await api("/api/session", {method:"POST",
-    headers:{"Content-Type":"application/json"}, body: JSON.stringify({folder: picked.folder})});
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({folder: picked.folder, ...visitOverride()})});
   startSession(r);
   return r;
 }
@@ -1128,33 +1235,25 @@ function drawStaged(){
 /* 새 환자 — 모달. 취소하면 보던 목록이 그대로 남는다. */
 const dlg = () => el("dlg-new");
 function openNewDialog(){
-  const needH = ((RULES && RULES.folder_pattern) || "").includes("{hospital_id}");
   el("new-rules").textContent =
-    `한글·영문 이름 · 병원 ${RULES.hospital_digits}자리` +
-    (needH ? "" : "(선택)") + ` · 교정과 ${RULES.ortho_digits}자리`;
-  el("f-hosp").maxLength  = RULES.hospital_digits + 1;   // 20000A 꼬리 글자 허용
-  el("f-ortho").maxLength = RULES.ortho_digits + 1;
-  el("f-hosp").placeholder  = `${RULES.hospital_digits}자리 숫자` +
-    (needH ? "" : " — 없으면 비워두세요");
+    `한글·영문 이름 · 교정과 ${RULES.ortho_digits}자리 — 병원번호는 받지 않습니다`;
+  el("f-ortho").maxLength = RULES.ortho_digits + 1;      // 20000A 꼬리 글자 허용
   el("f-ortho").placeholder = `${RULES.ortho_digits}자리 숫자`;
-  for(const id of ["f-name","f-hosp","f-ortho"]) el(id).value = "";
+  for(const id of ["f-name","f-ortho"]) el(id).value = "";
   el("new-err").textContent = "";
   syncPreview();
   dlg().showModal();
   el("f-name").focus();
 }
 const newIds = () => ({name: el("f-name").value.trim(),
-                       hospital_id: el("f-hosp").value.trim(),
                        ortho_id: el("f-ortho").value.trim()});
 function syncPreview(){
-  const needH = ((RULES && RULES.folder_pattern) || "").includes("{hospital_id}");
-  const v = newIds(), full = v.name && v.ortho_id && (v.hospital_id || !needH);
-  // 서버가 실제로 쓸 형식(★ 맨 위 등록 형식)으로 미리 보여준다 — 하드코딩하면
-  // 설정에서 형식을 바꿨을 때 미리보기와 실제 폴더 이름이 갈라진다.
-  const pat = (RULES && RULES.folder_pattern) || "{name}_{hospital_id}_{ortho_id}";
+  const v = newIds(), full = v.name && v.ortho_id;
+  // 서버가 실제로 쓸 생성형(★ 형식에서 순번·병원번호를 뺀 모습)으로 보여준다 —
+  // 하드코딩하면 설정에서 형식을 바꿨을 때 미리보기와 실제 폴더 이름이 갈라진다.
+  const pat = (RULES && RULES.folder_pattern) || "{name}_{ortho_id}";
   el("f-preview").innerHTML = "만들어질 폴더 <b>" +
     (full ? esc(pat.replace("{name}", v.name)
-                   .replace("{hospital_id}", v.hospital_id)
                    .replace("{ortho_id}", v.ortho_id)) : "—") + "</b>";
 }
 
@@ -1167,7 +1266,7 @@ async function openSession(body, errId){  // 새 환자 모달 전용
     startSession(r);
     picked = {folder: r.folder, name: r.ids.name, hospital_id: r.ids.hospital_id,
               ortho_id: r.ids.ortho_id, visits: r.prev_visits, next_visit: r.visit,
-              ppt: r.ppt_exists ? r.folder + ".pptx" : null, photos: 0, updated: "—"};
+              ppt: r.ppt_exists ? r.folder + ".pptx" : null, updated: "—"};
     await loadPatients();
     const hit = PATIENTS.find(x => x.folder === r.folder);
     if(hit) picked = hit;
@@ -1196,6 +1295,8 @@ function startSession(r){
       imgCache.delete(url);
   }
   SESSION = r;
+  // 세션이 만들어진 뒤에는 차수·위치를 못 바꾼다 — 세션이 이미 그 값으로 산다
+  for(const id of ["v-letter", "v-pos"]){ const n = el(id); if(n) n.disabled = true; }
   el("pchip").innerHTML =
     `<span class="nm">${esc(r.ids.name)}</span>` +
     `<span class="id">${[r.ids.hospital_id, r.ids.ortho_id].filter(Boolean).join(" · ")}</span>` +
@@ -1345,7 +1446,7 @@ function faceFit(cv, c, fallbackW){
 }
 
 function drawFaceComposite(ctx, W, H, img, st, k, border, flipV){
-  ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = LETTERBOX; ctx.fillRect(0, 0, W, H);
   if(img){
     // 6000x4000을 한 번에 줄여 그리므로 보간 품질을 명시한다(기본값은 브라우저마다 다르다)
     ctx.imageSmoothingEnabled = true;
@@ -2240,7 +2341,7 @@ el("btn-new-pt").onclick = openNewDialog;
 el("new-cancel").onclick = () => dlg().close();
 el("hist-close").onclick = () => el("dlg-hist").close();
 el("new-ok").onclick = () => openSession(newIds(), "new-err");
-for(const id of ["f-name","f-hosp","f-ortho"]){
+for(const id of ["f-name","f-ortho"]){
   el(id).oninput = syncPreview;
   el(id).onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); el("new-ok").click(); } };
 }
@@ -2251,23 +2352,43 @@ el("btn-fb").onclick = () =>
   window.open("https://forms.gle/k8MRUas5LwGAxFnB9", "_blank", "noopener");
 
 /* ── 폴더 이름 형식 — 블록 조립 ──────────────────────────────────────────────
-   [이름]·[병록번호]·[교정번호] 필드 블록과 구분자(-, _, .) 블록을 ‹ › 로 움직여
-   형식을 만든다. 아래에 실제 폴더들이 이 형식으로 읽히는지 실시간으로 보인다. */
+   [이름]·[병록번호]·[교정번호] 필드 블록과 구분자(-, _, .) 블록을 **끌어서**
+   원하는 자리에 놓아 형식을 만든다. 아래에 실제 폴더들이 이 형식으로 읽히는지
+   실시간으로 보인다. */
 const PAT = {toks: [], saved: [], timer: null, kind: "folder", def: ""};
-const patKey = () => PAT.kind === "ppt" ? "ppt_patterns"
-                   : PAT.kind === "label" ? "label_patterns" : "folder_patterns";
-const patNoun = () => PAT.kind === "ppt" ? "PPT"
-                    : PAT.kind === "label" ? "라벨" : "폴더";
+const patKey = () => PAT.kind === "ppt" ? "ppt_patterns" : "folder_patterns";
+const patNoun = () => PAT.kind === "ppt" ? "PPT" : "폴더";
 
-const patRecog = (pat) => /\{(any|all|[dc]\d+-\d+)\}/.test(pat);  // 인식 전용 형식인가
-const RECOG_LABEL = v => v === "any" ? "*아무거나"
+const patRecog = (pat) => /\{(seq|any|all|[dc]\d+-\d+)\}/.test(pat);  // 인식 전용 형식인가
+const RECOG_LABEL = v => v === "seq" ? "순번"
+  : v === "any" ? "*아무거나"
   : v === "all" ? "**전부(구분자 포함)"
   : (v[0] === "d" ? "숫자" : "문자") + v.slice(1).replace("-", "~");
+
+/* 생성 시 실제로 쓰일 모습 — 백엔드 strip_recognition 과 같은 규칙.
+   인식 전용 블록을 빼고, 빈 자리 양옆에 겹친 같은 구분자는 하나로 접는다. */
+function patStrip(pat){
+  const parts = pat.split(/(\{[^}]+\})/);
+  const out = [];
+  let dropped = false;
+  for(let part of parts){
+    if(!part) continue;
+    const m = part.match(/^\{([^}]+)\}$/);
+    if(m && /^(seq|any|all|[dc]\d+-\d+)$/.test(m[1])){ dropped = true; continue; }
+    if(dropped && !m && out.length){
+      const prev = out[out.length - 1];
+      while(part && "-_. ".includes(part[0]) && prev.endsWith(part[0]))
+        part = part.slice(1);
+    }
+    dropped = false;
+    if(part) out.push(part);
+  }
+  return out.join("").replace(/^[-_. ]+|[-_. ]+$/g, "");
+}
 const patExample = (pat) => pat
+  .replace(/\{seq\}/g, "3")
   .replace(/\{any\}/g, "…").replace(/\{all\}/g, "…").replace(/\{d\d+-\d+\}/g, "12")
   .replace(/\{c\d+-\d+\}/g, "ab")
-  .replace("{date}", "26.08.12").replace("{vkind}", "초진")
-  .replace("{visit}", "A")
   .replace("{name}", "홍길동")
   .replace("{hospital_id}", "1".repeat(RULES.hospital_digits || 9))
   .replace("{ortho_id}", "2".repeat(RULES.ortho_digits || 5));
@@ -2299,17 +2420,17 @@ function patRenderSaved(){
     star.textContent = i === 0 ? "★" : "";
     const ex = document.createElement("span");
     ex.className = "ex";
-    ex.textContent = patExample(pat) + (implicit ? " — 기본" : "");
+    // 인식 전용 블록(순번 등)은 생성 때 없는 셈 친다 — ★ 형식이면 실제로
+    // 만들어질 모습을 함께 보여준다.
+    ex.textContent = patExample(pat)
+      + (i === 0 && patRecog(pat) ? ` → 생성 시 ${patExample(patStrip(pat))}` : "")
+      + (implicit ? " — 기본" : "");
     ex.title = pat;
     const up = document.createElement("button");
     up.textContent = "▲";
-    if(patRecog(pat)){
-      up.disabled = true;
-      up.title = `인식 전용 형식 — 새 ${patNoun()} 생성에는 못 씁니다`;
-    }else{
-      up.title = `이 형식으로 새 ${patNoun()} 생성`;
-      up.onclick = () => patPost([pat, ...PAT.saved.filter(p => p !== pat)]);
-    }
+    up.title = `이 형식으로 새 ${patNoun()} 생성` +
+      (patRecog(pat) ? " (인식 전용 블록은 빼고 만듭니다)" : "");
+    up.onclick = () => patPost([pat, ...PAT.saved.filter(p => p !== pat)]);
     const bx = document.createElement("button");
     bx.textContent = "×";
     bx.onclick = () => patPost(PAT.saved.filter(p => p !== pat));
@@ -2318,12 +2439,11 @@ function patRenderSaved(){
   });
 }
 const PAT_FIELDS = {name: "이름", hospital_id: "병원번호", ortho_id: "교정번호"};
-const LABEL_FIELDS = {date: "날짜", vkind: "초진/재진", visit: "차수글자"};
-const patFields = () => PAT.kind === "label" ? LABEL_FIELDS : PAT_FIELDS;
+const patFields = () => PAT_FIELDS;
 
 function patTokens(pattern){
   const out = [];
-  const re = /\{(name|hospital_id|ortho_id|date|vkind|visit)\}|\{(any|all|[dc]\d+-\d+)\}|([^{]+)/g;
+  const re = /\{(name|hospital_id|ortho_id)\}|\{(seq|any|all|[dc]\d+-\d+)\}|([^{]+)/g;
   let m;
   while((m = re.exec(pattern))){
     if(m[1]) out.push({t: "f", k: m[1]});
@@ -2335,6 +2455,16 @@ function patTokens(pattern){
 const patString = () =>
   PAT.toks.map(t => t.t === "f" || t.t === "r" ? `{${t.k || t.v}}` : t.v).join("");
 
+/* from 번째 블록을 빼서 to 자리(빼기 전 인덱스 기준)에 끼워 넣는다 */
+function patMove(from, to){
+  if(from == null || from === to) return;
+  if(from < to) to--;                    // 빼낸 만큼 뒤쪽 자리가 당겨진다
+  const [tok] = PAT.toks.splice(from, 1);
+  PAT.toks.splice(to, 0, tok);
+  PAT.drag = null;
+  patRender();
+}
+
 function patRender(){
   const row = el("pat-row"); if(!row) return;
   row.innerHTML = "";
@@ -2342,38 +2472,64 @@ function patRender(){
     const c = document.createElement("span");
     c.className = "patchip" + (t.t === "s" ? " sep" : "");
     const label = t.t === "f"
-      ? (patFields()[t.k] || LABEL_FIELDS[t.k] || PAT_FIELDS[t.k])
+      ? (PAT_FIELDS[t.k] || t.k)
         + (t.k === "hospital_id" ? `(${RULES.hospital_digits||9})`
            : t.k === "ortho_id" ? `(${RULES.ortho_digits||5})` : "")
       : t.t === "r" ? RECOG_LABEL(t.v)
       : t.v === " " ? "␣" : t.v;
-    const mv = (d) => { const j = i + d;
-      if(j < 0 || j >= PAT.toks.length) return;
-      [PAT.toks[i], PAT.toks[j]] = [PAT.toks[j], PAT.toks[i]];
-      patRender(); };
-    const bl = document.createElement("button"); bl.textContent = "‹";
-    bl.onclick = () => mv(-1);
-    const br = document.createElement("button"); br.textContent = "›";
-    br.onclick = () => mv(1);
+    // 잡아서 원하는 자리에 놓는다 — 마우스 위치가 칩의 왼/오른쪽 절반이냐로
+    // 앞에 끼울지 뒤에 끼울지 정한다.
+    c.draggable = true;
+    c.title = "끌어서 자리를 옮깁니다";
+    c.addEventListener("dragstart", e => {
+      PAT.drag = i;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(i));  // Firefox 요구사항
+      requestAnimationFrame(() => c.classList.add("drag"));
+    });
+    c.addEventListener("dragend", () => {
+      PAT.drag = null;
+      row.querySelectorAll(".patchip").forEach(x =>
+        x.classList.remove("drag", "ins-l", "ins-r"));
+    });
+    c.addEventListener("dragover", e => {
+      if(PAT.drag == null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const before = e.offsetX < c.offsetWidth / 2;
+      c.classList.toggle("ins-l", before);
+      c.classList.toggle("ins-r", !before);
+    });
+    c.addEventListener("dragleave", () => c.classList.remove("ins-l", "ins-r"));
+    c.addEventListener("drop", e => {
+      e.preventDefault();
+      e.stopPropagation();                // row 의 "맨 뒤로" 처리와 겹치지 않게
+      const before = e.offsetX < c.offsetWidth / 2;
+      patMove(PAT.drag, i + (before ? 0 : 1));
+    });
     const bx = document.createElement("button"); bx.textContent = "×";
     bx.onclick = () => { PAT.toks.splice(i, 1); patRender(); };
-    c.append(bl, document.createTextNode(label), br, bx);
+    c.append(document.createTextNode(label), bx);
     row.appendChild(c);
   });
+  // 칩 밖(줄의 빈 자리)에 놓으면 맨 뒤로 간다
+  row.ondragover = e => { if(PAT.drag != null) e.preventDefault(); };
+  row.ondrop = e => { e.preventDefault(); patMove(PAT.drag, PAT.toks.length); };
   const ex = el("pat-ex");
   const tail = PAT.kind === "ppt" ? ".pptx" : "";   // 확장자는 저장할 때 붙는다
-  ex.textContent = (patString() ? patExample(patString()) + tail : "—");
+  const ps = patString();
+  ex.textContent = !ps ? "—"
+    : patExample(ps) + tail + (patRecog(ps)
+        ? `  →  생성 시 ${patExample(patStrip(ps))}${tail}` : "");
   clearTimeout(PAT.timer);
   PAT.timer = setTimeout(patCheck, 300);
 }
 
 async function patCheck(){
   const box = el("pat-list"); if(!box) return;
-  // 폴더 인식 미리보기는 폴더 형식에서만 의미가 있다
-  if(PAT.kind !== "folder"){ box.hidden = true; return; }
   box.hidden = false;
   try{
-    const d = await api("/api/pattern_check?pattern=" +
+    const d = await api("/api/pattern_check?kind=" + PAT.kind + "&pattern=" +
                         encodeURIComponent(patString()));
     box.innerHTML = "";
     for(const it of d.items){
@@ -2383,7 +2539,9 @@ async function patCheck(){
       r.appendChild(document.createTextNode(it.name));
       box.appendChild(r);
     }
-    if(!d.items.length) box.textContent = "폴더가 아직 없습니다";
+    if(!d.items.length)
+      box.textContent = PAT.kind === "ppt" ? "PPT 파일이 아직 없습니다"
+                                           : "폴더가 아직 없습니다";
   }catch(e){ box.textContent = "목록을 읽지 못했습니다"; }
 }
 
@@ -2392,7 +2550,6 @@ async function patLoad(){
     const p = await api("/api/prefs");
     PAT.saved = p[patKey()] || [];
     PAT.def = (PAT.kind === "ppt" ? p.ppt_pattern_default
-               : PAT.kind === "label" ? p.label_pattern_default
                : p.folder_pattern_default)
               || "{name}_{hospital_id}_{ortho_id}";
     PAT.toks = patTokens((PAT.saved[0] || PAT.def).replace(/\.pptx$/i, ""));
@@ -2405,13 +2562,11 @@ async function patLoad(){
   const desc = el("pat-desc");
   if(desc) desc.textContent = PAT.kind === "ppt"
     ? "등록된 형식 — 전부 인식에 쓰이고, ★ 첫 번째로 새 PPT를 만듭니다"
-    : PAT.kind === "label"
-    ? "등록된 형식 — 전부 인식에 쓰이고, ★ 첫 번째 형식으로 라벨을 씁니다"
     : "등록된 형식 — 전부 인식에 쓰이고, ★ 첫 번째로 새 폴더를 만듭니다";
   patRenderSaved();
   const pal = el("pat-pal");
   if(pal){
-    pal.innerHTML = "";   // 탭(폴더/PPT/날짜차수)마다 블록 구성이 다르다
+    pal.innerHTML = "";   // 탭(폴더/PPT)마다 블록 구성이 다르다
     for(const [k, nm] of Object.entries(patFields())){
       const b = document.createElement("button");
       b.textContent = "+ " + nm;
@@ -2419,9 +2574,7 @@ async function patLoad(){
         PAT.toks.push({t: "f", k}); patRender(); };
       pal.appendChild(b);
     }
-    // 날짜/차수 라벨은 "YY.MM.DD (초진 A)" 꼴만 조립하면 된다 — 블록을 최소로.
-    const seps = PAT.kind === "label" ? [" ", "(", ")"]
-                                      : ["-", "_", ".", " ", "(", ")"];
+    const seps = ["-", "_", ".", " ", "(", ")"];
     for(const v of seps){
       const b = document.createElement("button");
       b.textContent = v === " " ? "␣ 공백" : v;
@@ -2441,10 +2594,13 @@ async function patLoad(){
       PAT.toks.push({t: "s", v}); patRender();
     };
     pal.appendChild(bt);
-    // 인식 전용 블록 — 손으로 만든 옛 폴더를 읽을 때만 쓰인다 (생성용 불가).
-    // 날짜/차수 탭에는 안 낸다 — 라벨 양식은 세 블록 + 공백·괄호면 충분하다.
+    // 인식 전용 블록 — 손으로 만든 옛 폴더를 읽을 때만 쓰인다.
     const addR = (v) => { PAT.toks.push({t: "r", v}); patRender(); };
-    if(PAT.kind !== "label"){
+    const bs = document.createElement("button");
+    bs.textContent = "+ 순번";
+    bs.title = "숫자 1~3자리 — 새 이름을 만들 때는 없는 셈 칩니다";
+    bs.onclick = () => addR("seq");
+    pal.appendChild(bs);
     const br1 = document.createElement("button");
     br1.textContent = "* 이후 아무거나"; br1.onclick = () => addR("any");
     pal.appendChild(br1);
@@ -2460,11 +2616,12 @@ async function patLoad(){
       };
       pal.appendChild(b);
     }
-    }
     // 조립한 형식을 목록 맨 앞에 추가 — 곧바로 새 폴더 생성용(★)이 된다
     el("pat-save").onclick = () => {
+      // 인식 전용 블록이 있어도 맨 위(생성용)로 간다 — 생성 때는 그 블록을
+      // 없는 셈 치고 만들기 때문이다.
       const pat = patString(), rest = PAT.saved.filter(p => p !== pat);
-      patPost(patRecog(pat) ? [...rest, pat] : [pat, ...rest]);
+      patPost([pat, ...rest]);
     };
     el("pat-reset").onclick = () => patPost([]);
   }
@@ -2504,7 +2661,20 @@ async function openDoc(kind){
       sm.appendChild(w);
     }
     const bd = document.createElement("div");
-    bd.className = "body"; bd.textContent = it.body || "";
+    bd.className = "body";
+    // ``` 로 감싼 구간만 고정폭으로 그린다 — 표는 열이 맞아야 읽히는데 본문
+    // 글꼴은 가변폭이라 공백으로 맞춘 칸이 어긋난다. 넓으면 그 블록만 가로로
+    // 스크롤되고 창은 안 넓어진다.
+    (it.body || "").split("```").forEach((seg, i) => {
+      if(i % 2){
+        const pre = document.createElement("pre");
+        pre.className = "mono";
+        pre.textContent = seg.replace(/^\n|\n$/g, "");
+        bd.appendChild(pre);
+      }else if(seg){
+        bd.appendChild(document.createTextNode(seg));
+      }
+    });
     dt.append(sm, bd);
     box.appendChild(dt);
   }
@@ -2608,6 +2778,42 @@ function firstRun(h){
   el("first-path").value = h.root || "";
   el("dlg-first").showModal();
 }
+
+/* 골라 둔 저장 위치가 지금 닿지 않는다 — 외장 드라이브를 뺐거나 드라이브
+   문자가 바뀐 경우다. **첫 실행처럼 묻지 않는다**: 여기서 임시 위치를 확정하면
+   설정에 남아 있던 그 경로가 덮여 사라지고, 환자 자료를 어디에 뒀는지 앱이
+   잊는다. 꽂고 [다시 확인] 이 정상 경로다. */
+function rootMissing(h){
+  el("first-title").textContent = "저장 위치를 찾을 수 없습니다";
+  el("first-sub").innerHTML =
+    `설정에 적힌 위치에 닿지 못했습니다 — <span class="ident">${esc(h.root_missing)}</span>`;
+  el("first-path").value = h.root_missing;
+  el("first-tips").innerHTML =
+    `<li>외장 드라이브라면 <b>연결한 뒤 [다시 확인]</b> 을 눌러 주세요</li>` +
+    `<li>드라이브 문자가 바뀌었으면 <b>변경</b> 으로 새 경로를 고르세요</li>` +
+    `<li>지금은 임시로 <span class="ident">${esc(h.root)}</span> 를 보고 있습니다 — ` +
+    `여기서 확정하지 않으면 원래 위치는 그대로 남습니다</li>`;
+  el("first-recheck").hidden = false;
+  el("first-ok").textContent = "이 위치로 바꾸기";
+  el("dlg-first").showModal();
+}
+
+el("first-recheck").onclick = async () => {
+  const b = el("first-recheck");
+  b.disabled = true; b.textContent = "확인 중…";
+  const r = await api("/api/root/recheck", {method: "POST"}).catch(() => null);
+  b.disabled = false; b.textContent = "다시 확인";
+  if(r && r.ok){
+    if(HEALTH) { HEALTH.root = r.root; HEALTH.root_missing = ""; }
+    el("dlg-first").close();
+    setRootLabel(r.root);
+    loadPatients();
+    return;
+  }
+  el("first-sub").innerHTML =
+    `아직 닿지 못했습니다 — <span class="ident">${esc((r && r.path) || "")}</span><br>` +
+    `연결을 확인한 뒤 다시 눌러 주세요.`;
+};
 
 /* 운영체제 폴더 창을 먼저 쓴다 — 사용자가 아는 그 창이다. 못 띄우는 환경
    (WSL 처럼 창이 다른 쪽에 뜨는 경우)에서는 서버가 즉시 실패를 돌려주고,
@@ -2767,9 +2973,15 @@ el("btn-commit").onclick = async () => {
     el("fin-visit").textContent = `차수 ${r.visit} 저장됨`;
     setStep("fin", "done", "완료");
     // 서버가 세션을 정리했다. 화면도 같이 비워야 유령 상태가 남지 않는다.
+    const saved = picked && picked.folder;
     resetSession();
     btn.textContent = "확정 저장";
-    loadPatients();
+    // 방금 저장한 환자를 **다시 그린다.** 목록만 새로 받으면 오른쪽 상세는 확정
+    // 전 화면(옛 차수 이력·옛 폴더 내용)이 그대로 남아, 사람이 새로고침해야
+    // 방금 만든 파일이 보였다.
+    await loadPatients();
+    const hit = saved && PATIENTS.find(x => x.folder === saved);
+    if(hit){ picked = hit; drawList(); drawDetail(); }
   }catch(e){
     err.textContent = e.message || "저장 실패";
     btn.textContent = "확정 저장"; btn.disabled = false;
@@ -2781,6 +2993,8 @@ addEventListener("paste", e => {
   if(files.length){ e.preventDefault(); addFiles(files); }
 });
 el("find").oninput = drawList;
+el("sort").value = localStorage.getItem("plist_sort") || "new";
+el("sort").onchange = () => { localStorage.setItem("plist_sort", el("sort").value); drawList(); };
 
 syncThemeSeg();
 bindEditor();
@@ -2788,7 +3002,14 @@ bindFaceEditor();
 drawDetail();
 loadPatients();
 showView("setup");
-api("/api/health").then(h => { HEALTH = h; if(h.needs_setup) firstRun(h); }).catch(() => {});
+api("/api/health").then(h => {
+  HEALTH = h;
+  if(h.needs_setup) firstRun(h);
+  else if(h.root_missing) rootMissing(h);
+}).catch(() => {});
+api("/api/prefs").then(p => {
+  if(p && p.letterbox_color){ LETTERBOX = "#" + p.letterbox_color; redrawBoardSlots(); }
+}).catch(() => {});
 checkWeights();
 setTimeout(checkUpdate, 3000);   // 네트워크를 쓰므로 첫 화면을 막지 않는다
 api("/api/case/layout").then(l => { CASE = l; syncTabs(); }).catch(() => {});

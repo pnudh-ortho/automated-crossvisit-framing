@@ -209,8 +209,8 @@ notes:
     # 차수 날짜가 괄호에 박히고, 이후 차수는 거기서부터 센다. 체크 전에는 0 month.
     - {key: tx_period,  label: "Tx. Period",  hint: "0 month",
        default: "{months_tx} month{tx_paren}"}
-    - {key: rx_period,  label: "Rx. Period",  hint: "0 month (24.08.12)",
-       default: "{months} month ({first_date})"}
+    - {key: rx_period,  label: "Rx. Period",  hint: "0 month",
+       default: "{months_rx} month{rx_paren}"}
     - {key: app_period, label: "App. Period", hint: "0 month",
        default: "{months_app} month{app_paren}"}
     - {key: subj,       label: "s) 주관적",   hint: "n/s",            lines: 3}

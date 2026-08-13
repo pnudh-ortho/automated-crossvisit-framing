@@ -234,3 +234,77 @@ def test_paren_only_line_is_not_split():
     assert [r.text for r in runs] == ["(메모만 있는 줄)"], [r.text for r in runs]
     assert runs[0].font.size.pt == 12
     print("PASS 괄호만 있는 줄은 안 쪼갠다")
+
+
+def test_Rx는_초진일을_자동으로_넣지_않는다():
+    """Rx 기준일도 Tx·App 과 같은 규칙 — 고르기 전에는 괄호가 없다.
+
+    예전에는 Rx 만 초진일을 기본 기준일로 박아 넣어서, 기준일 체크를 풀어도
+    날짜가 남았다 (2026-08-14 결정으로 없앰).
+    """
+    import main as _M
+    import naming as _N
+    ids = _N.Identifiers("홍길동", "", "12345")
+    s = _M.Session("first", ids, "A")
+    s.first_date = "26.08.14"
+    status = _M._note_text(s)["NOTE_STATUS"]
+    assert "Rx. Period: 0 month\n" in status + "\n", status
+    assert "(26.08.14)" not in status, status
+    # 기준일을 고르면 그때 괄호가 붙는다 — Tx·App 과 같은 동작
+    s.period_start["rx"] = "26.08.14"
+    assert "Rx. Period: 0 month (26.08.14)" in _M._note_text(s)["NOTE_STATUS"]
+
+
+def test_TxRxApp_상자는_줄_앞_간격을_갖고_태어난다():
+    """초진 덱은 물려받을 원본이 없다 — 세 줄이 붙어 나오지 않게 기본값을 새긴다.
+
+    간격은 문단이 아니라 상자의 목록서식(lstStyle)에 둔다. 글을 갈아끼워도(문단을
+    새로 만들어도) 남고, 글자 크기를 바꿔도 비율이 유지된다.
+    """
+    import re
+    from pptx import Presentation
+    from pptx.oxml.ns import qn
+    from lxml import etree
+
+    prs = Presentation()
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    CD.add_note_box(sl, CD.NOTE_STATUS, {"x": 1, "y": 1, "w": 8, "h": 5})
+    CD.add_note_box(sl, CD.NOTE_SOAP, {"x": 1, "y": 7, "w": 8, "h": 3})
+    CD.set_note_text(sl, CD.NOTE_STATUS, "Tx. Period: 0 month\nRx. Period: 3 month")
+
+    def spc(name):
+        sh = next(x for x in sl.shapes if x.name == name)
+        lst = sh.text_frame._txBody.find(qn("a:lstStyle"))
+        if lst is None:
+            return None
+        m = re.search(r'<a:spcBef>\s*<a:spcPct val="(\d+)"',
+                      etree.tostring(lst, encoding="unicode"))
+        return m.group(1) if m else None
+
+    assert spc(CD.NOTE_STATUS) == CD.STATUS_SPACE_PCT   # 글을 쓴 뒤에도 남는다
+    assert spc(CD.NOTE_SOAP) is None                    # 다른 칸은 종전 그대로
+
+
+def test_수제_덱의_기간_상자도_읽는다():
+    """이름 규약이 없는 상자를 **글 내용**으로 찾는다 — 라벨과 같은 방식.
+
+    이 폴백이 없으면 수제 PPT 에서 기준일 이력이 통째로 비어, Tx/Rx/App 이 차수마다
+    0 month 로 다시 시작한다(이어붙인 슬라이드에서 기간이 어긋난 원인).
+    """
+    from pptx import Presentation
+    from pptx.util import Emu
+    import ppt_reader as _Rd
+
+    prs = Presentation()
+    sl = prs.slides.add_slide(prs.slide_layouts[6])
+    box = sl.shapes.add_textbox(Emu(0), Emu(0), Emu(3000000), Emu(2000000))
+    box.name = "TextBox 7"                       # 수제 — 규약명이 아니다
+    box.text_frame.text = ("Tx. Period: 3 month (24.06.05)\n"
+                           "Rx. Period: 3 month (24.05.01)")
+    assert "Rx. Period" in _Rd._status_text(sl)
+
+    vs = _Rd.VisitSlide(slide_index=0, visit="B", date="24.09.04", kind="revisit",
+                        status_text=_Rd._status_text(sl))
+    hist = M._period_history([vs], "Rx. Period")
+    assert hist["dates"] == ["24.05.01"], hist
+    assert hist["last"] == "Rx. Period: 3 month (24.05.01)"

@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -218,5 +219,12 @@ def rollback() -> dict:
 
 
 def restart_now() -> None:
-    """재시작 종료코드로 죽는다. 실행 스크립트의 루프가 다시 띄운다."""
-    sys.exit(RESTART_CODE)
+    """재시작 종료코드로 죽는다. 실행 스크립트의 루프가 다시 띄운다.
+
+    `os._exit` 여야 한다. 이 함수는 응답을 먼저 보내려고 **타이머 스레드**에서
+    불리는데, 거기서 `sys.exit()` 은 그 스레드만 끝내고 프로세스는 멀쩡히 산다 —
+    종료코드가 나가지 않으니 실행 스크립트의 루프도 돌지 않는다. 그러면 `git pull`
+    은 됐는데 **옛 코드가 계속 도는** 상태가 되고, 사용자는 업데이트가 된 줄 안다.
+    정리할 것은 없다: 감사 로그는 매번 닫고, 임시 업로드는 기한으로 청소된다.
+    """
+    os._exit(RESTART_CODE)

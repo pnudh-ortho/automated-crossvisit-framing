@@ -75,12 +75,43 @@ def validate_identifiers(
 
 
 # ── 템플릿 포맷/파싱 ──────────────────────────────────────────────────────────
-RECOG_ONLY = re.compile(r"\{(any|all|[dc]\d+-\d+)\}")
+RECOG_ONLY = re.compile(r"\{(seq|any|all|[dc]\d+-\d+)\}")
+
+# 토큰을 뺀 자리의 구분자 정리에 쓰는 문자들 — 팔레트의 구분자 블록과 같다.
+_SEP_CHARS = "-_. "
 
 
 def is_recognition_only(pattern: str) -> bool:
-    """인식 전용 토큰이 든 형식인가 — 이걸로는 폴더 이름을 만들 수 없다."""
+    """인식 전용 토큰이 든 형식인가 — 이 토큰들로는 글자를 만들어낼 수 없다."""
     return bool(RECOG_ONLY.search(pattern))
+
+
+def strip_recognition(pattern: str, extra: frozenset[str] | set[str] = frozenset()) -> str:
+    """인식 전용 토큰(+ extra 필드)을 뺀 **생성용** 형식.
+
+    미리 확정할 수 없는 요소(순번·*·자릿수 범위)는 폴더를 만들 때 없는 셈 친다.
+    빠진 자리 양옆에 같은 구분자가 겹치면 하나로 접고, 맨 앞/뒤에 남은 구분자는
+    잘라낸다:  '{seq}_{name}_{ortho_id}' → '{name}_{ortho_id}'.
+    """
+    parts = re.split(r"(\{[^}]+\})", pattern)
+    out: list[str] = []
+    dropped = False
+    for part in parts:
+        if not part:
+            continue
+        m = re.fullmatch(r"\{([^}]+)\}", part)
+        field = m.group(1) if m else None
+        if field is not None and (RECOG_ONLY.fullmatch(part) or field in extra):
+            dropped = True
+            continue
+        if dropped and field is None and out:
+            prev = out[-1]
+            while part and part[0] in _SEP_CHARS and prev.endswith(part[0]):
+                part = part[1:]
+        dropped = False
+        if part:
+            out.append(part)
+    return "".join(out).strip(_SEP_CHARS)
 
 
 def format_pattern(pattern: str, **fields) -> str:
@@ -115,11 +146,13 @@ def compile_pattern(pattern: str, field_regex: dict[str, str]) -> re.Pattern:
             field = pattern[i + 1 : j]
             if field not in field_regex:
                 # 인식 전용 토큰 — 폴더를 '읽을' 때만 쓴다 (이름 생성엔 못 쓴다).
-                #   {any}    이후 아무거나        {d1-3}  숫자 1~3자리
-                #   {c2-5}   아무 글자 2~5자리
-                mr = re.fullmatch(r"any|all|([dc])(\d+)-(\d+)", field)
+                #   {seq}    순번(숫자 1~3자리)   {any}   이후 아무거나
+                #   {d1-3}   숫자 1~3자리         {c2-5}  아무 글자 2~5자리
+                mr = re.fullmatch(r"seq|any|all|([dc])(\d+)-(\d+)", field)
                 if mr:
-                    if field == "any":
+                    if field == "seq":
+                        out.append(r"\d{1,3}")
+                    elif field == "any":
                         # 중간의 *는 구분자(- _ . 공백 괄호)를 먹지 않는다 — 먹으면
                         # 구분이 무의미해진다. 맨 끝의 *만 "이후 전부 무시"다.
                         out.append(r".*" if j == len(pattern) - 1
@@ -214,20 +247,6 @@ def next_visit_letter(existing: list[str] | None) -> str:
     return num_to_letter(mx + 1)
 
 
-def scan_visit_letters(filenames: list[str], ortho_id: str, visit_regex_tpl: str) -> list[str]:
-    """
-    폴더 파일명 목록에서 이 환자의 차수 알파벳들을 추출.
-    visit_regex_tpl 예: '{ortho_id}_([A-Z]+)'  → ortho_id 대입 후 매칭.
-    """
-    rx = re.compile(visit_regex_tpl.format(ortho_id=re.escape(ortho_id)))
-    found = set()
-    for fn in filenames:
-        m = rx.search(fn)
-        if m:
-            found.add(m.group(1))
-    return sorted(found, key=letter_to_num)
-
-
 # ── 최종 이름 생성 ────────────────────────────────────────────────────────────
 def folder_name(ids: Identifiers, pattern: str) -> str:
     return format_pattern(pattern, name=ids.name, hospital_id=ids.hospital_id, ortho_id=ids.ortho_id)
@@ -246,29 +265,38 @@ def photo_extra_filename(ortho_id: str, visit: str, index: int, n: int, pattern:
     return format_pattern(pattern, ortho_id=ortho_id, visit=visit, index=index, n=n)
 
 
-# ── 원본 사본 (_raw) ──────────────────────────────────────────────────────────
-# 환자 폴더에는 **슬라이드에 실린 그대로**(잘린 사진)가 간다. 폴더와 PPT 가 다른
-# 그림이면 나중에 어느 쪽이 진짜인지 다투게 된다.
+# ── 차수별 저장 폴더 · 원본 사본 (_raw) ───────────────────────────────────────
+# 환자 폴더에는 차수마다 제 폴더가 생긴다: 잘린 완성본(슬라이드에 실린 그대로)은
+# `교정번호_차수/`, 원본 사본은 `교정번호_차수_raw/`. 폴더와 PPT 가 다른 그림이면
+# 나중에 어느 쪽이 진짜인지 다투게 된다 — 그래서 완성본이 기본이다.
 #
 # 원본을 함께 남기고 싶으면 설정에서 켠다. 그때 원본은 같은 이름에 `_raw` 를 붙여
 # **원본 확장자 그대로** 저장한다 — 잘린 쪽은 항상 .jpg 지만 원본은 .png·.heic 일
 # 수 있고, 확장자가 내용과 다르면 나중에 못 여는 파일이 된다.
 RAW_SUFFIX = "_raw"
-RAW_DIR = "raw"     # 원본 사본이 모이는 하위 폴더 — 환자 폴더가 두 배로 안 붐빈다
-PROCESSED_DIR = "processed"   # 잘린 완성본이 모이는 하위 폴더 (raw 와 대칭)
+
+
+def visit_dir(ortho_id: str, visit: str) -> str:
+    """한 차수의 잘린 완성본이 모이는 폴더 이름 — '교정번호_차수'."""
+    return f"{ortho_id}_{visit}"
+
+
+def visit_raw_dir(ortho_id: str, visit: str) -> str:
+    """한 차수의 원본 사본 폴더 이름 — '교정번호_차수_raw'."""
+    return f"{ortho_id}_{visit}{RAW_SUFFIX}"
 
 
 def raw_filename(final_name: str, src_name: str) -> str:
-    """잘린 사진 이름 → 짝이 되는 원본의 상대 경로 (`raw/` 하위).
+    """잘린 사진 이름 → 짝이 되는 원본 사본의 파일 이름.
 
-        raw_filename("12345_A (1).jpg", "IMG_0042.PNG")  →  "raw/12345_A (1)_raw.png"
+        raw_filename("12345_A (1).jpg", "IMG_0042.PNG")  →  "12345_A (1)_raw.png"
 
-    `_raw` 접미는 하위 폴더가 생긴 뒤에도 남긴다 — 폴더 밖으로 복사돼 나가도
-    완성본과 안 헷갈리고, 옛 버전이 루트에 저장한 `_raw` 파일과 규칙이 같다.
+    `_raw` 접미는 폴더 이름에도 있지만 파일에도 남긴다 — 폴더 밖으로 복사돼
+    나가도 완성본과 안 헷갈리고, 옛 버전이 저장한 `_raw` 파일과 규칙이 같다.
     """
     stem = final_name.rsplit(".", 1)[0]
     ext = ("." + src_name.rsplit(".", 1)[1].lower()) if "." in src_name else ".jpg"
-    return f"{RAW_DIR}/{stem}{RAW_SUFFIX}{ext}"
+    return f"{stem}{RAW_SUFFIX}{ext}"
 
 
 def is_raw(name: str) -> bool:

@@ -56,8 +56,48 @@ if /i "%D2%"=="y" (
   )
 )
 
+REM -- Git / Python.  These are system tools: ask one at a time.
+REM    ".installed_tools" lists what OUR installer added; when it exists we
+REM    say so, but we ask either way -- installs made before that file
+REM    existed would otherwise have no way to remove them.
+set "TOOLS="
+set "MINE="
+if exist ".installed_tools" set /p MINE=<.installed_tools
+
+git --version >nul 2>&1
+if not errorlevel 1 (
+  echo.
+  findstr /c:"Git.Git" ".installed_tools" >nul 2>&1
+  if not errorlevel 1 (
+    echo   Git was installed by this program.
+  ) else (
+    echo   Git may have been on this PC already.
+  )
+  set /p G1="  Remove Git? (y/N): "
+  if /i "!G1!"=="y" set "TOOLS=!TOOLS! Git.Git"
+)
+
+set "PYFOUND="
+py -3 --version >nul 2>&1
+if not errorlevel 1 set "PYFOUND=1"
+if not defined PYFOUND (
+  python --version >nul 2>&1
+  if not errorlevel 1 set "PYFOUND=1"
+)
+if defined PYFOUND (
+  echo.
+  findstr /c:"Python.Python" ".installed_tools" >nul 2>&1
+  if not errorlevel 1 (
+    echo   Python was installed by this program.
+  ) else (
+    echo   Python may have been on this PC already.
+  )
+  set /p P1="  Remove Python 3.12? (y/N): "
+  if /i "!P1!"=="y" set "TOOLS=!TOOLS! Python.Python.3.12"
+)
+
 copy /y "%~f0" "%TEMP%\acf_uninstall.bat" >nul
-start "" cmd /c ""%TEMP%\acf_uninstall.bat" --stage2 "%PROG%" "!DROP!""
+start "" cmd /c ""%TEMP%\acf_uninstall.bat" --stage2 "%PROG%" "!DROP!" "!TOOLS!""
 exit /b
 
 :stage2
@@ -65,6 +105,17 @@ REM -- running from %TEMP% now; the program folder is free to delete
 timeout /t 2 /nobreak >nul
 set "PROG=%~2"
 set "DROP=%~3"
+set "TOOLS=%~4"
+
+REM -- desktop shortcut (both the plain and the OneDrive desktop)
+del /f /q "%USERPROFILE%\Desktop\CRoCs.lnk" 2>nul
+del /f /q "%USERPROFILE%\OneDrive\Desktop\CRoCs.lnk" 2>nul
+
+for %%T in (%TOOLS%) do (
+  echo Removing %%T ...
+  winget uninstall -e --id %%T --silent --accept-source-agreements
+)
+
 echo Removing %PROG% ...
 rmdir /s /q "%PROG%" 2>nul
 if exist "%PROG%" (

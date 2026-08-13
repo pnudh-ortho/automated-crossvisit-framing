@@ -24,18 +24,19 @@
 
 <!-- ══ 첫 실행 — 저장 위치 확인 ══ -->
 <dialog class="modal" id="dlg-first">
-  <h3>환자 자료를 저장할 위치</h3>
-  <p class="hint" style="margin:10px 0 4px">여기에 환자 폴더와 이력 로그가 쌓입니다.</p>
+  <h3 id="first-title">환자 자료를 저장할 위치</h3>
+  <p class="hint" id="first-sub" style="margin:10px 0 4px">여기에 환자 폴더와 이력 로그가 쌓입니다.</p>
   <div class="row" style="gap:8px">
     <input id="first-path" class="grow" readonly>
     <button class="btn" id="first-change">변경</button>
   </div>
-  <ul class="hint" style="margin:10px 0 0;padding-left:16px">
+  <ul class="hint" id="first-tips" style="margin:10px 0 0;padding-left:16px">
     <li>프로그램 폴더 <b>밖</b>입니다 — 업데이트가 건드리지 않습니다</li>
     <li>나중에 <b>설정</b>에서 바꿀 수 있습니다</li>
   </ul>
-  <div class="row" style="justify-content:flex-end;margin-top:14px">
-    <button class="btn primary" id="first-ok">이 위치로 시작</button>
+  <div class="row" style="justify-content:flex-end;margin-top:14px;gap:8px">
+    <button class="btn primary" id="first-recheck" hidden>다시 확인</button>
+    <button class="btn" id="first-ok">이 위치로 시작</button>
   </div>
 </dialog>
 
@@ -61,7 +62,13 @@
           <button class="btn" id="btn-root">폴더 변경</button>
         </div>
         <input class="find" id="find" autocomplete="off"
-               placeholder="이름 · 병원 환자번호 · 교정과 환자번호 검색">
+               placeholder="폴더 이름 검색">
+        <select class="sort" id="sort" title="정렬">
+          <option value="new">최신순</option>
+          <option value="old">오래된순</option>
+          <option value="az">이름 오름차순</option>
+          <option value="za">이름 내림차순</option>
+        </select>
         <button class="btn" id="btn-refresh" title="새로고침">↻</button>
         <button class="btn primary" id="btn-new-pt">＋ 새 환자</button>
       </div>
@@ -95,12 +102,13 @@
                 <canvas id="ed-canvas" width="840" height="630"></canvas>
                 <!-- 겹쳐보기 — 재진에서만 뜬다(기준영상이 있어야 한다) -->
                 <div class="ovbar" id="ov-bar" hidden>
-                  <label class="row" style="gap:6px">
+                  <label class="ovsw">
                     <input type="checkbox" id="ov-on">
                     <span>기준 겹쳐보기</span>
                   </label>
+                  <select id="ov-visit" class="ovsel"
+                          title="어느 차수와 겹쳐 볼지 — 다섯 칸에 함께 적용됩니다"></select>
                   <span class="ovkey"><i class="r"></i>기준<i class="c"></i>현재</span>
-                  <select id="ov-visit" class="ovsel"></select>
                 </div>
                 <div class="knobs">
                   <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="v-angle">0.0°</span>
@@ -184,8 +192,6 @@
   <div class="fields">
     <label class="fld"><span>이름</span>
       <input id="f-name" placeholder="김하늘" autocomplete="off"></label>
-    <label class="fld"><span>병원 환자번호</span>
-      <input id="f-hosp" inputmode="numeric" autocomplete="off"></label>
     <label class="fld"><span>교정과 환자번호</span>
       <input id="f-ortho" inputmode="numeric" autocomplete="off"></label>
   </div>
@@ -218,11 +224,10 @@
   </div>
   <div class="sec">
     <details class="fold">
-    <summary>폴더·PPT·날짜/차수 양식 <small class="sub">— 사용법은 F&amp;Q 참고해주세요</small></summary>
+    <summary>폴더·PPT 이름 양식 <small class="sub">— 사용법은 F&amp;Q 참고해주세요</small></summary>
     <div class="seg" id="pat-kind" style="margin:2px 0 8px">
       <button data-k="folder" aria-pressed="true">폴더</button>
       <button data-k="ppt" aria-pressed="false">PPT 파일</button>
-      <button data-k="label" aria-pressed="false">날짜/차수</button>
     </div>
     <p class="sub" id="pat-desc">등록된 형식 — 전부 인식에 쓰이고, ★ 첫 번째로 새 폴더를 만듭니다</p>
     <div class="patsaved" id="pat-saved"></div>
@@ -251,13 +256,29 @@
         <button data-u="int">정수(반올림)</button><button data-u="half">0.5 단위</button>
       </div>
     </div>
+    <div class="setrow stack">
+      <span class="settl wrap">라벨 표기<small class="sub">새 PPT를 만들 때만 적용 —
+        기존 PPT에 이어 쓸 때는 그 PPT의 라벨 형식을 그대로 따릅니다</small></span>
+      <div class="seg" id="set-label">
+        <button data-f="tight">26.08.12 (초진 A)</button><button data-f="spaced">26. 08. 12. (초진 A)</button>
+      </div>
+    </div>
+    <div class="setrow stack">
+      <span class="settl wrap">직전 차수 슬라이드 복사<small class="sub">직전 슬라이드의
+        선·화살표·텍스트 박스를 새 차수 슬라이드로 가져올지 정합니다. 사진과
+        날짜/차수/TxRxApp 상자는 이 설정과 무관하게 항상 복사됩니다</small></span>
+      <div class="seg" id="set-shapes">
+        <button data-c="none">복사 안 함</button><button data-c="lines">선만 복사</button><button data-c="all">전부 복사</button>
+      </div>
+    </div>
     <div class="setrow">
       <span class="settl">원본 저장<small class="sub">켜면 원본이 raw 폴더에 함께 남습니다</small></span>
       <input type="checkbox" id="set-raw">
     </div>
     <div class="setrow">
-      <span class="settl">하위 폴더 탐색<small class="sub">두 단계까지 인식 · 새 사진은 기존 사진 폴더를 따라 저장</small></span>
-      <input type="checkbox" id="set-subdirs">
+      <span class="settl">여백 색<small class="sub">사진을 돌리거나 줄일 때 드러나는 빈 자리 —
+        검수 화면·저장되는 사진·PPT 가 이 색을 함께 씁니다</small></span>
+      <input type="color" class="lbcolor" id="set-letterbox">
     </div>
     <div class="setrow">
       <span class="settl">새 노트 상자 글자 크기<small class="sub">복사해 온 상자는 원본 크기 유지 (pt)</small></span>
@@ -287,6 +308,7 @@
       <input type="checkbox" id="uninst-data">
       <span>환자 자료도 함께 지웁니다 (되돌릴 수 없습니다)</span>
     </label>
+    <div id="uninst-tools-row" style="margin-top:6px" hidden></div>
     <div class="row" id="uninst-confirm" hidden style="margin-top:6px">
       <span>확인을 위해 <b>삭제</b> 를 입력하세요</span>
       <input id="uninst-word" style="width:90px">

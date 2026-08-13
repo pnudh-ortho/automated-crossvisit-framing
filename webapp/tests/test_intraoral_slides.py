@@ -34,6 +34,8 @@ pytestmark = pytest.mark.skipif(not main._case_deck_ready(),
 _PICTURE = 13
 HOSP, ORTHO = "987654321", "13579"
 NAME = "구내검사"
+# 잘린 완성본은 '교정번호_차수/', 원본 사본은 '교정번호_차수_raw/' 폴더로 간다.
+VDIR, RDIR = f"{ORTHO}_A", f"{ORTHO}_A_raw"
 # 촬영 순서 = 파일 순번. 슬라이드 12~16 이 이 순서를 그대로 따라야 한다.
 #
 #   (1) 정면   (2) 우측방   (3) 좌측방   (4) 상악   (5) 하악
@@ -112,7 +114,7 @@ def test_구내_슬라이드_12_16에_한_장씩_들어간다(app):
         assert pics[0].name.endswith(f"IO_{slot}"), pics[0].name
         # **순번으로** 확인한다. 슬라이드에 실린 그림이 그 순번의 사진과 같은
         # 그림이어야 한다 — 자리 이름의 right/left 에 기대지 않는다.
-        saved = (pdir / f"{ORTHO}_A ({idx}).jpg").read_bytes()
+        saved = (pdir / VDIR / f"{ORTHO}_A ({idx}).jpg").read_bytes()
         d = float(np.abs(_mean(pics[0].image.blob) - _mean(saved)).max())
         assert d < 12, f"슬라이드 {no} 에 ({idx}) 가 아닌 사진 (평균색 차 {d:.0f})"
         assert not [sh for sh in prs.slides[no - 1].shapes if sh.is_placeholder], no
@@ -122,12 +124,12 @@ def test_기본은_잘린_사진만_저장한다(app):
     c, root = app
     plan, res, pdir = _commit(c, root, save_raw=False)
     assert all(e.get("raw") is None for e in plan["slots"] if not e["empty"])
-    saved = sorted(p.name for p in pdir.glob("*.jpg"))
-    assert not [n for n in saved if N.is_raw(n)], saved
-    assert set(res["files"]) == set(saved) | {res["ppt"]}
+    saved = sorted(p.name for p in (pdir / VDIR).glob("*.jpg"))
+    assert saved and not [n for n in saved if n.rsplit(".", 1)[0].endswith("_raw")], saved
+    assert set(res["files"]) == {f"{VDIR}/{n}" for n in saved} | {res["ppt"]}
 
     # 저장된 것이 **슬라이드와 같은 그림**인가 — 창 비율(4:3)로 잘려 있어야 한다
-    img = cv2.imread(str(pdir / f"{ORTHO}_A (1).jpg"))
+    img = cv2.imread(str(pdir / VDIR / f"{ORTHO}_A (1).jpg"))
     h, w = img.shape[:2]  # noqa: F841
     assert abs(w / h - 8.40 / 6.30) < 0.01, f"{w}x{h} — 원본 비율 그대로다"
 
@@ -136,32 +138,38 @@ def test_원본_저장을_켜면_raw가_함께_남는다(app):
     c, root = app
     plan, res, pdir = _commit(c, root, save_raw=True)
     raws = {e["raw"] for e in plan["slots"] if not e["empty"]}
-    # 원본 사본은 raw/ 하위 폴더로 간다 — 환자 폴더가 두 배로 붐비지 않는다
-    assert raws == {f"raw/{ORTHO}_A ({i})_raw.jpg" for i in range(1, 6)}, raws
+    # 원본 사본은 '교정번호_차수_raw/' 폴더로 간다 — 완성본 폴더와 나란히 선다
+    assert raws == {f"{RDIR}/{ORTHO}_A ({i})_raw.jpg" for i in range(1, 6)}, raws
     for name in raws:
         assert (pdir / name).exists(), f"{name} 없음"
     on_disk = {p.relative_to(pdir).as_posix() for p in pdir.rglob("*") if p.is_file()}
     assert set(res["files"]) == on_disk
 
     # 원본은 자르지 않은 그대로여야 한다
-    raw = cv2.imread(str(pdir / "raw" / f"{ORTHO}_A (1)_raw.jpg"))
+    raw = cv2.imread(str(pdir / RDIR / f"{ORTHO}_A (1)_raw.jpg"))
     assert raw.shape[:2] == (1200, 1600), raw.shape
 
 
-def test_raw는_사진_장수에_안_들어간다(app):
+def test_사진은_읽지_않는다_차수는_PPT_라벨로(app):
+    """환자 목록·폴더 보기 어디에도 사진 스캔이 없다 — 차수는 PPT 라벨이 진실."""
     c, root = app
     _, _, pdir = _commit(c, root, save_raw=True)
     rec = c.get("/api/patients").json()
     me = [p for p in rec["patients"] if p["ortho_id"] == ORTHO]
-    assert me and me[0]["photos"] == 5, me
+    assert me and me[0]["visits"] == ["A"], me
+    assert "photos" not in me[0]                      # 사진 장수 집계는 없다
     fc = c.get("/api/folder", params={"folder": pdir.name}).json()
-    assert [v for v in fc["visits"] if v["visit"] == "A"][0]["photos"] == 5, fc["visits"]
+    assert "visits" not in fc                         # 파일명 차수 해석도 없다
+    # 자동 선택된 PPT 가 무엇인지 알려준다 — 화면이 "선택됨"으로 표시한다
+    assert fc["ppt"], fc
+    sel = [i for i in fc["items"] if i.get("selected")]
+    assert len(sel) == 1 and sel[0]["name"].endswith(fc["ppt"]), fc["items"]
 
 
 def test_촬영시각이_굽는_동안_바뀌지_않는다(app):
-    """차수 날짜는 파일의 mtime 에서 나온다 — '구운 시각'이면 오늘로 보인다."""
+    """완성본과 원본 사본의 mtime 이 같아야 한다 — 촬영시각(mtime) 보존."""
     c, root = app
     _, _, pdir = _commit(c, root, save_raw=True)
-    cropped = (pdir / f"{ORTHO}_A (1).jpg").stat().st_mtime
-    raw = (pdir / "raw" / f"{ORTHO}_A (1)_raw.jpg").stat().st_mtime
+    cropped = (pdir / VDIR / f"{ORTHO}_A (1).jpg").stat().st_mtime
+    raw = (pdir / RDIR / f"{ORTHO}_A (1)_raw.jpg").stat().st_mtime
     assert abs(cropped - raw) < 2, (cropped, raw)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import copy
 import io
 from collections import Counter
 import json
@@ -30,6 +31,7 @@ import numpy as np
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pptx.oxml.ns import qn
 from pydantic import BaseModel
 
 import case_deck as CD
@@ -397,14 +399,14 @@ def _place_faces(prs, s: "Session") -> dict[str, Path]:
         baked, bwh = _bake_window(photo, win, st, False, s.tmp / f"bake_face_{cell}.jpg")
         if baked:
             W.place_photo_in_window(slide, f"FACE_{cell}", win, baked, bwh,
-                                    letterbox_color=cfg.geometry.letterbox_color)
+                                    letterbox_color=_letterbox_color())
             bakes.setdefault(pid, baked)
         else:
             bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
             pl = editor_to_placement(st, win, bw, bh, PPC)
             W.place_photo_in_window(slide, f"FACE_{cell}", win, photo.path,
                                     (photo.w, photo.h), placement=pl,
-                                    letterbox_color=cfg.geometry.letterbox_color)
+                                    letterbox_color=_letterbox_color())
     return bakes
 
 
@@ -449,13 +451,13 @@ def _place_intraoral(prs, s: "Session") -> list[int]:
                                   s.tmp / f"bake_io_{slot}.jpg")
         if baked:
             W.place_photo_in_window(slide, f"IO_{slot}", win, baked, bwh,
-                                    letterbox_color=cfg.geometry.letterbox_color)
+                                    letterbox_color=_letterbox_color())
         else:
             bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
             pl = editor_to_placement(st, win, bw, bh, PPC)
             W.place_photo_in_window(slide, f"IO_{slot}", win, photo.path,
                                     (photo.w, photo.h), placement=pl,
-                                    letterbox_color=cfg.geometry.letterbox_color,
+                                    letterbox_color=_letterbox_color(),
                                     flip_v=photo.flip_v)
         filled.append(slide_no)
     return filled
@@ -475,7 +477,7 @@ def _bake_window(photo, win: WindowCm, st: EditorState, flip_v: bool, dst: Path)
     if arr is None:
         return None, None                    # 못 읽으면 종전 방식으로 물러난다
     out = Cr.render_window(arr, win, st, flip_v, ppcm, PPC,
-                           Cr.hex_to_bgr(cfg.geometry.letterbox_color))
+                           Cr.hex_to_bgr(_letterbox_color()))
     # EXIF 를 원본에서 옮겨 심는다 — cv2.imwrite 는 EXIF 를 쓸 줄 모른다. 스테이징
     # 원본은 회전이 이미 픽셀에 구워져 있어(orientation ≤1) 그대로 옮겨도 뷰어가
     # 이중 회전하지 않는다. 화질 규약은 종전과 동일 (q95, subsampling=0 = 4:4:4).
@@ -678,9 +680,9 @@ def _note_auto(s: "Session") -> dict:
         chosen = s.period_start.get(k) or ""
         if chosen == "none":                # 체크를 다 푼 상태 — 기준일 없이 쓴다
             return "0", "", ""
+        # 기준일은 사람이 고른 것 > 이전 차수에 적힌 것 순이다. 없으면 없는 대로
+        # 둔다 — Rx 도 마찬가지다(초진일을 자동으로 넣지 않는다, 2026-08-14 결정).
         start = chosen or (hist.get("dates") or [None])[0]
-        if k == "rx" and not start:
-            start = s.first_date            # 초진일이 Rx 의 첫 기준일이다
         m = _months_since(start, now, unit)
         return (_fmt_months(m) if m is not None else "0",
                 start or "", f" ({start})" if start else "")
@@ -697,7 +699,8 @@ def _note_auto(s: "Session") -> dict:
         "months_rx": per["rx"][0], "rx_date": per["rx"][1], "rx_paren": per["rx"][2],
         "months_app": per["app"][0], "app_date": per["app"][1], "app_paren": per["app"][2],
         "visit": s.visit or "",
-        "visit_label": _render_label(today, s.visit or ""),
+        "visit_label": _render_label(today, s.visit or "",
+                                     getattr(s, "label_fp", None)),
     }
 
 
@@ -881,6 +884,21 @@ def _fill_patient_info(prs, s: "Session") -> dict[str, str]:
     return CD.fill_prefixed_lines(prs.slides[pi.slide_no - 1], filled)
 
 
+def _letterbox_color() -> str:
+    """회전·축소로 드러나는 빈 자리를 채울 색 (RGB hex, '#' 없이).
+
+    화면 캔버스·저장되는 JPG·PPT 배경판이 **같은 값**을 봐야 한다. 셋이 갈리면
+    검수 화면에서 본 모습과 결과물이 달라진다. 설정이 없으면 config 기본값.
+    """
+    try:
+        v = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("letterbox_color")
+        if isinstance(v, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", v):
+            return v.upper()
+    except Exception:                                   # noqa: BLE001
+        pass
+    return cfg.geometry.letterbox_color
+
+
 def _small_pt(box: str) -> float | None:
     """그 박스에서 줄 끝 괄호를 작게 쓸 크기. 줄이지 않는 박스면 None.
 
@@ -920,7 +938,6 @@ PPC = cfg.geometry.render_px_per_cm
 async def _lifespan(_app: FastAPI):
     """청소 스레드는 서버 수명과 함께 산다. TestClient를 컨텍스트 없이 쓰면 뜨지 않는다."""
     _log_framer()
-    Rd.set_label_patterns(_label_patterns())   # 등록된 날짜/차수 양식으로 파싱
     _apply_note_sizes()                        # 설정된 노트 글자 크기 반영
     stop = threading.Event()
     threading.Thread(target=_sweeper_loop, args=(stop,), daemon=True).start()
@@ -961,31 +978,19 @@ PROGRAM_DIR = BACKEND_DIR.parents[1]
 SETTINGS_FILE = PROGRAM_DIR / "settings.json"
 
 
-def _scan_subdirs() -> bool:
-    """환자 폴더의 한 단계 하위 폴더(원본/편집본 등)까지 뒤질 것인가 — 설정."""
-    try:
-        return bool(json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-                    .get("scan_subdirs"))
-    except Exception:                                   # noqa: BLE001
-        return False
-
-
 def _patient_files(d: Path) -> list[Path]:
-    """환자 폴더의 파일들. 설정이 켜져 있으면 **두 단계** 하위 폴더까지 본다.
+    """환자 폴더의 파일들 — 두 단계 하위 폴더까지.
 
-    raw/ 는 설정과 무관하게 본다 — 원본 사본을 목록에 보여야 한다. 장수 집계는
-    `_raw` 접미가 걸러 주므로 두 배로 세이지 않는다. (설정 파일을 폴더마다 다시
-    읽지 않도록 플래그는 한 번만 얻는다.)
+    사진 파일을 열지는 않는다. 이 목록의 용도는 둘뿐이다: 폴더 내용을 화면에
+    그대로 보여주는 것, 그리고 하위 폴더에 있어도 PPT 를 찾아내는 것.
     """
-    deep = _scan_subdirs()
 
     def walk(base: Path, depth: int, out: list[Path]) -> None:
         for f in sorted(base.iterdir(), key=lambda x: x.name.lower()):
             if f.name.startswith("."):
                 continue
             if f.is_dir():
-                if depth < 2 and (deep or (depth == 0 and
-                                           f.name in (N.RAW_DIR, N.PROCESSED_DIR))):
+                if depth < 2:
                     walk(f, depth + 1, out)
             elif f.is_file():
                 out.append(f)
@@ -1046,6 +1051,19 @@ def _default_root() -> Path:
         return sib
     except OSError:
         return Path.home() / "ortho-webapp" / "data"
+
+
+def _saved_root_str() -> str:
+    """설정에 적힌 저장 위치 — **있는지는 보지 않는다.**
+
+    외장 드라이브에 환자 폴더를 둔 설치본이 있다. 드라이브를 빼면 그 경로는
+    잠깐 사라질 뿐 잘못된 설정이 아니다. "아직 안 골랐다" 와 "골라 뒀는데 지금
+    닿지 않는다" 를 가르려면 존재 여부를 빼고 읽는 길이 하나 필요하다.
+    """
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("root") or ""
+    except Exception:                                   # noqa: BLE001
+        return ""
 
 
 def _saved_root() -> Path | None:
@@ -1288,7 +1306,7 @@ def framing_to_editor(res: "Fr.FramingResult", win: WindowCm, pw, ph) -> EditorS
 # ── 스키마 ────────────────────────────────────────────────────────────────────
 class FirstReq(BaseModel):
     name: str
-    hospital_id: str
+    hospital_id: str = ""      # 병원번호는 요구하지 않는다 — 있으면 형식만 검사
     ortho_id: str
 
 
@@ -1330,6 +1348,20 @@ class AdjustReq(BaseModel):
 NO_CACHE = {"Cache-Control": "no-cache"}
 
 
+@app.middleware("http")
+async def _no_store_api(request, call_next):
+    """API 응답은 **저장하지 않는다.**
+
+    화면 파일과 달리 API 는 조회할 때마다 답이 달라진다 — 방금 확정한 차수, 방금
+    생긴 파일이 그 답이다. 캐시 지시가 없으면 브라우저가 제 나름의 기준으로 옛
+    응답을 다시 쓸 수 있고, 그러면 사람이 새로고침해야 저장 결과가 보인다.
+    """
+    resp = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.get("/")
 def index():
     return FileResponse(FRONTEND_DIR / "index.html", headers=NO_CACHE)
@@ -1358,7 +1390,12 @@ def health():
             # 첫 실행이면 화면이 저장 위치를 묻는다. **파일 존재가 아니라 `root`
             # 가 적혔는지**로 본다 — 다른 설정(개월 표기 등)이 먼저 저장되면
             # 파일은 생기지만 저장 위치는 여전히 안 고른 상태다.
-            "needs_setup": not _saved_root(),
+            # 아직 안 고른 경우에만 첫 실행 화면을 띄운다. 골라 뒀는데 지금
+            # 닿지 않는 것(외장 드라이브 분리)은 아래 root_missing 으로 구분한다 —
+            # 첫 실행처럼 물으면 사용자가 임시 위치를 확정해 버리고, 그 순간
+            # 설정의 외장 경로가 덮여 사라진다.
+            "needs_setup": not _saved_root() and not _saved_root_str(),
+            "root_missing": ("" if _saved_root() else _saved_root_str()),
             "root": str(ROOT), "program_dir": str(PROGRAM_DIR),
             "framing": fr,
             "classes": cfg.classes, "slots": cfg.ppt.slot_names,
@@ -1498,11 +1535,12 @@ def session_first(req: FirstReq):
             req.name, req.hospital_id, req.ortho_id,
             hospital_digits=cfg.identifiers.hospital_id.digits,
             ortho_digits=cfg.identifiers.ortho_id.digits,
-            name_regex=cfg.identifiers.name.allow_regex)
+            name_regex=cfg.identifiers.name.allow_regex,
+            require_hospital=False)
     except N.NamingError as e:
         raise HTTPException(400, str(e))
     s = Session("first", ids, "A")
-    folder = N.folder_name(ids, _folder_pattern())
+    folder = _gen_folder_name(ids)
     s.patient_dir = ROOT / folder
     SESSIONS[s.id] = s
     return {"session_id": s.id, "visit": "A", "folder": folder,
@@ -1522,11 +1560,7 @@ def session_revisit(req: RevisitReq):
         raise HTTPException(400, str(e))
 
     patient_dir = ppt_path.parent
-    files = [p.name for p in _patient_files(patient_dir)]
-    letters = N.scan_visit_letters(files, ids.ortho_id, cfg.naming.visit_regex)
-    visit = N.next_visit_letter(letters)
-
-    s = Session("revisit", ids, visit)
+    s = Session("revisit", ids, "A")
     s.patient_dir = patient_dir
     s.ppt_path = ppt_path
 
@@ -1538,10 +1572,9 @@ def session_revisit(req: RevisitReq):
                                  "있습니다 — 닫은 뒤 다시 시도해 주세요")
     visits = Rd.read_all_visits(prs, cfg, PPC)
     s.references = Rd.references_for_registration(visits)
-    ppt_letters = [vs.visit for vs in visits if vs.visit]
-    if ppt_letters:
-        letters = sorted({*letters, *ppt_letters}, key=N.letter_to_num)
-        s.visit = N.next_visit_letter(letters)
+    # 차수 이력의 진실은 PPT 뿐이다 — 사진 파일명은 보지 않는다.
+    letters = sorted({vs.visit for vs in visits if vs.visit}, key=N.letter_to_num)
+    s.visit = N.next_visit_letter(letters)
     SESSIONS[s.id] = s
     return {"session_id": s.id, "visit": s.visit, "prev_visits": letters,
             "ids": {"name": ids.name, "hospital_id": ids.hospital_id, "ortho_id": ids.ortho_id},
@@ -1555,45 +1588,64 @@ IMG_EXT = (".jpg", ".jpeg", ".png")
 
 
 # 환자 목록이 뜰 때마다 모든 PPT 를 여는 건 느리다 — (경로, mtime)로 캐시.
-_VISITS_CACHE: dict[str, tuple[float, list[tuple[str, str | None]]]] = {}
+_VISITS_CACHE: dict[str, tuple[float, dict]] = {}
 
 
-def _ppt_visit_letters(path: Path) -> list[tuple[str, str | None]]:
-    """PPT 라벨에서 (차수, 날짜) 목록 — 실패는 빈 목록 (이력은 파일명으로 폴백)."""
+_EMPTY_SCAN = {"visits": [], "excluded": [], "fallback": False, "slides": 0}
+
+
+def _ppt_visit_letters(path: Path) -> dict:
+    """PPT 라벨 스캔 결과(차수 장부) — 잠금·손상이면 빈 장부."""
     try:
         mt = path.stat().st_mtime
     except OSError:
-        return []
+        return _EMPTY_SCAN
     hit = _VISITS_CACHE.get(str(path))
     if hit and hit[0] == mt:
         return hit[1]
     try:
         out = Rd.scan_ppt_visits(T.load_presentation(path), cfg)
     except Exception:                                   # noqa: BLE001 — 잠금·손상
-        out = []
+        out = _EMPTY_SCAN
     if len(_VISITS_CACHE) > 256:
         _VISITS_CACHE.clear()
     _VISITS_CACHE[str(path)] = (mt, out)
     return out
 
 
-def _ppt_reject_reason(name: str, ids) -> str:
-    """이 파일을 왜 그 환자의 PPT 로 안 봤는가 — 화면에 보일 한 줄."""
+def _ppt_reject_reason(name: str, ids) -> dict:
+    """이 파일을 왜 그 환자의 PPT 로 안 봤는가 — 화면에 보일 한 줄 + 해결 여부.
+
+    구형 `.ppt` 는 **같은 이름을 .pptx 로 저장했을 때 인식되는지**까지 본다.
+    이름 자체가 양식과 어긋나 있으면 변환만으로는 안 되는데, 그걸 알려주지 않으면
+    시키는 대로 저장하고도 여전히 안 붙는 이유를 알 수 없다.
+    """
     if name.startswith("~$"):
-        return "PowerPoint 임시 파일입니다"
+        return {"why": "PowerPoint 임시 파일입니다"}
     if name.lower().endswith(".ppt"):
-        return "구형 .ppt — .pptx 로 다시 저장해야 인식됩니다"
+        try:
+            got = _parse_ppt_name(name + "x")
+            ok = got.ortho_id == ids.ortho_id
+        except N.NamingError:
+            ok = False
+        return {"why": (".pptx 로 다시 저장하면 인식됩니다" if ok
+                        else ".pptx 로 저장해도 등록된 이름 양식과 맞지 않습니다"),
+                "convertible": ok}
     try:
         got = _parse_ppt_name(name)
     except N.NamingError:
-        return "등록된 PPT 이름 양식과 맞지 않습니다"
+        return {"why": "등록된 PPT 이름 양식과 맞지 않습니다"}
     if got.ortho_id != ids.ortho_id:
-        return f"교정번호가 다릅니다 ({got.ortho_id})"
-    return "인식 가능"
+        return {"why": f"교정번호가 다릅니다 ({got.ortho_id})"}
+    return {"why": "인식 가능"}
 
 
 def _scan_patient(d: Path) -> dict | None:
-    """환자 폴더 하나 → 목록 한 줄. 폴더명이 명명 규칙에 안 맞으면 None."""
+    """환자 폴더 하나 → 목록 한 줄. 폴더명이 명명 규칙에 안 맞으면 None.
+
+    차수 이력·날짜의 출처는 **PPT 라벨뿐**이다 — 사진 파일은 읽지 않는다.
+    사진이 어떤 이름·폴더 구조로 저장돼 있는지 이 앱이 알 필요가 없다.
+    """
     try:
         ids = _parse_folder(
             d.name,
@@ -1605,52 +1657,44 @@ def _scan_patient(d: Path) -> dict | None:
     entries = _patient_files(d)      # 하위 폴더 정리 환자 — 두 단계까지
     files = [e.name for e in entries]
     ppt_name = _find_ppt(files, ids)
-    # 차수 이력의 진실은 PPT 다 — 사진 이름에 차수가 없는(1.jpg …) 환자도
-    # PPT 라벨로 이력이 나온다. 사진으로만 아는 차수도 있어 합집합으로 간다.
-    ppt_visits: list[tuple[str, str | None]] = []
+    scan = _EMPTY_SCAN
     if ppt_name:
         p = next((e for e in entries if e.name == ppt_name), None)
         if p is not None:
-            ppt_visits = _ppt_visit_letters(p)
-    visits = sorted({*N.scan_visit_letters(files, ids.ortho_id,
-                                           cfg.naming.visit_regex),
-                     *[v for v, _ in ppt_visits]}, key=N.letter_to_num)
+            scan = _ppt_visit_letters(p)
+    visits = sorted({v["visit"] for v in scan["visits"]}, key=N.letter_to_num)
 
-    # 차수별 날짜. 목록에는 첫 차수와 마지막 차수만 쓰므로 그 둘만 계산한다 —
-    # 환자마다 사진 전부를 stat하면 네트워크 드라이브에서 눈에 띄게 느려진다.
-    rx = re.compile(cfg.naming.visit_regex.format(ortho_id=re.escape(ids.ortho_id)))
-
-    pdates = {v: dt for v, dt in ppt_visits if dt}
+    # 차수별 날짜 — 라벨의 "26.08.12" 를 목록 표기(2026.08.12)로 편다.
+    pdates = {v["visit"]: v["date"] for v in scan["visits"] if v["date"]}
 
     def date_of(letter: str) -> str | None:
-        oldest = None
-        for e in entries:
-            m = rx.search(e.name)
-            if m and m.group(1) == letter:
-                t = e.stat().st_mtime
-                oldest = t if oldest is None else min(oldest, t)
-        if oldest is not None:
-            return datetime.fromtimestamp(oldest).strftime("%Y.%m.%d")
-        if letter in pdates:              # 사진 없이 PPT 로만 아는 차수 — 라벨 날짜
+        if letter in pdates:
             nums = re.findall(r"\d+", pdates[letter])
             if len(nums) >= 3:
                 return f"20{int(nums[0]):02d}.{int(nums[1]):02d}.{int(nums[2]):02d}"
         return None
 
-    wanted = {visits[0], visits[-1]} if visits else set()
     return {
         "folder": d.name, "name": ids.name,
         "hospital_id": ids.hospital_id, "ortho_id": ids.ortho_id,
         "visits": visits, "next_visit": N.next_visit_letter(visits),
-        "visit_dates": {L: date_of(L) for L in wanted},
+        "visit_dates": {L: date_of(L) for L in visits},
         "ppt": ppt_name,
-        # `_raw` 는 짝이 있는 같은 사진이다 — 세면 장수가 두 배로 보인다.
-        "photos": sum(1 for f in files
-                      if f.lower().endswith(IMG_EXT) and not N.is_raw(f)),
+        # 확인 줄 재료 — 인식된 차수(슬라이드 번호 포함), 제외된 라벨 장, 폴백 여부.
+        "visit_slides": scan["visits"],
+        "label_excluded": scan["excluded"],
+        "label_fallback": scan["fallback"],
+        "ppt_slides": scan["slides"],
+        # 새 슬라이드를 **어느 장 뒤에** 넣을지. 날짜가 가장 늦은 차수 슬라이드다 —
+        # "몇 번째가 된다" 보다 "몇 번 뒤" 가 사람이 슬라이드를 세는 방식이다.
+        "suggest_after": (max(scan["visits"],
+                              key=lambda v: (Rd._date_key(v["date"]) or (0,),
+                                             v["slide_no"]))["slide_no"]
+                          if scan["visits"] else None),
         # PPT 를 못 찾았을 때: 폴더의 PPT 파일마다 못 알아본 이유 한 줄.
         # 왜 안 붙는지 아무도 모르는 채 새 PPT 가 생기는 것을 막는다.
         "ppt_diag": ([] if ppt_name else
-                     [{"name": f, "why": _ppt_reject_reason(f, ids)}
+                     [{"name": f, **_ppt_reject_reason(f, ids)}
                       for f in files
                       if f.lower().endswith((".pptx", ".ppt"))][:5]),
         "updated": datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d"),
@@ -1672,13 +1716,12 @@ def patients():
             "root": str(root.resolve()),
             "rules": {"hospital_digits": cfg.identifiers.hospital_id.digits,
                       "ortho_digits": cfg.identifiers.ortho_id.digits,
-                      "folder_pattern": _folder_pattern(),
+                      # 새 환자 미리보기용 — 실제로 만들어질 모습. 인식 전용
+                      # 블록(순번 등)과 병원번호는 생성 때 없는 셈 친다.
+                      "folder_pattern": N.strip_recognition(
+                          _folder_pattern(), {"hospital_id"}),
                       "photo_pattern": cfg.naming.photo_pattern,
-                      "slots": len(cfg.ppt.slot_names),
-                      # 사진 번호 → 슬롯. 시작 화면 미리보기가 (1)~(5) 완성본을
-                      # 십자 자리에 놓을 때 쓴다.
-                      "io_slots": {str(si.index): si.slot
-                                   for si in cfg.intraoral_slots.values()}}}
+                      "slots": len(cfg.ppt.slot_names)}}
 
 
 # ── 시작 화면 미리보기 — PPT에 실린 그림 ────────────────────────────────────
@@ -1772,15 +1815,15 @@ def ppt_preview(folder: str):
                     faces.append(_face_uri(im))
             except Exception:       # noqa: BLE001 — 깨진 그림
                 continue
-    # 수제 PPT 폴백 — 이름 규약이 없다. 앞에서부터 훑어 **너비 12cm 이상,
-    # 가로(폭>높이) 사진이 2장 이상**인 첫 슬라이드를 얼굴 슬라이드로 보고 그
-    # 슬라이드의 사진만 쓴다(십자 사진은 8cm 안팎이라 안 걸리고, 큰 사진이
-    # 한 장뿐인 슬라이드는 엑스레이 등일 수 있다). 뒤 슬라이드는 보지 않는다.
+    # 수제 PPT 폴백 — 이름 규약이 없다. 앞에서부터 훑어 **너비 12cm 이상 사진이
+    # 2장 이상**인 첫 슬라이드를 얼굴 슬라이드로 보고 그 슬라이드의 사진만 쓴다
+    # (십자 사진은 8cm 안팎이라 안 걸리고, 큰 사진이 한 장뿐인 슬라이드는
+    # 엑스레이 등일 수 있다). 뒤 슬라이드는 보지 않는다.
     if not faces:
         for slide in prs.slides:
             big = [sh for sh in slide.shapes
                    if _pic_image(sh) is not None
-                   and emu_to_cm(sh.width) >= 12.0 and sh.width > sh.height]
+                   and emu_to_cm(sh.width) >= 12.0]
             if len(big) < 2:
                 continue
             for sh in big[:2]:
@@ -1849,6 +1892,27 @@ def fs_mkdir(req: MkdirReq):
     return {"path": str(p), "existed": False}
 
 
+@app.post("/api/root/recheck")
+def root_recheck():
+    """사라졌던 저장 위치가 돌아왔는지 다시 본다 — 드라이브를 꽂고 누른다.
+
+    설정은 건드리지 않는다. 경로가 살아 있으면 그리로 되돌아가고, 아니면 어디에
+    무엇이 없는지 그대로 알려준다.
+    """
+    global ROOT, SESS_ROOT
+    saved = _saved_root()
+    if saved is None:
+        return {"ok": False, "path": _saved_root_str(), "root": str(ROOT)}
+    for s in list(SESSIONS.values()):     # 임시 업로드는 옛 루트에 있다
+        discard_session(s)
+    ROOT = saved
+    SESS_ROOT = ROOT / "_sessions_tmp"
+    SESS_ROOT.mkdir(parents=True, exist_ok=True)
+    _VISITS_CACHE.clear()
+    _PV_CACHE.clear()
+    return {"ok": True, "root": str(ROOT)}
+
+
 class RootReq(BaseModel):
     path: str
 
@@ -1881,7 +1945,11 @@ def set_root(req: RootReq):
 
 @app.get("/api/folder")
 def folder_contents(folder: str):
-    """환자 폴더 안을 그대로 보여준다 — 무엇이 이미 있는지 보고 사진을 넣게."""
+    """환자 폴더 안을 그대로 보여준다 — 무엇이 이미 있는지 보고 사진을 넣게.
+
+    파일 이름·종류·크기만 나열한다. 차수 이력은 PPT 라벨이 진실이라 여기서
+    사진 파일명을 해석하지 않는다.
+    """
     d = (ROOT / folder).resolve()
     if not str(d).startswith(str(ROOT)) or not d.is_dir():
         raise HTTPException(404, f"폴더를 찾을 수 없습니다: {folder}")
@@ -1891,34 +1959,23 @@ def folder_contents(folder: str):
             hospital_digits=cfg.identifiers.hospital_id.digits,
             ortho_digits=cfg.identifiers.ortho_id.digits,
             name_regex=cfg.identifiers.name.allow_regex, label="폴더명")
-        visit_rx = cfg.naming.visit_regex.format(ortho_id=ids.ortho_id)
     except N.NamingError:
-        visit_rx = None
+        ids = None
 
-    items, per_visit = [], {}
-    for f in _patient_files(d):
-        ext = f.suffix.lower()
-        st = f.stat()
-        m = re.search(visit_rx, f.name) if visit_rx else None
-        letter = m.group(1) if m else None
-        # 원본 사본은 짝이 있는 같은 사진이다. 세면 한 차수 장수가 두 배로 보인다.
-        raw = N.is_raw(f.name)
-        items.append({
-            "name": f.relative_to(d).as_posix(), "size": st.st_size,
-            "kind": "ppt" if ext == ".pptx" else "photo" if ext in IMG_EXT else "other",
-            "visit": letter, "raw": raw,
-        })
-        if letter and ext in IMG_EXT and not raw:
-            rec = per_visit.setdefault(letter, {"visit": letter, "photos": 0, "_t": st.st_mtime})
-            rec["photos"] += 1
-            rec["_t"] = min(rec["_t"], st.st_mtime)
-
-    visits = []
-    for letter in sorted(per_visit, key=N.letter_to_num):
-        rec = per_visit[letter]
-        visits.append({"visit": letter, "photos": rec["photos"],
-                       "date": datetime.fromtimestamp(rec["_t"]).strftime("%Y.%m.%d")})
-    return {"folder": d.name, "path": str(d), "items": items, "visits": visits}
+    entries = _patient_files(d)
+    items = [{
+        "name": f.relative_to(d).as_posix(), "size": f.stat().st_size,
+        "kind": ("ppt" if f.suffix.lower() == ".pptx"
+                 else "photo" if f.suffix.lower() in IMG_EXT else "other"),
+    } for f in entries]
+    # 이 환자의 PPT 로 자동 선택된 파일 — 화면이 "선택됨"으로 표시한다.
+    sel = _find_ppt([e.name for e in entries], ids) if ids else None
+    if sel:
+        for it, e in zip(items, entries):
+            if e.name == sel:
+                it["selected"] = True
+                break
+    return {"folder": d.name, "path": str(d), "items": items, "ppt": sel}
 
 
 class OpenReq(BaseModel):
@@ -1926,6 +1983,9 @@ class OpenReq(BaseModel):
     name: str | None = None            # 새 환자: 식별자 3종
     hospital_id: str | None = None
     ortho_id: str | None = None
+    # 확인 줄에서 고친 값 — 이번 차수 글자, 새 슬라이드를 넣을 자리
+    visit: str | None = None
+    insert_after: int | None = None   # 이 번호의 슬라이드 **뒤**에 (0 = 맨 앞)
 
 
 @app.post("/api/session")
@@ -1951,24 +2011,21 @@ def session_open(req: OpenReq):
             raise HTTPException(400, str(e))
     else:
         try:
-            # ★ 생성 양식이 병원번호를 쓰지 않으면 비워 둘 수 있다 — 폴더명에
-            # 들어가지 않는 값을 강요할 이유가 없다. 나중에 검수 화면의
+            # 병원번호는 요구하지 않는다 — 값이 있으면 형식만 검사하고, 비어
+            # 있으면 이름을 만들 때 그 블록을 뺀다. 나중에 검수 화면의
             # 환자정보 칸으로 채울 수 있다.
-            need_h = ("{hospital_id}" in _folder_pattern()
-                      or "{hospital_id}" in _ppt_pattern())
             ids = N.validate_identifiers(req.name, req.hospital_id, req.ortho_id,
-                                         require_hospital=need_h, **dig)
+                                         require_hospital=False, **dig)
         except N.NamingError as e:
             raise HTTPException(400, str(e))
-        d = root / N.folder_name(ids, _folder_pattern())
+        d = root / _gen_folder_name(ids)
         if d.exists():
             return JSONResponse(status_code=409, content={
                 "error": "patient_exists", "folder": d.name,
                 "detail": f"이미 등록된 환자입니다: {d.name} — 목록에서 선택해 이어서 진행하세요"})
 
-    files = [p.name for p in _patient_files(d)] if d.is_dir() else []
-    visits = N.scan_visit_letters(files, ids.ortho_id, cfg.naming.visit_regex)
-    ppt_path = d / N.ppt_filename(ids, _ppt_pattern())
+    visits: list[str] = []            # 차수 이력의 진실은 PPT 뿐이다
+    ppt_path = d / _gen_ppt_name(ids)
     if not ppt_path.exists() and d.is_dir():
         # 옛 형식 이름이거나 하위 폴더에 있어도 찾아낸다
         cand = {p.name: p for p in _patient_files(d)}
@@ -1998,12 +2055,17 @@ def session_open(req: OpenReq):
                 "event": "references_empty", "patient": d.name,
                 "ppt": ppt_path.name, "slides": len(prs.slides._sldIdLst),
                 "cross_slides": len(seen)})
-        # 사진 이름에 차수가 없어도 PPT 가 아는 차수는 이력이다 — 다음 차수가
-        # 그 뒤로 이어져야 기존 슬라이드와 겹치지 않는다.
-        ppt_letters = [vs.visit for vs in seen if vs.visit]
+        # 차수 장부는 가벼운 스캔(십자뷰 단일 기준 + 폴백)과 같은 규칙으로 센다 —
+        # 목록 화면과 세션이 다른 차수를 말하면 확인 줄이 거짓말이 된다.
+        scan = Rd.scan_ppt_visits(prs, cfg)
+        ppt_letters = [v["visit"] for v in scan["visits"]]
         if ppt_letters:
             visits = sorted({*visits, *ppt_letters}, key=N.letter_to_num)
             s.visit = N.next_visit_letter(visits)
+        # 재진 라벨은 이 덱의 표기(마지막 십자뷰 라벨의 지문)를 따른다
+        with_label = [vs for vs in seen if getattr(vs, "label_text", "")]
+        s.label_fp = (Rd.label_fingerprint(with_label[-1].label_text)
+                      if with_label else None)
         s.first_date = _first_visit_date(seen)
         try:
             # 수제 라벨 위치·폰트 상속 — 있으면 좋은 것이라, 어떤 실패도
@@ -2020,6 +2082,21 @@ def session_open(req: OpenReq):
     elif s.visit == "A":
         # 오늘이 초진이다 — 경과 개월은 0.
         s.first_date = datetime.now().strftime(cfg.ppt.info_date_format)
+
+    # 확인 줄에서 고친 값 — 서버가 한 번 더 검증한다 (의료 기록물, 이중 잠금)
+    if req.visit:
+        v = req.visit.strip().upper()
+        if not re.fullmatch(r"[A-Z]{1,2}", v):
+            raise HTTPException(400, "차수는 영문 대문자 1~2글자여야 합니다")
+        if v in visits:
+            raise HTTPException(400, f"차수 {v} 는 이미 이 PPT에 있습니다")
+        s.visit = v
+    if req.insert_after is not None:
+        last = scan["slides"] if has_ppt else 0
+        if not 0 <= req.insert_after <= last:
+            raise HTTPException(
+                400, f"슬라이드 위치는 0~{last} 사이여야 합니다 (0 = 맨 앞)")
+        s.insert_after = int(req.insert_after)
     SESSIONS[s.id] = s
 
     return {"session_id": s.id, "mode": s.mode, "visit": s.visit,
@@ -2031,8 +2108,15 @@ def session_open(req: OpenReq):
 
 
 # ── 업로드 + 분류 (+ 재진 정합) ───────────────────────────────────────────────
-def _choose_refs(refs_by_visit: dict[str, np.ndarray], cur_visit: str) -> dict[str, np.ndarray]:
-    """직전 차수 + 초진(A) 두 기준 선택 (§5.1.2)."""
+def _choose_refs(refs_by_visit: dict[str, np.ndarray],
+                 cur_visit: str) -> dict[str, np.ndarray]:
+    """기준영상 후보를 **먼저 쓸 것부터** 담아 돌려준다.
+
+    기본은 직전 차수다 — 바로 앞 회차와 같은 구도로 놓는 것이 이 도구의 목적이고,
+    사람이 기대하는 결과이기도 하다. 초진(A)은 직전 정합이 실패했을 때만 쓰는
+    안전망으로 남긴다: 직전만 연쇄로 따라가면 이전 차수의 배치 오차가 그대로
+    물려 내려가는데, 초진이라는 고정점이 그 사슬을 끊는다.
+    """
     if not refs_by_visit:
         return {}
     letters = sorted(refs_by_visit, key=N.letter_to_num)
@@ -2255,7 +2339,8 @@ def _classify(s: "Session", targets: list[Photo]) -> None:
         _auto_assign_faces(s)
 
 
-def _frame(s: "Session", slots: list[str] | None = None, *, force: bool = False) -> list[str]:
+def _frame(s: "Session", slots: list[str] | None = None, *,
+           force: bool = False) -> list[str]:
     """슬롯의 초기 구도를 잡는다 — 재진이면 **정합**, 초진이면 **프레이밍 모델**.
 
     ### 왜 분류와 떨어져 있나
@@ -2326,8 +2411,17 @@ def _frame(s: "Session", slots: list[str] | None = None, *, force: bool = False)
             # register 가 마지막에 합성하므로 crop 오차는 전파되지 않는다.
             try:
                 pw = Reg.pseudo_frame(arr, framer, photo.label, flip_v=photo.flip_v)
-                best, res, _ = Reg.register_best(arr_reg, refs, thresholds=reg_thr,
-                                                 prewarp=pw)
+                # 후보를 담긴 순서대로 시도하고 **되는 첫 기준에서 멈춘다**.
+                # 점수로 고르면 직전이 멀쩡한데도 초진이 채택될 수 있는데,
+                # 사람이 기대하는 것은 "바로 앞 회차와 같은 구도"다.
+                best, res = None, None
+                for _name, _ref in refs.items():
+                    b, r, _ = Reg.register_best(arr_reg, {_name: _ref},
+                                                thresholds=reg_thr, prewarp=pw)
+                    if res is None or r.ok:
+                        best, res = b, r
+                    if r.ok:
+                        break
             except Exception as e:                              # noqa: BLE001
                 # 정합 오류가 검수 진입을 막으면 안 된다 — 남기고 프레이밍으로.
                 S.append_audit(LOG_FILE, {
@@ -2840,16 +2934,6 @@ def reference(sid: str, slot: str, visit: str = ""):
     return StreamingResponse(io.BytesIO(buf.tobytes()), media_type="image/png")
 
 
-@app.get("/api/file/{folder}/{name:path}")
-def patient_file(folder: str, name: str):
-    """환자 폴더의 사진 한 장 — 시작 화면 미리보기용. 폴더 밖 접근은 막는다."""
-    d = S.patient_dir_path(ROOT, folder).resolve()
-    p = (d / name).resolve()
-    if (d not in p.parents) or p.suffix.lower() not in IMG_EXT or not p.is_file():
-        raise HTTPException(404, "없음")
-    return FileResponse(str(p))
-
-
 @app.get("/api/references/{sid}")
 def reference_list(sid: str):
     """슬롯마다 **어느 차수를 겹쳐볼 수 있나**. 화면의 겹쳐보기 목록이 이걸 쓴다."""
@@ -2859,36 +2943,6 @@ def reference_list(sid: str):
 
 
 # ── 확정 (원자적 저장) ────────────────────────────────────────────────────────
-def _output_dir(s: "Session") -> str:
-    """새 잘린 사진이 들어갈 곳 — 기존 사진이 모여 있는 하위 폴더를 따른다.
-
-    하위 폴더 탐색이 꺼져 있으면 환자 폴더 바로 아래(종전 그대로). 켜져 있으면
-    기존 사진(원본 사본 제외)이 든 폴더들의 **공통 조상**을 고른다:
-      사진/ 에 모두 있다      → 사진/
-      사진/날짜별/ 로 나뉜다  → 사진/  (새 차수를 옛 날짜 폴더에 섞지 않는다)
-      루트에 하나라도 있다    → 루트
-    이름 규칙 없는 1.jpg 같은 사진도 센다 — 옛 정리 방식 그대로인 폴더를
-    따라가는 것이 목적이라서.
-    """
-    d = s.patient_dir
-    if not _scan_subdirs() or not d or not d.is_dir():
-        return ""
-    dirs: set[str] = set()
-    for f in _patient_files(d):
-        if f.suffix.lower() in IMG_EXT and not N.is_raw(f.name):
-            rel = f.parent.relative_to(d).as_posix()
-            # 우리가 만든 processed/ 안의 사진은 그 부모가 "사진의 집"이다 —
-            # 안 벗기면 다음 차수가 processed/processed/ 로 파고든다.
-            if rel.split("/")[-1] == N.PROCESSED_DIR:
-                rel = "/".join(rel.split("/")[:-1]) or "."
-            dirs.add("" if rel == "." else rel)
-    if not dirs or "" in dirs:
-        return ""
-    common = (os.path.commonpath(sorted(dirs)) if len(dirs) > 1
-              else next(iter(dirs)))
-    return common.replace(os.sep, "/")
-
-
 def _build_plan(s) -> dict:
     """
     확정하면 **무엇이 어떤 이름으로 어디에 생기는지** 계산한다. 부수효과 없음.
@@ -2899,11 +2953,10 @@ def _build_plan(s) -> dict:
     ids = s.ids
     index_by_class = cfg.index_by_class
     raw = _save_raw()
-    # 기존 사진 폴더를 따라간다 — raw/·processed/ 가 그 옆에 나란히 생겨
-    # 원본과 완성본 짝이 흩어지지 않는다.
-    outdir = _output_dir(s)
-    pre = f"{outdir}/" if outdir else ""
-    ppre = f"{pre}{N.PROCESSED_DIR}/"     # 잘린 완성본이 들어가는 곳
+    # 새 사진은 차수마다 제 폴더로 간다 — 잘린 완성본은 '교정번호_차수/',
+    # 원본 사본은 '교정번호_차수_raw/'. 기존 사진이 어디 있든 추적하지 않는다.
+    ppre = f"{N.visit_dir(ids.ortho_id, s.visit)}/"
+    rpre = f"{N.visit_raw_dir(ids.ortho_id, s.visit)}/"
     slots = []
     for slot in cfg.ppt.slot_names:
         members = s.bins.get(slot, [])
@@ -2919,7 +2972,7 @@ def _build_plan(s) -> dict:
             "file": ppre + base,
             # 원본 사본. 추가 촬영본에는 없다 — 편집값이 없어 자를 것이 없고,
             # 그쪽은 지금도 원본 그대로 저장된다.
-            "raw": (pre + N.raw_filename(base, _photo(s, members[0]).path.name)
+            "raw": (rpre + N.raw_filename(base, _photo(s, members[0]).path.name)
                     if raw else None),
             "extras": [
                 {"label": _photo(s, pid).label,
@@ -2931,7 +2984,7 @@ def _build_plan(s) -> dict:
     for pid in s.face:
         base = N.photo_filename(ids.ortho_id, s.visit, fidx, cfg.naming.photo_pattern)
         faces.append({"label": _photo(s, pid).label, "file": ppre + base,
-                      "raw": (pre + N.raw_filename(base, _photo(s, pid).path.name)
+                      "raw": (rpre + N.raw_filename(base, _photo(s, pid).path.name)
                               if raw else None)})
         fidx += 1
     return {
@@ -2943,7 +2996,7 @@ def _build_plan(s) -> dict:
         # 만들면 어느 쪽이 진짜인지 다투는 사본이 남는다. 새 PPT 만 생성 이름.
         "ppt": (Path(s.ppt_path).relative_to(s.patient_dir).as_posix()
                 if s.ppt_path and Path(s.ppt_path).exists()
-                else N.ppt_filename(ids, _ppt_pattern())),
+                else _gen_ppt_name(ids)),
         "ppt_exists": bool(s.ppt_path and Path(s.ppt_path).exists()),
         "slots": slots,
         "faces": faces,
@@ -2982,6 +3035,7 @@ def commit(sid: str, allow_missing: bool = False):
                           "닫은 뒤 다시 확정해 주세요"})
 
     try:
+        src_slide = None          # 도형을 물려받을 직전 차수 슬라이드 (재진에서만)
         with S.Transaction(s.patient_dir) as tx:
             # 1) PPT 준비
             if s.mode == "first":
@@ -2990,12 +3044,19 @@ def commit(sid: str, allow_missing: bool = False):
                 # 사진은 있는데 PPT만 없는 폴더는 mode='first'로 새 PPT를 만들지만
                 # 차수는 A가 아니다 — 그때 '(초진)'이라고 쓰면 기록이 틀린다.
                 # 두 서식 모두 {visit} 를 쓴다 — "(초진 A)" 처럼 차수 글자가 붙는다
-                info_text = _render_label(date_str, s.visit)
+                info_text = _render_label(date_str, s.visit,
+                                          getattr(s, "label_fp", None))
             else:
                 stage_ppt = s.tmp / ppt_name
                 shutil.copyfile(s.ppt_path, stage_ppt)
                 prs = T.load_presentation(stage_ppt)
-                insert_idx = _revisit_insert_index(prs)
+                # 확인 줄에서 고쳤으면 "그 번호의 장 뒤", 아니면 날짜순 규칙.
+                # n 번 장 뒤 = 0-기반 삽입 위치 n (그래서 새 장은 n+1 번이 된다).
+                pos = getattr(s, "insert_after", None)
+                insert_idx = (min(max(pos, 0), len(prs.slides._sldIdLst))
+                              if pos is not None else _revisit_insert_index(prs))
+                # 도형을 물려받을 원본 = 새 장이 끼어들 **바로 앞 장**(직전 차수)
+                src_slide = (prs.slides[insert_idx - 1] if insert_idx > 0 else None)
                 slide = W.import_template_slide(prs, TEMPLATE_PRS, insert_idx)
                 # 십자뷰 양식에는 노트 칸이 없다 — 그대로 두면 이번 차수에 적은
                 # 노트가 갈 곳이 없어 조용히 사라진다. 화면 오버레이가 쓰는
@@ -3005,7 +3066,8 @@ def commit(sid: str, allow_missing: bool = False):
                     CD.add_note_boxes_from_layout(
                         slide, NOTE_BOXES,
                         skip={CD.NOTE_DATE} if T.find_shape(slide, cfg.ppt.info_box_name) is not None else set())
-                info_text = _render_label(date_str, s.visit)
+                info_text = _render_label(date_str, s.visit,
+                                          getattr(s, "label_fp", None))
             # 검은 마스크(MASK_*)는 **모든 경우** 제거한다 (2026-08-12 결정).
             # 근거: ① 사진을 창 크기로 구워 넣어 초과가 없고, ② 슬라이드 배경
             # 자체가 검정(000000)이라 시각적으로 동일하며, ③ 수제 레이아웃 상속
@@ -3028,6 +3090,9 @@ def commit(sid: str, allow_missing: bool = False):
             for key in (CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT):
                 if inherit.get(key):
                     CD.replace_with_copied_box(slide, key, inherit[key])
+            # 사람이 그려 둔 선·화살표 등 — 설정에 따라 직전 장에서 가져온다
+            if s.mode == "revisit":
+                _inherit_shapes(src_slide, slide, _copy_shapes())
 
             # 2) 구내 슬롯 삽입 — 상자의 대표(0번)만 슬라이드에 들어간다
             #    파일명은 전부 _build_plan() 이 정한 것을 쓴다(미리보기와 동일 보장).
@@ -3057,13 +3122,13 @@ def commit(sid: str, allow_missing: bool = False):
                                           s.tmp / f"bake_{slot}.jpg")
                 if baked:
                     W.place_photo_in_slot(slide, slot, baked, bwh,
-                                          letterbox_color=cfg.geometry.letterbox_color)
+                                          letterbox_color=_letterbox_color())
                     tx.stage_file(baked, entry["file"])
                 else:
                     staged_img = tx.stage_file(photo.path, entry["file"])
                     W.place_photo_in_slot(slide, slot, staged_img, (photo.w, photo.h),
                                           placement=pl,
-                                          letterbox_color=cfg.geometry.letterbox_color,
+                                          letterbox_color=_letterbox_color(),
                                           flip_v=photo.flip_v)
                 if entry.get("raw"):
                     tx.stage_file(photo.path, entry["raw"])
@@ -3116,7 +3181,7 @@ def commit(sid: str, allow_missing: bool = False):
 
         S.append_audit(LOG_FILE, {
             "event": "commit", "mode": s.mode, "visit": s.visit,
-            "patient": N.folder_name(ids, _folder_pattern()),
+            "patient": s.patient_dir.name,
             # 이름이 아니라 환자 폴더 기준 상대경로 — 원본은 raw/ 하위로 간다
             "files": [p.relative_to(s.patient_dir).as_posix() for p in moved],
             "slots": {k: _photo(s, v).label for k, v in s.slots.items()},
@@ -3142,7 +3207,7 @@ def commit(sid: str, allow_missing: bool = False):
 def _revisit_insert_index(prs) -> int:
     """새 차수 슬라이드가 들어갈 자리.
 
-    ① 슬라이드마다 라벨(날짜 + 초진/재진, 등록 양식 포함)을 찾아 **날짜가 가장
+    ① 슬라이드마다 라벨(날짜 + 초진/재진)을 찾아 **날짜가 가장
        늦은 차수 슬라이드 바로 다음**. 문서 순서가 아니라 날짜로 고르므로 장
        순서가 뒤섞인 PPT 에서도 마지막 차수 뒤에 붙는다. 날짜가 같으면 뒤에
        있는 장을 마지막으로 본다. 텍스트뿐인 장(환자정보 등)을 차수로 오인하지
@@ -3176,6 +3241,77 @@ def _revisit_insert_index(prs) -> int:
     if best is not None:
         return best[1] + 1
     return last_io + 1 if last_io >= 0 else len(prs.slides._sldIdLst)
+
+
+# 새 슬라이드가 스스로 만드는 도형들 — 복사 대상에서 뺀다(겹쳐 두 벌이 된다).
+_RESERVED_PREFIX = (W.PHOTO_NAME_PREFIX, "BACKDROP_", "MASK_")
+_RESERVED_NAME = {cfg.ppt.info_box_name, CD.NOTE_DATE, CD.NOTE_STATUS,
+                  CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT}
+
+
+def _copy_shapes() -> str:
+    """직전 차수 슬라이드의 도형을 새 슬라이드로 가져올까 — "none"|"lines"|"all".
+
+    기본은 "lines" 다. 정중선·교합평면 같은 기준선은 매 차수 같은 자리를 가리키므로
+    따라오는 편이 맞고, 선은 글과 달리 옛 차수의 내용을 실어 나르지 않는다.
+    """
+    try:
+        v = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("copy_shapes")
+        return v if v in ("none", "lines", "all") else "lines"
+    except Exception:                                   # noqa: BLE001
+        return "lines"
+
+
+# 글을 물려받을 수 있는 자유 기입 상자 — 날짜/차수·기간 상자는 매 차수 새로 쓴다.
+_FREE_NOTE_BOXES = (CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT)
+
+
+def _inherit_shapes(src, dst, mode: str) -> int:
+    """직전 차수 슬라이드의 도형을 새 슬라이드로 복사한다.
+
+    "lines" 는 직선·연결선만 — 정중선·교합평면처럼 매 차수 같은 자리를 가리키는
+    기준선이 이쪽이다. "all" 은 거기에 글상자와 **그 안의 글까지** 더한다: 지난
+    차수 내용을 이어 고쳐 쓰는 방식이라, 그 차수에만 해당하는 주석도 따라온다.
+
+    자유 기입 상자(좌상단 s/p·좌하단·우하단)의 글은 "all" 에서만 물려받는다.
+    다른 모드에서는 상속으로 딸려 온 글을 지운다 — 수제 덱은 상자를 통째로
+    복사해 오므로 지우지 않으면 지난 차수 글이 그대로 남는다.
+    """
+    if src is None or dst is None:
+        return 0
+    n = 0
+    for key in _FREE_NOTE_BOXES:
+        if mode == "all":
+            sh = T.find_shape(src, key)
+            t = (sh.text_frame.text if sh is not None
+                 and getattr(sh, "has_text_frame", False) else "") or ""
+            if t.strip() and CD.set_note_text(dst, key, t, small_pt=_small_pt(key)):
+                n += 1
+            continue
+        sh = T.find_shape(dst, key)
+        if sh is not None and getattr(sh, "has_text_frame", False) \
+                and (sh.text_frame.text or "").strip():
+            CD.set_note_text(dst, key, "")
+    if mode == "none":
+        return n
+    spTree = dst.shapes._spTree
+    for sh in src.shapes:
+        name = str(getattr(sh, "name", ""))
+        if name.startswith(_RESERVED_PREFIX) or name in _RESERVED_NAME:
+            continue
+        if getattr(sh, "shape_type", None) == 13:       # PICTURE — 사진은 새로 넣는다
+            continue
+        if mode == "lines" and getattr(sh, "shape_type", None) != _LINE_TYPE:
+            continue
+        new = copy.deepcopy(sh._element)
+        ids = [int(e.get("id")) for e in spTree.iter(qn("p:cNvPr"))
+               if (e.get("id") or "").isdigit()]
+        for cnv in new.iter(qn("p:cNvPr")):
+            cnv.set("id", str(max(ids, default=1) + 1))
+            break                                       # 최상위 하나만 새 번호로
+        spTree.append(new)
+        n += 1
+    return n
 
 
 def _slot_to_class(slot):
@@ -3332,12 +3468,15 @@ def update_restart():
 class PrefsReq(BaseModel):
     months_unit: str | None = None
     save_raw: bool | None = None
-    scan_subdirs: bool | None = None
     # 형식 **목록** — 첫 번째가 생성용, 전부가 인식용. 빈 목록 = 기본만.
     folder_patterns: list[str] | None = None
     ppt_patterns: list[str] | None = None
-    label_patterns: list[str] | None = None
+    # 새 PPT 라벨 표기 — "tight"(YY.MM.DD (초진 A)) | "spaced"(YY. MM. DD. (초진 A))
+    label_format: str | None = None
+    # 직전 차수 슬라이드의 도형 복사 — "none" | "lines" | "all"
+    copy_shapes: str | None = None
     note_sizes: dict[str, float] | None = None   # 좌상단 s/p·좌하단·우하단 글자 크기
+    letterbox_color: str | None = None           # 회전·축소로 드러나는 빈 자리 색
 
 
 def _saved_patterns(key: str = "folder_patterns") -> list[str]:
@@ -3364,29 +3503,58 @@ def _ppt_patterns() -> list[str]:
     out = []
     for p in (_saved_patterns("ppt_patterns")
               or [cfg.naming.ppt_pattern, *cfg.naming.ppt_patterns_legacy]):
-        if p and p not in out:
-            out.append(p)
+        # 원형 + 생성형 변형 — 순번 같은 인식 전용 블록이 든 형식으로 "없는 셈
+        # 치고" 만든 파일이나 병원번호 없이 만든 파일도 같은 형식으로 읽힌다.
+        for q in (p, N.strip_recognition(p),
+                  N.strip_recognition(p, {"hospital_id"})):
+            if q and q not in out:
+                out.append(q)
     return out
 
 
-def _label_patterns() -> list[str]:
-    return _saved_patterns("label_patterns")
+# 새 PPT 라벨 표기 두 가지 — 설정에서 고른다. **새 PPT 를 만들 때만** 쓰인다.
+_BASE_FP = {"paren": True, "paren_space": True, "letter_space": True,
+            "has_letter": True}
+_FMT_FP = {
+    "tight":  {**_BASE_FP, "spaced": False, "trailing_dot": False},
+    "spaced": {**_BASE_FP, "spaced": True,  "trailing_dot": True},
+}
 
 
-def _render_label(date_str: str, visit: str) -> str:
-    """차수 라벨 한 벌 — ★ 등록 양식이 있으면 그것, 없으면 config 서식.
+def _label_format() -> str:
+    """새 PPT 라벨 표기 — "tight"(YY.MM.DD) 또는 "spaced"(YY. MM. DD.)."""
+    try:
+        v = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("label_format")
+        return v if v in _FMT_FP else "tight"
+    except Exception:                                   # noqa: BLE001
+        return "tight"
 
-    초진/재진 모양 분리는 지원하지 않는다 — {vkind} 블록이 차수에 따라
-    "초진"/"재진"으로 스스로 바뀐다 (2026-08-12 결정).
+
+def _render_label(date_str: str, visit: str, fp: dict | None = None) -> str:
+    """차수 라벨 한 벌.
+
+    새 PPT: 설정의 두 표기 중 하나 — **새 PPT 에만 적용**. 기존 PPT 이어쓰기:
+    그 덱 마지막 십자뷰 라벨의 표기 지문(fp)을 따른다 — 한 덱 안에서 표기가
+    섞이지 않게. 덱에 차수 글자가 없으면 글자 없이 쓴다 — 글자를 붙이면 기존
+    무글자 슬라이드들이 "글자 차수 이전"이 되어 자동 부여에서 통째로 빠진다.
+    지문이 없으면(라벨을 못 읽은 덱) 설정 표기로 물러난다.
     """
-    saved = _label_patterns()
-    pat = saved[0] if saved else None
-    if pat and not N.is_recognition_only(pat):
-        return (pat.replace("{date}", date_str)
-                   .replace("{vkind}", "초진" if visit == "A" else "재진")
-                   .replace("{visit}", visit))
-    return (cfg.ppt.info_first_visit if visit == "A"
-            else cfg.ppt.info_revisit).format(date=date_str, visit=visit)
+    fp = fp or _FMT_FP[_label_format()]
+    nums = re.findall(r"\d+", date_str)
+    if len(nums) >= 3:
+        sep = ". " if fp.get("spaced") else "."
+        date = (sep.join(f"{int(x):02d}" for x in nums[:3])
+                + ("." if fp.get("trailing_dot") else ""))
+    else:
+        date = date_str
+    kind = "초진" if visit == "A" else "재진"
+    # 띄어쓰기까지 그 덱을 따른다 — "18(재진 C)" 인 덱에 "18 (재진 D)" 를 적으면
+    # 같은 슬라이드 묶음 안에서 표기가 갈린다.
+    inner = (f"{kind}{' ' if fp.get('letter_space', True) else ''}{visit}"
+             if visit and fp.get("has_letter", True) else kind)
+    gap = " " if fp.get("paren_space", True) else ""
+    return (f"{date}{gap}({inner})" if fp.get("paren", True)
+            else f"{date}{gap}{inner}")
 
 
 def _parse_ppt_name(name: str):
@@ -3406,7 +3574,7 @@ def _parse_ppt_name(name: str):
 
 def _find_ppt(names: list[str], ids) -> str | None:
     """이 환자의 PPT 파일명 찾기 — 생성 형식 우선, 없으면 등록 형식들로 파싱."""
-    gen = N.ppt_filename(ids, _ppt_pattern())
+    gen = _gen_ppt_name(ids)
     if gen in names:
         return gen
     for n in names:
@@ -3437,8 +3605,11 @@ def _folder_patterns() -> list[str]:
     """
     out = []
     for p in _saved_patterns() or [cfg.naming.folder_pattern]:
-        if p and p not in out:
-            out.append(p)
+        # 원형 + 생성형 변형 — 순번 없이 만든 폴더·병원번호 없는 폴더도 읽힌다.
+        for q in (p, N.strip_recognition(p),
+                  N.strip_recognition(p, {"hospital_id"})):
+            if q and q not in out:
+                out.append(q)
     return out
 
 
@@ -3451,6 +3622,19 @@ def _parse_folder(name: str, **kw):
         except N.NamingError as e:
             last = e
     raise last
+
+
+def _gen_folder_name(ids) -> str:
+    """새 환자 폴더 이름 — ★ 형식에서 미리 정할 수 없는 블록(순번·*·자릿수
+    범위)과, 비어 있으면 병원번호까지 뺀 **생성형**으로 만든다."""
+    extra = set() if ids.hospital_id else {"hospital_id"}
+    return N.folder_name(ids, N.strip_recognition(_folder_pattern(), extra))
+
+
+def _gen_ppt_name(ids) -> str:
+    """새 PPT 파일 이름 — 폴더와 같은 규칙의 생성형."""
+    extra = set() if ids.hospital_id else {"hospital_id"}
+    return N.ppt_filename(ids, N.strip_recognition(_ppt_pattern(), extra))
 
 
 NOTE_SIZE_KEYS = (CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT)
@@ -3477,15 +3661,15 @@ def _apply_note_sizes() -> None:
 
 def _prefs_json() -> dict:
     return {"months_unit": _months_unit(), "save_raw": _save_raw(),
-            "scan_subdirs": _scan_subdirs(),
             "folder_patterns": _saved_patterns(),
             "folder_pattern_default": cfg.naming.folder_pattern,
             "ppt_patterns": _saved_patterns("ppt_patterns"),
             "ppt_pattern_default": cfg.naming.ppt_pattern,
-            "label_patterns": _saved_patterns("label_patterns"),
-            "label_pattern_default": "{date} ({vkind} {visit})",
+            "label_format": _label_format(),
+            "copy_shapes": _copy_shapes(),
             "note_sizes": {k: CD.NOTE_WINDOWS[k]["size_pt"]
-                           for k in NOTE_SIZE_KEYS}}
+                           for k in NOTE_SIZE_KEYS},
+            "letterbox_color": _letterbox_color()}
 
 
 @app.get("/api/prefs")
@@ -3511,8 +3695,6 @@ def prefs_set(req: PrefsReq):
         d["months_unit"] = req.months_unit
     if req.save_raw is not None:
         d["save_raw"] = bool(req.save_raw)
-    if req.scan_subdirs is not None:
-        d["scan_subdirs"] = bool(req.scan_subdirs)
     if req.note_sizes is not None:
         clean = {}
         for k, v in req.note_sizes.items():
@@ -3536,23 +3718,21 @@ def prefs_set(req: PrefsReq):
                     k not in pat for k in ("{name}", "{ortho_id}")):
                 raise HTTPException(400, '형식에는 {name} {ortho_id} 가 있어야 하고 '
                                          '(병원번호는 선택) \\ / : * ? " < > | 는 못 씁니다')
-            if not N.is_recognition_only(pat):
-                # 역파싱 라운드트립 — 만들 수 있어도 못 읽으면 환자 목록이 깨진다.
-                # 인식 전용 형식(*·숫자/문자 범위 포함)은 만들 일이 없으니 건너뛴다.
-                probe = N.Identifiers("홍길동", "1" * cfg.identifiers.hospital_id.digits,
-                                      "2" * cfg.identifiers.ortho_id.digits)
-                try:
-                    N.parse_pattern(N.folder_name(probe, pat), pat, label="폴더명",
-                                    hospital_digits=cfg.identifiers.hospital_id.digits,
-                                    ortho_digits=cfg.identifiers.ortho_id.digits,
-                                    name_regex=cfg.identifiers.name.allow_regex)
-                except N.NamingError:
-                    raise HTTPException(400, f"'{pat}' 형식은 폴더명을 다시 읽어낼 수 "
-                                             "없습니다 — 항목 사이에 구분 문자를 넣어주세요")
+            # 역파싱 라운드트립 — 만들 수 있어도 못 읽으면 환자 목록이 깨진다.
+            # 인식 전용 블록(순번·*·자릿수 범위)은 생성 때 빠지므로, 실제로
+            # 만들어질 모습(생성형)으로 검사한다.
+            gen = N.strip_recognition(pat)
+            probe = N.Identifiers("홍길동", "1" * cfg.identifiers.hospital_id.digits,
+                                  "2" * cfg.identifiers.ortho_id.digits)
+            try:
+                N.parse_pattern(N.folder_name(probe, gen), gen, label="폴더명",
+                                hospital_digits=cfg.identifiers.hospital_id.digits,
+                                ortho_digits=cfg.identifiers.ortho_id.digits,
+                                name_regex=cfg.identifiers.name.allow_regex)
+            except N.NamingError:
+                raise HTTPException(400, f"'{pat}' 형식은 폴더명을 다시 읽어낼 수 "
+                                         "없습니다 — 항목 사이에 구분 문자를 넣어주세요")
             pats.append(pat)
-        if pats and N.is_recognition_only(pats[0]):
-            raise HTTPException(400, "인식 전용 블록(*·숫자/문자 범위)이 든 형식은 "
-                                     "맨 위(새 폴더 생성용)에 둘 수 없습니다")
         if pats:
             d["folder_patterns"] = pats
         else:
@@ -3573,67 +3753,102 @@ def prefs_set(req: PrefsReq):
             if "{ortho_id}" not in pat:
                 raise HTTPException(400, "형식에는 {ortho_id} 가 있어야 합니다 "
                                          "(이름·병원번호는 선택)")
-            if not N.is_recognition_only(pat):
-                try:
-                    N.parse_ppt_filename(
-                        N.ppt_filename(probe, pat), pat,
-                        hospital_digits=cfg.identifiers.hospital_id.digits,
-                        ortho_digits=cfg.identifiers.ortho_id.digits,
-                        name_regex=cfg.identifiers.name.allow_regex)
-                except (N.NamingError, KeyError):
-                    raise HTTPException(400, f"'{pat}' 형식은 파일명을 다시 읽어낼 "
-                                             "수 없습니다 — 구분 문자를 넣어주세요")
+            gen = N.strip_recognition(pat)
+            try:
+                N.parse_ppt_filename(
+                    N.ppt_filename(probe, gen), gen,
+                    hospital_digits=cfg.identifiers.hospital_id.digits,
+                    ortho_digits=cfg.identifiers.ortho_id.digits,
+                    name_regex=cfg.identifiers.name.allow_regex)
+            except (N.NamingError, KeyError):
+                raise HTTPException(400, f"'{pat}' 형식은 파일명을 다시 읽어낼 "
+                                         "수 없습니다 — 구분 문자를 넣어주세요")
             pats.append(pat)
-        if pats and N.is_recognition_only(pats[0]):
-            raise HTTPException(400, "인식 전용 블록이 든 형식은 맨 위(생성용)에 "
-                                     "둘 수 없습니다")
         if pats:
             d["ppt_patterns"] = pats
         else:
             d.pop("ppt_patterns", None)
-    if req.label_patterns is not None:
-        pats = []
-        for pat in (p.strip() for p in req.label_patterns):
-            if not pat or pat in pats:
-                continue
-            if "{date}" not in pat or "{vkind}" not in pat:
-                raise HTTPException(400, "양식에는 {날짜}와 {초진/재진} 블록이 "
-                                         "모두 있어야 합니다")
-            pats.append(pat)
-        if pats and N.is_recognition_only(pats[0]):
-            raise HTTPException(400, "인식 전용 블록이 든 양식은 맨 위(생성용)에 "
-                                     "둘 수 없습니다")
-        if pats:
-            d["label_patterns"] = pats
-        else:
-            d.pop("label_patterns", None)
+    if req.label_format is not None:
+        if req.label_format not in _FMT_FP:
+            raise HTTPException(400, "tight 또는 spaced")
+        d["label_format"] = req.label_format
+        d.pop("label_patterns", None)   # 옛 블록 양식 — 더는 쓰지 않는다
+    if req.letterbox_color is not None:
+        v = req.letterbox_color.strip().lstrip("#")
+        if not re.fullmatch(r"[0-9A-Fa-f]{6}", v):
+            raise HTTPException(400, "색은 RGB 6자리(예: 000000)여야 합니다")
+        d["letterbox_color"] = v.upper()
+    if req.copy_shapes is not None:
+        if req.copy_shapes not in ("none", "lines", "all"):
+            raise HTTPException(400, "none · lines · all 중 하나")
+        d["copy_shapes"] = req.copy_shapes
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
-    Rd.set_label_patterns(_label_patterns())   # 저장 즉시 파서에도 반영
     _apply_note_sizes()                        # 노트 글자 크기도 즉시 반영
     return _prefs_json()
 
 
-@app.get("/api/pattern_check")
-def pattern_check(pattern: str = ""):
-    """조립 중인 폴더 형식으로 실제 폴더들이 읽히는지 미리 본다 (설정 화면)."""
-    pat = pattern or _folder_pattern()
-    dig = dict(hospital_digits=cfg.identifiers.hospital_id.digits,
-               ortho_digits=cfg.identifiers.ortho_id.digits,
-               name_regex=cfg.identifiers.name.allow_regex, label="폴더명")
-    out = []
+def _existing_ppt_names() -> list[str]:
+    """환자 폴더들에 실제로 있는 PPT 파일 이름 — 형식 미리보기용.
+
+    같은 이름이 여러 환자 폴더에 있을 이유는 없지만, 있어도 한 줄로 보이면 된다.
+    PowerPoint 임시 파일(~$)은 사람이 만든 이름이 아니라 뺀다.
+    """
+    seen: dict[str, None] = {}
     for d in sorted(ROOT.iterdir(), key=lambda x: x.name.lower()):
         if not d.is_dir() or d.name.startswith((".", "_")):
             continue
-        row = {"name": d.name, "match": False, "fallback": False}
-        try:
-            N.parse_pattern(d.name, pat, **dig)
-            row["match"] = True
-        except N.NamingError:
+        for f in _patient_files(d):
+            if f.suffix.lower() == ".pptx" and not f.name.startswith("~$"):
+                seen.setdefault(f.name)
+    return list(seen)
+
+
+@app.get("/api/pattern_check")
+def pattern_check(pattern: str = "", kind: str = "folder"):
+    """조립 중인 형식으로 실제 폴더·PPT 가 읽히는지 미리 본다 (설정 화면).
+
+    ✓ 이 형식으로 인식 · ↩ 다른 등록 형식으로는 인식 · ✗ 어느 형식으로도 못 읽음.
+    형식마다 **생성형 변형**(순번 등 인식 전용 블록과 빈 병원번호를 뺀 모습)도
+    함께 시도한다 — 그렇게 만들어진 이름도 그 형식 소속이기 때문이다.
+    """
+    dig = dict(hospital_digits=cfg.identifiers.hospital_id.digits,
+               ortho_digits=cfg.identifiers.ortho_id.digits,
+               name_regex=cfg.identifiers.name.allow_regex)
+    ppt = kind == "ppt"
+    if ppt:
+        pat = pattern or _ppt_pattern()
+        if not pat.lower().endswith(".pptx"):
+            pat += ".pptx"                  # 조립 중인 형식엔 확장자가 없다
+        names = _existing_ppt_names()
+    else:
+        pat = pattern or _folder_pattern()
+        names = [d.name for d in sorted(ROOT.iterdir(), key=lambda x: x.name.lower())
+                 if d.is_dir() and not d.name.startswith((".", "_"))]
+
+    def parse_one(name: str, q: str):
+        if ppt:
+            return N.parse_ppt_filename(name, q, **dig)
+        return N.parse_pattern(name, q, label="폴더명", **dig)
+
+    out = []
+    for name in names:
+        row = {"name": name, "match": False, "fallback": False}
+        for q in (pat, N.strip_recognition(pat),
+                  N.strip_recognition(pat, {"hospital_id"})):
+            if not q:
+                continue
             try:
-                _parse_folder(d.name, **dig)
-                row["fallback"] = True          # 옛/기본 형식으로는 읽힌다
-            except N.NamingError:
+                parse_one(name, q)
+                row["match"] = True
+                break
+            except (N.NamingError, KeyError):
+                pass
+        if not row["match"]:
+            try:
+                _parse_ppt_name(name) if ppt else _parse_folder(name, label="폴더명", **dig)
+                row["fallback"] = True      # 옛/기본 형식으로는 읽힌다
+            except (N.NamingError, KeyError):
                 pass
         out.append(row)
     return {"items": out}
@@ -3656,9 +3871,10 @@ def uninstall_prepare(body: dict = Body(default={})):
     if _busy():
         return {"ok": False, "detail": "확정하지 않은 작업이 있습니다"}
     drop = bool(body.get("drop_data"))
+    tools = [str(t) for t in (body.get("drop_tools") or [])]
     if drop and body.get("confirm") != "삭제":
         return {"ok": False, "detail": "환자 자료를 지우려면 확인 문구가 필요합니다"}
-    r = Un.prepare(BACKEND_DIR.parents[1], ROOT, drop_data=drop)
+    r = Un.prepare(BACKEND_DIR.parents[1], ROOT, drop_data=drop, drop_tools=tools)
     # 종료코드 0 — 재시작 루프를 끝낸다 (42 는 재시작)
     threading.Timer(1.0, lambda: os._exit(0)).start()
     return r
@@ -3685,12 +3901,124 @@ def weights_status():
 app.mount("/static", _NoCacheStatic(directory=str(FRONTEND_DIR)), name="static")
 
 
+def _port_free(port: int) -> bool:
+    """그 포트에 바인딩할 수 있나 — 서버가 실제로 뜰 수 있는지와 같은 조건.
+
+    POSIX 에서는 `SO_REUSEADDR` 를 켠다. 방금 죽은 프로세스가 남긴 TIME_WAIT 소켓이
+    있으면 이 옵션 없이는 바인딩이 막히는데, 정작 uvicorn 은 이 옵션을 켜고 뜨므로
+    "못 쓴다" 는 판정이 거짓이 된다 (좀비를 정리하고도 실패로 봤다).
+    Windows 에서는 켜지 않는다 — 거기서는 이 옵션이 **남이 쓰는 포트도 빼앗는**
+    뜻이라, 켜면 비어 있지도 않은 포트를 비었다고 보게 된다.
+    """
+    import socket                                                   # noqa: PLC0415
+    with socket.socket() as s:
+        if os.name != "nt":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _ours_at(port: int) -> bool:
+    """그 포트에 떠 있는 것이 **살아 있는 이 앱**인가.
+
+    두 번, 넉넉한 시간을 두고 물어본다. 한 번 놓치고 좀비로 판정하면 멀쩡히 돌던
+    실행을 죽이게 되는데, 그 안에는 아직 확정하지 않은 작업(담아둔 사진·조정한
+    구도·입력한 노트)이 통째로 들어 있다. 되살릴 수 없는 손실이라 판정을 느슨하게
+    잡는 편이 맞다.
+    """
+    import urllib.request                                           # noqa: PLC0415
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/api/health", timeout=4.0) as r:
+                return bool(json.loads(r.read()).get("program_dir"))
+        except Exception:                                           # noqa: BLE001
+            if attempt == 0:
+                time.sleep(0.6)
+    return False
+
+
+# 실행 중인 서버가 자기 pid 와 포트를 적어 두는 자리. 새로 뜨는 쪽이 "포트를 쥔
+# 것이 우리 것인가" 를 확인하는 데 쓴다 — 이게 없으면 남의 프로그램을 죽일 수 있다.
+LOCK_FILE = PROGRAM_DIR / ".server.json"
+
+
+def _write_lock(port: int) -> None:
+    try:
+        LOCK_FILE.write_text(json.dumps({"pid": os.getpid(), "port": port}),
+                             encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _kill_stale(port: int) -> bool:
+    """응답하지 않으면서 포트만 쥐고 있는 **우리 프로세스**를 정리한다.
+
+    창을 닫았는데 프로세스만 남았거나 멎어 버린 경우다. 죽일 대상은 우리가 적어
+    둔 pid 와 포트가 모두 맞을 때뿐이다 — 포트만 보고 죽이면 하필 그 포트를 쓰던
+    남의 프로그램을 끄게 된다.
+    """
+    import signal                                                   # noqa: PLC0415
+    try:
+        d = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+    except Exception:                                               # noqa: BLE001
+        return False
+    pid = d.get("pid")
+    if not isinstance(pid, int) or d.get("port") != port or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False                    # 이미 없는 pid — 포트는 남이 쥐고 있다
+    for _ in range(20):                 # 최대 2초 기다린다
+        time.sleep(0.1)
+        if _port_free(port):
+            return True
+    try:                                # 안 죽으면 강제로 (Windows 는 위가 이미 강제)
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except OSError:
+        pass
+    for _ in range(20):                 # 포트가 풀릴 때까지 다시 2초
+        time.sleep(0.1)
+        if _port_free(port):
+            return True
+    return False
+
+
 def run():
     import threading
     import webbrowser
     import uvicorn
-    # 포트를 열어둔다 — 같은 PC 에서 옛 설치본이 8000 을 잡고 있으면 새 것이 못 뜬다.
     port = int(os.environ.get("PORT", "8000"))
+    # 이미 쓰이는 포트면 서버가 뜨지 못하고 창이 그냥 닫힌다 — 사용자 눈에는
+    # "실행했는데 아무 일도 안 일어남" 이다. 그래서 먼저 살펴본다.
+    if not _port_free(port):
+        if _ours_at(port):
+            # 앞서 띄운 것이 **살아서** 돌고 있다. 두 번째를 띄울 이유가 없고,
+            # 죽여서도 안 된다 — 확정 전 작업이 그 안에 있다. 브라우저만 연다.
+            print(f"[알림] 이미 실행 중입니다 (포트 {port}). 브라우저만 엽니다.")
+            webbrowser.open(f"http://127.0.0.1:{port}/")
+            return
+        if _kill_stale(port):
+            # 창은 닫혔는데 프로세스만 남아 포트를 쥐고 있던 경우 — 정리하고 뜬다.
+            print(f"[알림] 응답하지 않는 이전 실행을 정리하고 시작합니다 (포트 {port}).")
+        else:
+            # 남이 쓰는 포트다. **옆 포트로 물러나지 않는다** — 주소가 늘 같아야
+            # 즐겨찾기·바로가기가 계속 맞는다. 남의 프로그램을 끌 수도 없으니
+            # 무엇을 하라는 것인지 적고 멈춘다.
+            print(f"[오류] 포트 {port} 을 다른 프로그램이 쓰고 있습니다.")
+            print("       그 프로그램을 닫고 다시 실행해 주세요.")
+            print(f"       확인:  netstat -ano | findstr :{port}")
+            print(f"       이번만 다른 포트로 띄우려면:  set PORT={port + 1} && run.bat")
+            try:
+                input("       Enter 를 누르면 닫습니다... ")
+            except EOFError:
+                pass
+            return
+    _write_lock(port)
     threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}/")).start()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
 

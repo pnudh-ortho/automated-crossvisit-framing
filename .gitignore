@@ -35,3 +35,5 @@ _update_backup_*/
 # 가중치를 models\ 가 아닌 곳에 떨어뜨려도 업데이트가 막히지 않게.
 # 추적되는 .onnx 는 없다 — 가중치는 git 에 넣지 않는다.
 *.onnx
+.server.json
+.installed_tools

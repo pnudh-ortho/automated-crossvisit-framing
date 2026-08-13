@@ -47,6 +47,7 @@ class VisitSlide:
     visit: str | None            # 차수 알파벳 (A, B, ...) 또는 None
     date: str | None             # "YY.MM.DD"
     kind: str                    # "first"|"revisit"|"unknown"
+    label_text: str = ""         # 라벨 원문 — 표기 지문(label_fingerprint)용
     slots: dict[str, SlotRef] = field(default_factory=dict)
     # 우상단 상태 칸의 글. `Tx./App. Period` 의 기준일이 괄호로 여기 적혀 있어서,
     # 재진 때 그 날짜를 되읽는다 (`main._period_start`).
@@ -62,50 +63,6 @@ _REVISIT = re.compile(r"재진\s*\(?([A-Z]+)?")
 _FIRST = re.compile(r"초진")
 
 
-# 사용자 등록 라벨 양식 (설정 → 날짜/차수). main 이 기동·저장 시 주입한다.
-# 토큰: {date}=날짜  {vkind}=초진/재진  {visit}=차수글자  (+ 인식 전용 {any} 등)
-_LABEL_RX: list = []
-_TOK = {
-    "date": r"(?P<date>\d{2}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2})",
-    "vkind": r"(?P<vkind>초진|재진)",
-    "visit": r"(?P<visit>[A-Z]+)",
-}
-
-
-def set_label_patterns(patterns: list[str]) -> None:
-    """등록 양식 → 정규식 컴파일. 못 읽는 양식은 조용히 건너뛴다."""
-    _LABEL_RX.clear()
-    for pat in patterns:
-        out, i = [], 0
-        try:
-            while i < len(pat):
-                if pat[i] == "{":
-                    j = pat.index("}", i)
-                    f = pat[i + 1: j]
-                    if f in _TOK:
-                        out.append(_TOK[f])
-                    elif f == "any":
-                        out.append(r".*?")
-                    elif re.fullmatch(r"([dc])(\d+)-(\d+)", f):
-                        m = re.fullmatch(r"([dc])(\d+)-(\d+)", f)
-                        base = r"\d" if m.group(1) == "d" else r"."
-                        out.append(f"{base}{{{m.group(2)},{m.group(3)}}}")
-                    else:
-                        raise ValueError(f)
-                    i = j + 1
-                elif pat[i] == " ":
-                    # 리터럴 공백은 "있어도 없어도" — (재진 B)와 (재진C)가 같은
-                    # 양식으로 읽힌다. 쓸 때는 양식 그대로 공백을 붙인다.
-                    out.append(r"\s*")
-                    i += 1
-                else:
-                    out.append(re.escape(pat[i]))
-                    i += 1
-            _LABEL_RX.append(re.compile("".join(out)))
-        except (ValueError, re.error):
-            continue
-
-
 def _norm_date(raw: str | None) -> str | None:
     """"26. 1. 5" · "26.01.05" → "26.01.05". 표기가 달라도 같은 날짜는 같은 글."""
     nums = re.findall(r"\d+", raw or "")
@@ -116,17 +73,11 @@ def _norm_date(raw: str | None) -> str | None:
 
 
 def parse_info_box(text: str) -> tuple[str | None, str | None, str]:
-    """INFO_BOX 텍스트 → (visit, date, kind). visit 은 글자가 없으면 None."""
-    # 등록 양식 먼저 — 사람이 쓰는 라벨 모양을 그대로 알아본다.
-    for rx in _LABEL_RX:
-        m = rx.search(text or "")
-        if not m:
-            continue
-        g = m.groupdict()
-        date = _norm_date(g.get("date"))
-        kind = "first" if g.get("vkind") == "초진" else "revisit"
-        visit = g.get("visit") or ("A" if kind == "first" else None)
-        return visit, date, kind
+    """INFO_BOX 텍스트 → (visit, date, kind). visit 은 글자가 없으면 None.
+
+    파서는 이것 하나다 — 표기는 점 뒤 공백·끝점·차수 글자 유무 정도만 흔들린다는
+    전제로, 등록 양식 없이 관대하게 읽는다 (2026-08-13 결정).
+    """
     date = None
     m = _DATE.search(text or "")
     if m:
@@ -137,6 +88,29 @@ def parse_info_box(text: str) -> tuple[str | None, str | None, str]:
     if m:
         return m.group(1), date, "revisit"
     return None, date, "unknown"
+
+
+def label_fingerprint(text: str) -> dict | None:
+    """라벨 원문의 표기 지문 — 새 라벨이 그 덱의 모양을 그대로 따라 쓰게 한다.
+
+    한 덱 안에서도 손으로 적은 라벨은 띄어쓰기가 흔들린다("18(재진 C)" · "18 (재진F)").
+    큰 틀(날짜 + 괄호 안 초진/재진 + 차수 글자)은 그대로이므로, 흔들리는 다섯 곳만
+    본다: 점 뒤 공백 · 날짜 끝 마침표 · 괄호 유무 · 괄호 앞 공백 · 차수 글자 앞 공백
+    (그리고 글자가 있는지). 마지막 차수 슬라이드를 기준으로 삼는다.
+    """
+    m = re.search(r"(\d{2})\s*\.(\s*)\d{1,2}\s*\.\s*(\d{1,2})(\s*\.)?", text or "")
+    if not m:
+        return None
+    # 날짜 뒤 — 괄호(있다면)와 초진/재진, 그리고 차수 글자까지의 사이 공백
+    k = re.search(r"(\s*)(\()?\s*(?:초진|재진)(\s*)([A-Z]+)?", text or "")
+    return {
+        "spaced": bool(m.group(2)),
+        "trailing_dot": bool(m.group(4)),
+        "paren": bool(k.group(2)) if k else True,
+        "paren_space": bool(k.group(1)) if k else True,
+        "letter_space": bool(k.group(3)) if k else True,
+        "has_letter": bool(k.group(4)) if k else False,
+    }
 
 
 # ── 픽셀 복원 ─────────────────────────────────────────────────────────────────
@@ -235,8 +209,7 @@ def _visit_text(slide, cfg) -> str:
     """차수·날짜가 적힌 상자의 글.
 
     INFO_BOX → 날짜 칸 순으로 **이름**으로 찾고, 둘 다 없으면(수제 PPT) 슬라이드의
-    모든 텍스트 박스를 훑어 날짜+초진/재진 라벨이 든 첫 박스를 쓴다 — 등록한
-    날짜/차수 양식(set_label_patterns)도 이 파싱에 그대로 적용된다.
+    모든 텍스트 박스를 훑어 날짜+초진/재진 라벨이 든 첫 박스를 쓴다.
     """
     for name in (cfg.ppt.info_box_name, _NOTE_DATE_BOX):
         sh = find_shape(slide, name)
@@ -252,14 +225,39 @@ def _visit_text(slide, cfg) -> str:
     return ""
 
 
+# 기간 칸을 글로 알아볼 때 쓰는 머리말. main.PERIOD_KEYS 와 같은 문자열이다
+# (여기서 main 을 임포트하면 순환이 된다).
+_PERIOD_MARKS = ("Tx. Period", "Rx. Period", "App. Period")
+
+
+def _status_text(slide) -> str:
+    """기간 칸(Tx/Rx/App)의 글.
+
+    이름(NOTE_STATUS)으로 먼저 찾고, 없으면 **글 내용으로** 찾는다 — 라벨과 같은
+    방식이다. 수제 PPT 의 상자에는 이름 규약이 없어서, 이 폴백이 없으면 기준일
+    이력이 통째로 비고 기간이 차수마다 0 month 로 다시 시작한다.
+    """
+    sh = find_shape(slide, _NOTE_STATUS_BOX)
+    if sh is not None and getattr(sh, "has_text_frame", False) \
+            and (sh.text_frame.text or "").strip():
+        return sh.text_frame.text
+    for sh in slide.shapes:
+        if not getattr(sh, "has_text_frame", False):
+            continue
+        t = sh.text_frame.text or ""
+        if any(m in t for m in _PERIOD_MARKS):
+            return t
+    return ""
+
+
 def read_visit_slide(slide, slide_index: int, cfg, px_per_cm: float,
                      windows: dict[str, WindowCm] | None = None,
                      slide_ctr: tuple[float, float] | None = None) -> VisitSlide:
-    visit, date, kind = parse_info_box(_visit_text(slide, cfg))
-    vs = VisitSlide(slide_index=slide_index, visit=visit, date=date, kind=kind)
-    st = find_shape(slide, _NOTE_STATUS_BOX)
-    if st is not None and st.has_text_frame:
-        vs.status_text = st.text_frame.text
+    text = _visit_text(slide, cfg)
+    visit, date, kind = parse_info_box(text)
+    vs = VisitSlide(slide_index=slide_index, visit=visit, date=date, kind=kind,
+                    label_text=text)
+    vs.status_text = _status_text(slide)
 
     # 슬롯별 사진 도형 (PHOTO_SLOT_x). 창 좌표는 config 슬롯 좌표 사용
     # (앵커가 삭제되었으므로 템플릿 슬롯 기준을 쓴다 — ppt_reader.slot_windows 주입).
@@ -379,28 +377,68 @@ def assign_letterless_visits(visits: list[VisitSlide]) -> None:
             v.kind = "revisit"
 
 
-def scan_ppt_visits(prs, cfg) -> list[tuple[str, str | None]]:
-    """슬라이드 라벨만 읽어 (차수 글자, 날짜) 목록을 얻는다 — 픽셀 복원 없이.
+def _cross_like(slide) -> bool:
+    """십자뷰 슬라이드인가 — 도형 메타데이터만 본다(픽셀 복원 없음).
 
-    환자 목록처럼 PPT 를 자주 훑는 곳을 위한 가벼운 스캔이다. 사진이 든
-    슬라이드의 라벨만 보고, 글자 없는 재진 라벨은 read_all_visits 와 같은
-    규칙(날짜순)으로 글자를 받는다.
+    앱 슬라이드는 슬롯 이름(PHOTO_SLOT_*)으로, 수제 슬라이드는 read_visit_slide
+    폴백과 같은 기준(폭 8cm 이상 사진 5장)으로 판정한다. 접두를 SLOT 까지 보는
+    이유: 얼굴 슬라이드의 PHOTO_FACE_* 가 십자뷰로 오인되면 안 된다.
     """
-    found: list[VisitSlide] = []
+    big = 0
+    for sh in slide.shapes:
+        if str(getattr(sh, "name", "")).startswith(PHOTO_NAME_PREFIX + "SLOT"):
+            return True
+        if getattr(sh, "shape_type", None) == 13 and emu_to_cm(sh.width) >= 8.0:
+            big += 1
+    return big >= 5
+
+
+def scan_ppt_visits(prs, cfg) -> dict:
+    """슬라이드 라벨을 읽어 차수 장부를 만든다 — 픽셀 복원 없이.
+
+    차수는 **십자뷰 슬라이드의 라벨** 하나로 통일한다("라벨 없는 십자뷰는 없다"
+    전제). 판정 순서는 라벨 확인 → 사진 기하 확인 — 라벨 없는 장은 기하 검사
+    비용도 내지 않는다. 라벨은 있는데 십자뷰가 아닌 장(얼굴·엑스레이 등)은
+    excluded 로 돌려 화면이 "왜 제외됐는지" 보여줄 수 있게 한다. 십자뷰를
+    하나도 못 알아본 덱만 라벨 장 전체로 물러난다(fallback) — 8cm 문턱에 걸린
+    수제 덱에서 이력이 통째로 사라지는 것을 막는다.
+
+    반환: {"visits":  [{visit, date, slide_no}...],   # 차수 장부 (글자 부여 완료)
+           "excluded": [{slide_no, visit, date}...],  # 라벨은 있으나 십자뷰 아님
+           "fallback": bool,
+           "slides":   int}                           # 덱의 전체 장수
+    """
+    labeled: list[VisitSlide] = []
+    cross: list[VisitSlide] = []
     for i, slide in enumerate(prs.slides):
         if not any(getattr(sh, "shape_type", None) == 13 for sh in slide.shapes):
             continue                  # 글만 있는 장(환자정보 등)은 차수가 아니다
-        for sh in slide.shapes:
-            if not getattr(sh, "has_text_frame", False):
-                continue
-            v, date, kind = parse_info_box(sh.text_frame.text or "")
-            if kind != "unknown" and (v or date):
-                vs = VisitSlide(slide_index=i, visit=v, date=date, kind=kind)
-                vs.slots = {"_": None}    # 글자 부여 규칙이 보는 '차수 슬라이드' 표식
-                found.append(vs)
-                break
-    assign_letterless_visits(found)
-    return [(vs.visit, vs.date) for vs in found if vs.visit]
+        text = _visit_text(slide, cfg)          # ① 라벨 먼저 — 없으면 여기서 끝
+        if not text:
+            continue
+        v, date, kind = parse_info_box(text)
+        if kind == "unknown" and not (v or date):
+            continue
+        vs = VisitSlide(slide_index=i, visit=v, date=date, kind=kind,
+                        label_text=text)
+        labeled.append(vs)
+        if _cross_like(slide):                  # ② 라벨이 있는 장만 기하 확인
+            cross.append(vs)
+    picked = cross or labeled                   # ③ 십자뷰 0개 덱만 관대한 폴백
+    for vs in picked:
+        vs.slots = {"_": None}    # 글자 부여 규칙이 보는 '차수 슬라이드' 표식
+    assign_letterless_visits(picked)
+    chosen = {id(vs) for vs in picked}
+    return {
+        "visits": [{"visit": vs.visit, "date": vs.date,
+                    "slide_no": vs.slide_index + 1}
+                   for vs in picked if vs.visit],
+        "excluded": [{"slide_no": vs.slide_index + 1, "visit": vs.visit,
+                      "date": vs.date}
+                     for vs in labeled if id(vs) not in chosen],
+        "fallback": bool(labeled) and not cross,
+        "slides": len(prs.slides._sldIdLst),
+    }
 
 
 def references_for_registration(visits: list[VisitSlide]) -> dict[str, dict[str, np.ndarray]]:

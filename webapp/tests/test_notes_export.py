@@ -244,7 +244,7 @@ def test_info_preview_matches_what_gets_written(patient):
                                     "values": {"sex": "F", "age": "19y 2m", "cc": "덧니"}})
     pi = client.get(f"/api/notes/{sid}").json()["patient_info"]
     assert pi["enabled"] and pi["slide"] == 1
-    assert pi["fields"] == ["sex", "age", "cc"]
+    assert pi["fields"] == ["sex", "hospital_id", "age", "cc"]
     # 고칠 수 있는 박스가 정확히 하나 (우리가 채우는 줄을 든 박스)
     hot = [n for n, b in pi["boxes"].items() if b["editable"]]
     assert len(hot) == 1, pi["boxes"]
