@@ -1771,14 +1771,15 @@ def ppt_preview(folder: str):
             except Exception:       # noqa: BLE001 — 깨진 그림
                 continue
     # 수제 PPT 폴백 — 이름 규약이 없다. 앞에서부터 훑어 **너비 12cm 이상,
-    # 가로(폭>높이)** 사진이 있는 첫 슬라이드를 얼굴 슬라이드로 보고 그 슬라이드의
-    # 사진만 쓴다(십자 사진은 8cm 안팎이라 안 걸린다). 뒤 슬라이드는 보지 않는다.
+    # 가로(폭>높이) 사진이 2장 이상**인 첫 슬라이드를 얼굴 슬라이드로 보고 그
+    # 슬라이드의 사진만 쓴다(십자 사진은 8cm 안팎이라 안 걸리고, 큰 사진이
+    # 한 장뿐인 슬라이드는 엑스레이 등일 수 있다). 뒤 슬라이드는 보지 않는다.
     if not faces:
         for slide in prs.slides:
             big = [sh for sh in slide.shapes
                    if _pic_image(sh) is not None
                    and emu_to_cm(sh.width) >= 12.0 and sh.width > sh.height]
-            if not big:
+            if len(big) < 2:
                 continue
             for sh in big[:2]:
                 try:
