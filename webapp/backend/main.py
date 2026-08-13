@@ -1750,6 +1750,32 @@ def fs(path: str = ""):
             "dirs": dirs, "drives": _fs_roots(), "current_root": str(ROOT)}
 
 
+class MkdirReq(BaseModel):
+    path: str
+    name: str
+
+
+@app.post("/api/fs/mkdir")
+def fs_mkdir(req: MkdirReq):
+    """저장 위치 픽커에서 새 폴더 만들기 — 탐색기로 나갔다 올 필요가 없게."""
+    base = Path(req.path).expanduser()
+    if not base.is_dir():
+        raise HTTPException(404, f"폴더가 없습니다: {base}")
+    name = req.name.strip().rstrip(".")
+    if not name or set(chr(92) + '/:*?"<>|') & set(name):
+        raise HTTPException(400, '폴더 이름이 비었거나 \\ / : * ? " < > | 가 들어 있습니다')
+    p = (base / name).resolve()
+    if p.exists():
+        if p.is_dir():
+            return {"path": str(p), "existed": True}   # 이미 있으면 그리로 들어간다
+        raise HTTPException(400, f"같은 이름의 파일이 있습니다: {name}")
+    try:
+        p.mkdir()
+    except OSError as e:
+        raise HTTPException(400, f"만들지 못했습니다: {e}")
+    return {"path": str(p), "existed": False}
+
+
 class RootReq(BaseModel):
     path: str
 

@@ -595,6 +595,7 @@ async function drawRootPicker(path, host){
     `<div class="dlist" id="pk-list"></div>` +
     `<p style="margin:14px 0 0; display:flex; gap:8px;">` +
       `<button class="btn primary" id="pk-ok">이 폴더로 지정</button>` +
+      `<button class="btn" id="pk-new">＋ 새 폴더</button>` +
       `<button class="btn" id="pk-cancel">취소</button></p>` +
     `<p class="err" id="pk-err"></p>`;
 
@@ -615,6 +616,16 @@ async function drawRootPicker(path, host){
     list.appendChild(b);
   }
 
+  el("pk-new").onclick = async () => {
+    const name = (prompt("새 폴더 이름") || "").trim();
+    if(!name) return;
+    try{
+      const res = await api("/api/fs/mkdir", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({path: r.path, name})});
+      drawRootPicker(res.path, host);   // 만든 폴더 안으로 들어가 바로 지정할 수 있게
+    }catch(e){ el("pk-err").textContent = e.message; }
+  };
   el("pk-up").onclick = () => r.parent && drawRootPicker(r.parent, host);
   el("pk-cancel").onclick = () => closePicker(host);
   el("pk-ok").onclick = async () => {
