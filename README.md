@@ -31,7 +31,9 @@
 
 ## Install
 
-Download **[`install.bat`](install.bat)** (Windows) and run it. Everything
+### Windows
+
+Download **[`install.bat`](install.bat)** and run it. Everything
 else follows:
 
 1. Installs Git and Python via `winget` if missing
@@ -39,6 +41,21 @@ else follows:
 3. Clones the repository and creates the virtual environment
 4. Optionally creates a desktop shortcut, then points you at the `models\`
    folder for the weights
+
+### macOS
+
+Download **[`install.command`](install.command)** and run it from
+Terminal:
+
+```
+bash ~/Downloads/install.command
+```
+
+It installs the Xcode command line tools if needed (git + python3),
+asks where to install, clones the repository, sets up the virtual
+environment, and offers a desktop shortcut. A downloaded script loses
+its execute bit, hence `bash` for this first run — everything the
+installer creates opens with a double-click afterwards.
 
 ### Model weights (~400 MB)
 
