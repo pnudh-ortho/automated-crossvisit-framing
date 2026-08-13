@@ -2268,20 +2268,18 @@ async function patPost(list){
 function patRenderSaved(){
   const box = el("pat-saved"); if(!box) return;
   box.innerHTML = "";
-  // 기본 형식도 목록의 한 줄로 보인다 — 폴더·PPT 인식에는 항상 끼어 있고,
-  // 날짜/차수는 등록이 없을 때만 쓰이므로 그때만 낸다. 지우는 건 불가.
+  // 등록한 목록이 전부다 — 기본 형식은 목록이 비어 있을 때만 안전망으로
+  // 나타난다(— 기본 표시). 형식을 하나라도 등록하면 기본은 어디에도 안 낀다.
   const def = PAT.def || "{name}_{hospital_id}_{ortho_id}";
-  const rows = PAT.saved.slice();
-  const defRow = !rows.includes(def) && (PAT.kind !== "label" || !rows.length);
-  if(defRow) rows.push(def);
+  const implicit = !PAT.saved.length;
+  const rows = implicit ? [def] : PAT.saved.slice();
   rows.forEach((pat, i) => {
-    const isDef = defRow && i === rows.length - 1;
     const r = document.createElement("div");
     const star = document.createElement("span");
     star.textContent = i === 0 ? "★" : "";
     const ex = document.createElement("span");
     ex.className = "ex";
-    ex.textContent = patExample(pat) + (isDef ? " — 기본" : "");
+    ex.textContent = patExample(pat) + (implicit ? " — 기본" : "");
     ex.title = pat;
     const up = document.createElement("button");
     up.textContent = "▲";
@@ -2294,8 +2292,7 @@ function patRenderSaved(){
     }
     const bx = document.createElement("button");
     bx.textContent = "×";
-    if(isDef){ bx.disabled = true; bx.title = "기본 형식은 지울 수 없습니다"; }
-    else bx.onclick = () => patPost(PAT.saved.filter(p => p !== pat));
+    bx.onclick = () => patPost(PAT.saved.filter(p => p !== pat));
     r.append(star, ex, up, bx);
     box.appendChild(r);
   });

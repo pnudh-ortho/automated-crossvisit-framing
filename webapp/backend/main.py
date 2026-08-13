@@ -3110,8 +3110,14 @@ def _ppt_pattern() -> str:
 
 
 def _ppt_patterns() -> list[str]:
+    """PPT 파일명 파싱에 시도할 형식들 — 등록 목록이 전부다.
+
+    목록이 비어 있을 때만 config 기본형이 안전망으로 쓰인다. 예전에는 기본형을
+    항상 뒤에 붙였는데, 그러면 병원번호가 든 기본형을 지울 길이 없다
+    (2026-08-13 결정). 옛 형식 파일을 계속 읽으려면 그 형식을 목록에 남겨 둔다.
+    """
     out = []
-    for p in _saved_patterns("ppt_patterns") + [cfg.naming.ppt_pattern]:
+    for p in _saved_patterns("ppt_patterns") or [cfg.naming.ppt_pattern]:
         if p and p not in out:
             out.append(p)
     return out
@@ -3176,13 +3182,15 @@ def _folder_pattern() -> str:
 
 
 def _folder_patterns() -> list[str]:
-    """폴더명 파싱에 시도할 형식들 — 목록 전부 + 기본.
+    """폴더명 파싱에 시도할 형식들 — 등록 목록이 전부다.
 
-    형식을 바꿔도 옛 형식으로 만든 환자 폴더가 계속 인식되어야 한다. 기존 폴더의
-    이름을 고쳐 쓰는 선택지는 없다 — 의료 기록이다.
+    목록이 비어 있을 때만 config 기본형이 안전망으로 쓰인다. 예전에는 기본형을
+    항상 뒤에 붙였는데, 그러면 병원번호가 든 기본형을 지울 길이 없다
+    (2026-08-13 결정). 옛 형식으로 만든 폴더를 계속 읽으려면 — 기존 폴더의
+    이름을 고쳐 쓰는 선택지는 없다, 의료 기록이다 — 그 형식을 목록에 남겨 둔다.
     """
     out = []
-    for p in _saved_patterns() + [cfg.naming.folder_pattern]:
+    for p in _saved_patterns() or [cfg.naming.folder_pattern]:
         if p and p not in out:
             out.append(p)
     return out
