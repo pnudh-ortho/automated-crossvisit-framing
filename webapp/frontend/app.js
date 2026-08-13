@@ -2426,6 +2426,19 @@ async function patLoad(){
       b.onclick = () => { PAT.toks.push({t: "s", v}); patRender(); };
       pal.appendChild(b);
     }
+    // 직접 입력 블록 — 모든 이름에 그대로 들어가는 글자라 생성(★)에도 쓴다.
+    const bt = document.createElement("button");
+    bt.textContent = "+ 글자 입력";
+    bt.onclick = () => {
+      const v = (prompt("이름에 넣을 글자 (예: 교정, -final)") || "").trim();
+      if(!v) return;
+      if(/[{}\\/:*?"<>|]/.test(v)){
+        el("pat-msg").textContent = '\\ / : * ? " < > | { } 는 글자에 못 씁니다';
+        return;
+      }
+      PAT.toks.push({t: "s", v}); patRender();
+    };
+    pal.appendChild(bt);
     // 인식 전용 블록 — 손으로 만든 옛 폴더를 읽을 때만 쓰인다 (생성용 불가).
     // 날짜/차수 탭에는 안 낸다 — 라벨 양식은 세 블록 + 공백·괄호면 충분하다.
     const addR = (v) => { PAT.toks.push({t: "r", v}); patRender(); };
