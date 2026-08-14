@@ -1172,6 +1172,16 @@ function pptLostNote(p){
       PowerPoint 에서 열어 <b>[다른 이름으로 저장] → PowerPoint 프레젠테이션(.pptx)</b> 으로 저장해 주세요<br>
       그 파일을 찾으면 <b>새로 만들지 않고 이어서 씁니다.</b> 원본 .ppt 는 그대로 두어도 됩니다.${old.map(g =>
         `<br>· <span class="ident">${esc(g.name)}</span>`).join("")}</div>`;
+  // 한쇼(.show) 뿐인 경우 — 저장 형식을 바꾸는 한 번으로 끝난다. 다만 확장자만
+  // 바꿔서는 안 된다는 말을 반드시 함께 해야 한다. 겉이 같아 보여 그렇게들 한다.
+  const show = diag.filter(g => /\.show$/i.test(g.name));
+  if(show.length && show.length === diag.length && show.every(g => g.convertible))
+    return `<div class="note" style="margin-top:10px">
+      <b>⚠ 한쇼(.show) 파일만 있습니다.</b> 이 프로그램은 <b>.pptx</b> 만 열 수 있습니다.<br>
+      한쇼에서 열어 <b>[파일] → [다른 이름으로 저장] → PowerPoint 문서(*.pptx)</b> 로 저장해 주세요<br>
+      <b>이름만 .pptx 로 바꾸는 것으로는 안 됩니다</b> — 속이 다른 형식이라 열리지 않습니다.<br>
+      그 파일을 찾으면 <b>새로 만들지 않고 이어서 씁니다.</b> 원본 .show 는 그대로 두어도 됩니다.${show.map(g =>
+        `<br>· <span class="ident">${esc(g.name)}</span>`).join("")}</div>`;
   return `<div class="note" style="margin-top:10px">
     <b>PPT를 찾을 수 없어 새로 만듭니다.</b>
     ${diag.map(g => `<br>· <span class="ident">${esc(g.name)}</span> — ${esc(g.why)}`).join("")}
@@ -1280,10 +1290,12 @@ async function loadFolder(folder){
       `<div class="frow" data-kind="${it.kind}"${
         it.kind === "ppt" && decks > 1 && !it.selected
           ? ` data-pick="${esc(it.name)}" title="이 PPT 에 이어붙입니다"` : ""}>` +
-        `<span class="ic">${it.kind === "ppt" ? "📄" : it.kind === "photo" ? "🖼" : "▫"}</span>` +
+        `<span class="ic">${it.kind === "ppt" ? "📄" : it.kind === "deck" ? "📄"
+                            : it.kind === "photo" ? "🖼" : "▫"}</span>` +
         `<span class="fn">${esc(it.name)}${it.selected ?
           ` <span class="sel">✓ 선택됨</span>` : ""}${
-          /\.ppt$/i.test(it.name) ? ` <span class="old">구형</span>` : ""}</span>` +
+          /\.ppt$/i.test(it.name) ? ` <span class="old">구형</span>` : ""}${
+          /\.show$/i.test(it.name) ? ` <span class="old">한쇼</span>` : ""}</span>` +
         `<span class="fs">${fmtSize(it.size)}</span>` +
       `</div>`).join("");
     for(const row of box.querySelectorAll(".frow[data-pick]"))

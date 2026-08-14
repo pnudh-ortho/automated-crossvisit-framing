@@ -1077,7 +1077,7 @@ def _patient_ppts(d: Path, ortho_id: str = "") -> list[Path]:
                 if e.is_dir():
                     if depth < 2 and not (skip and e.name.startswith(skip)):
                         walk(Path(e.path), depth + 1)
-                elif e.name.lower().endswith((".pptx", ".ppt")):
+                elif e.name.lower().endswith(DECK_EXT):
                     out.append(Path(e.path))
             except OSError:
                 continue
@@ -1723,6 +1723,11 @@ def session_revisit(req: RevisitReq):
 # 초진/재진은 사용자가 선언하지 않는다 — 폴더 안에 PPT가 있느냐로 서버가 판정한다.
 IMG_EXT = (".jpg", ".jpeg", ".png")
 
+# 발표 파일로 볼 확장자. **고르는 대상은 `.pptx` 뿐**이고 나머지는 "왜 안 붙는지"
+# 알려주려고 모은다. 조용히 지나치면 한쇼로만 작업해 온 사람은 폴더에 덱이 빤히
+# 있는데도 "PPT 없음" 만 보게 된다.
+DECK_EXT = (".pptx", ".ppt", ".show")
+
 
 # 환자 목록이 뜰 때마다 모든 PPT 를 여는 건 느리다 — (경로, mtime)로 캐시.
 _VISITS_CACHE: dict[str, tuple[float, dict]] = {}
@@ -1760,18 +1765,30 @@ def _ppt_visit_letters(path: Path, allow_open: bool = True) -> dict | None:
 def _ppt_reject_reason(name: str, ids) -> dict:
     """이 파일을 왜 그 환자의 PPT 로 안 봤는가 — 화면에 보일 한 줄 + 해결 여부.
 
-    구형 `.ppt` 는 **같은 이름을 .pptx 로 저장했을 때 인식되는지**까지 본다.
-    이름 자체가 양식과 어긋나 있으면 변환만으로는 안 되는데, 그걸 알려주지 않으면
-    시키는 대로 저장하고도 여전히 안 붙는 이유를 알 수 없다.
+    구형 `.ppt` 와 한쇼 `.show` 는 **같은 이름을 .pptx 로 저장했을 때 인식되는지**
+    까지 본다. 이름 자체가 양식과 어긋나 있으면 변환만으로는 안 되는데, 그걸
+    알려주지 않으면 시키는 대로 저장하고도 여전히 안 붙는 이유를 알 수 없다.
     """
     if name.startswith("~$"):
         return {"why": "PowerPoint 임시 파일입니다"}
-    if name.lower().endswith(".ppt"):
+
+    low = name.lower()
+    if low.endswith((".ppt", ".show")):
+        # 이름을 .pptx 로 바꿔 달았을 때 이 환자의 덱으로 읽히는가
         try:
-            got = _parse_ppt_name(name + "x")
+            got = _parse_ppt_name(name.rsplit(".", 1)[0] + ".pptx")
             ok = got.ortho_id == ids.ortho_id
         except N.NamingError:
             ok = False
+        if low.endswith(".show"):
+            # 한쇼 고유 형식은 속이 아예 다른 파일이다 — **이름만 .pptx 로 바꾸면
+            # 열리지도 않는다.** 반드시 한쇼에서 저장 형식을 바꿔 내보내야 한다.
+            return {"why": ("한쇼 파일입니다 — 한쇼에서 [파일 → 다른 이름으로 저장] 을 "
+                            "눌러 PowerPoint 문서(*.pptx)로 저장하면 인식됩니다. "
+                            "이름만 .pptx 로 바꾸는 것으로는 안 됩니다" if ok else
+                            "한쇼 파일입니다 — PowerPoint 문서(*.pptx)로 저장해도 "
+                            "등록된 이름 양식과는 맞지 않습니다"),
+                    "convertible": ok}
         return {"why": (".pptx 로 다시 저장하면 인식됩니다" if ok
                         else ".pptx 로 저장해도 등록된 이름 양식과 맞지 않습니다"),
                 "convertible": ok}
@@ -1849,7 +1866,7 @@ def _scan_patient(d: Path, deep: bool = True) -> dict | None:
         "ppt_diag": ([] if ppt_name else
                      [{"name": f, **_ppt_reject_reason(f, ids)}
                       for f in files
-                      if f.lower().endswith((".pptx", ".ppt"))][:5]),
+                      if f.lower().endswith(DECK_EXT)][:5]),
         "updated": datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d"),
     }
 
@@ -2163,6 +2180,7 @@ def folder_contents(folder: str):
     items = [{
         "name": f.relative_to(d).as_posix(), "size": f.stat().st_size,
         "kind": ("ppt" if f.suffix.lower() == ".pptx"
+                 else "deck" if f.suffix.lower() in DECK_EXT      # .ppt · .show
                  else "photo" if f.suffix.lower() in IMG_EXT else "other"),
     } for f in entries]
     # 이 환자의 PPT 로 자동 선택된 파일 — 화면이 "선택됨"으로 표시한다.
