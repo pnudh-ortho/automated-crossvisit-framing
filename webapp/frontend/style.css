@@ -329,8 +329,14 @@ body{
 .pcol > .plist{flex:1 1 auto;}
 /* 아직 못 쓰는 기능을 미리 알리는 버튼 — 눌리지 않는다는 게 보여야 한다.
    목록 아래 자리를 차지하는 예고라 보통 버튼보다 높이를 넉넉히 준다. */
-.btn.soon{flex:none; height:52px; margin-top:0; font-size:14px; font-weight:700;
-  letter-spacing:.01em;}
+/* 이름과 시기를 두 줄로 나눈다 — 한 줄에 몰면 좁은 목록 폭을 글자가 꽉 채워
+   답답하다. 나누면 줄마다 짧아져 좌우 여백이 생기고 높이도 제 몫을 한다. */
+.btn.soon{flex:none; height:56px; margin-top:0; width:100%;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:3px; text-align:center;}
+.btn.soon .soon-t{font-size:13.5px; font-weight:700; letter-spacing:.01em;}
+.btn.soon .soon-d{font:600 11.5px/1 var(--f-ui); color:var(--ink3);
+  letter-spacing:.02em;}
 .btn.soon:disabled{opacity:1; color:var(--ink3); background:var(--panel2);
   border-color:var(--edge-soft); cursor:default;}
 
