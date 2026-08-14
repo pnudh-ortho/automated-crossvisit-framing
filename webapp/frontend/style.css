@@ -1138,3 +1138,82 @@ body{
   border-radius:6px; background:var(--panel2); color:var(--ink);
   border:1px solid var(--edge);
 }
+
+/* ── 노트북 ────────────────────────────────────────────────────────────────
+   노트북은 "좁은 화면"이 아니라 **폭은 넉넉한데 높이가 모자란** 기기다. 그런데
+   여기 있던 화면 크기 규칙 셋은 전부 폭 기준이라, 노트북은 어느 것에도 걸리지
+   않고 데스크톱과 똑같은 치수를 썼다. 그래서 폭과 높이를 함께 본다.
+
+   1366 폭에서 사이드바 248 + 환자 목록 262 + 좌우 여백 40 = 524px, 화면의 38%가
+   내용이 나오기도 전에 쓰였다. 사이드바에 든 것은 단계 버튼 넷이고 목록 한 줄은
+   두 줄짜리다 — 둘 다 실제 필요보다 넓었다.
+
+   글자도 한 단 낮춘다. **한 벌로 함께** 낮추는 것이 중요하다 — 눈에 띄는 몇 개만
+   줄이면 어떤 글자는 작아지고 어떤 글자는 그대로라 위계가 흐트러져 더 어수선해
+   보인다. 여기 적힌 것이 주 작업 화면(환자·분류·검수)에 실제로 뜨는 글자 전부다.
+   대화상자는 일부러 그대로 둔다 — 잠깐 떠 있다 사라지고, 자리를 다투지 않는다.
+
+   이 블록은 **파일 맨 끝**에 있어야 한다. CSS 는 우선순위가 같으면 나중에 쓴 것이
+   이기는데, 여기서 줄이는 값들(.prow·.frow·.dropzone…)의 원래 규칙이 위쪽에 있어
+   앞에 두면 그대로 덮여 아무 일도 일어나지 않는다. 실제로 한 번 그렇게 넣었다. */
+@media (max-width:1500px), (max-height:860px){
+  :root{ --rail:184px; --ctl-h:30px; }
+  body{ font-size:13px; }
+
+  /* 사이드바 */
+  .rail{ padding:12px 8px; }
+  .rail > .eyebrow{ padding:0 8px; margin-bottom:7px; }
+  .nav{ padding:7px 10px 7px 9px; gap:1px 7px; grid-template-columns:15px 1fr; }
+  .nav .nm{ font-size:13px; }
+  .nav .st{ font-size:12px; }
+  /* 라틴 부제는 19자 고정폭("PRE-PROCESSING (AI)")이라 좁아진 폭에 그대로는 못
+     들어간다 — 자간부터 내려놓는다. 한글 이름이 먼저 읽히고 이건 아래 남는
+     보조라 여기서 양보시킨다. 넘칠 때 줄을 바꾸면 사이드바가 세로로 늘어나므로
+     말줄임으로 막는다: 글꼴이 기기마다 조금씩 달라 계산이 빗나가도 판은 그대로다. */
+  .nav .code{ font-size:11px; letter-spacing:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .head{ padding:9px 16px; }
+  .head .btn{ height:27px; }
+
+  /* 환자 목록 */
+  .prow{ padding:7px 10px; }
+  .prow .f_name{ font-size:12.5px; }
+  .prow .hist{ font-size:12px; }
+  .btn.soon{ height:48px; }
+  .btn.soon .soon-t{ font-size:12.5px; }
+  .empty{ padding:20px 12px; font-size:13px; }
+
+  /* 툴바 */
+  .rootbar .rootsel{ font-size:12.5px; }
+  .toolbar .sort{ font-size:13px; }
+  .toolbar{ margin-bottom:10px; }
+
+  /* 환자 상세 */
+  .content{ padding:12px 14px; }
+  .sec{ padding:11px 13px; }
+  .sec > h3.hd{ font-size:13px; }
+  .sec > h3 .aux{ font-size:12px; }
+  .detail .who{ font-size:17px; }
+  .detail .no{ font-size:12.5px; }
+  .plan{ font-size:13px; }
+  .plan .vbig{ font-size:13px; }
+  .tl-node b, .tl-date{ font-size:13px; }
+  .tl-ago{ font-size:12px; }
+  .frow{ font-size:12.5px; }
+  .frow .fs{ font-size:12px; }
+  .vconfirm .vc-err, .vconfirm .vc-aux{ font-size:12px; }
+  .dropzone{ height:104px; }
+  .dz-main{ font-size:13px; }
+}
+
+/* 짧은 화면에서 로고는 폭보다 **세로**를 먹는다 — 모자란 쪽이 세로다 */
+@media (max-height:820px){
+  .rail-logo{ display:none; }
+}
+
+/* 목록 폭만은 조건을 따로 건다. 이 블록이 파일 끝에 있어 앞의 규칙을 모두 이기는데,
+   더 좁아지면 한 줄로 세우는 900px 규칙까지 이겨 버리면 안 되기 때문이다. */
+@media (min-width:901px) and (max-width:1500px),
+       (min-width:901px) and (max-height:860px){
+  .setup{ grid-template-columns:minmax(180px,210px) minmax(0,1fr); }
+}
