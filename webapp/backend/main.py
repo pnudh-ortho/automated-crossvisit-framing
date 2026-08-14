@@ -1024,18 +1024,66 @@ def _patient_files(d: Path) -> list[Path]:
     """
 
     def walk(base: Path, depth: int, out: list[Path]) -> None:
-        for f in sorted(base.iterdir(), key=lambda x: x.name.lower()):
-            if f.name.startswith("."):
+        # scandir 은 폴더를 한 번 읽으면서 파일/폴더 구분까지 함께 받아 온다.
+        # iterdir + is_dir() 은 항목마다 서버에 한 번 더 묻는 셈이라, 공유 폴더나
+        # 외장 드라이브에서 사진 수백 장이 그대로 대기 시간이 됐다.
+        try:
+            it = os.scandir(base)
+        except OSError:
+            return
+        with it:
+            rows = sorted(it, key=lambda e: e.name.lower())
+        for e in rows:
+            if e.name.startswith("."):
                 continue
-            if f.is_dir():
-                if depth < 2:
-                    walk(f, depth + 1, out)
-            elif f.is_file():
-                out.append(f)
+            try:
+                if e.is_dir():
+                    if depth < 2:
+                        walk(Path(e.path), depth + 1, out)
+                elif e.is_file():
+                    out.append(Path(e.path))
+            except OSError:                 # 훑는 도중 사라진 항목
+                continue
 
     out: list[Path] = []
     walk(d, 0, out)
     return out
+
+
+def _patient_ppts(d: Path, ortho_id: str = "") -> list[Path]:
+    """환자 폴더의 **PPT 파일만** — 두 단계 하위 폴더까지.
+
+    목록 화면이 이 폴더에서 알아야 하는 것은 "어느 덱에 이어붙일까" 하나뿐인데,
+    예전에는 그걸 알아내려고 사진까지 전부 훑었다. 사진 쪽은 세어 봐야 쓰이지도
+    않는다 — 차수 이력의 출처는 PPT 라벨뿐이다.
+
+    이 앱이 만든 사진 폴더(`{교정번호}_차수`, `..._raw`)에는 덱이 있을 수 없으니
+    들어가지 않는다. `~$` 임시 파일은 남긴다 — 왜 안 붙는지 알려 줄 재료다.
+    """
+    skip = f"{ortho_id}_" if ortho_id else None
+    out: list[Path] = []
+
+    def walk(base: Path, depth: int) -> None:
+        try:
+            it = os.scandir(base)
+        except OSError:
+            return
+        with it:
+            rows = list(it)
+        for e in rows:
+            if e.name.startswith("."):
+                continue
+            try:
+                if e.is_dir():
+                    if depth < 2 and not (skip and e.name.startswith(skip)):
+                        walk(Path(e.path), depth + 1)
+                elif e.name.lower().endswith((".pptx", ".ppt")):
+                    out.append(Path(e.path))
+            except OSError:
+                continue
+
+    walk(d, 0)
+    return sorted(out, key=lambda p: p.name.lower())
 
 
 LEGACY_SETTINGS = Path.home() / "ortho-webapp" / "settings.json"
@@ -1683,8 +1731,13 @@ _VISITS_CACHE: dict[str, tuple[float, dict]] = {}
 _EMPTY_SCAN = {"visits": [], "excluded": [], "fallback": False, "slides": 0}
 
 
-def _ppt_visit_letters(path: Path) -> dict:
-    """PPT 라벨 스캔 결과(차수 장부) — 잠금·손상이면 빈 장부."""
+def _ppt_visit_letters(path: Path, allow_open: bool = True) -> dict | None:
+    """PPT 라벨 스캔 결과(차수 장부) — 잠금·손상이면 빈 장부.
+
+    `allow_open=False` 는 **이미 읽어 둔 것만** 돌려주고, 없으면 `None` 이다.
+    덱을 여는 데 한 개당 0.1초쯤 드는데 시작 화면은 환자를 전부 훑으므로,
+    거기서는 열지 않고 미룬다 — 사람이 그 환자를 누를 때 읽으면 된다.
+    """
     try:
         mt = path.stat().st_mtime
     except OSError:
@@ -1692,6 +1745,8 @@ def _ppt_visit_letters(path: Path) -> dict:
     hit = _VISITS_CACHE.get(str(path))
     if hit and hit[0] == mt:
         return hit[1]
+    if not allow_open:
+        return None
     try:
         out = Rd.scan_ppt_visits(T.load_presentation(path), cfg)
     except Exception:                                   # noqa: BLE001 — 잠금·손상
@@ -1729,11 +1784,15 @@ def _ppt_reject_reason(name: str, ids) -> dict:
     return {"why": "인식 가능"}
 
 
-def _scan_patient(d: Path) -> dict | None:
+def _scan_patient(d: Path, deep: bool = True) -> dict | None:
     """환자 폴더 하나 → 목록 한 줄. 폴더명이 명명 규칙에 안 맞으면 None.
 
     차수 이력·날짜의 출처는 **PPT 라벨뿐**이다 — 사진 파일은 읽지 않는다.
     사진이 어떤 이름·폴더 구조로 저장돼 있는지 이 앱이 알 필요가 없다.
+
+    `deep=False` 면 덱을 열지 않는다. 차수 칸은 비고 `pending` 이 서고, 화면은
+    그 자리에 "누르면 읽음"을 표시한다. 시작 화면이 환자 수만큼 덱을 여는 것을
+    막으려는 것이다 — 환자 8명에 0.8초, 100명이면 10초가 이 한 줄에서 나왔다.
     """
     try:
         ids = _parse_folder(
@@ -1743,13 +1802,17 @@ def _scan_patient(d: Path) -> dict | None:
             name_regex=cfg.identifiers.name.allow_regex, label="폴더명")
     except N.NamingError:
         return None
-    entries = _patient_files(d)      # 하위 폴더 정리 환자 — 두 단계까지
+    entries = _patient_ppts(d, ids.ortho_id)   # 하위 폴더 정리 환자 — 두 단계까지
     files = [e.name for e in entries]
     picked = _find_ppt(entries, d, ids)
     ppt_name = picked.relative_to(d).as_posix() if picked else None
-    scan = _EMPTY_SCAN
+    scan, pending = _EMPTY_SCAN, False
     if picked is not None:
-        scan = _ppt_visit_letters(picked)
+        got = _ppt_visit_letters(picked, allow_open=deep)
+        if got is None:
+            pending = True               # 아직 안 읽었다 — 누르면 그때
+        else:
+            scan = got
     visits = sorted({v["visit"] for v in scan["visits"]}, key=N.letter_to_num)
 
     # 차수별 날짜 — 라벨의 "26.08.12" 를 목록 표기(2026.08.12)로 편다.
@@ -1768,6 +1831,8 @@ def _scan_patient(d: Path) -> dict | None:
         "visits": visits, "next_visit": N.next_visit_letter(visits),
         "visit_dates": {L: date_of(L) for L in visits},
         "ppt": ppt_name,
+        # 차수 칸이 "아직 안 읽었다"인가 "정말 비었다"인가. 화면이 둘을 달리 그린다.
+        "pending": pending,
         # 확인 줄 재료 — 인식된 차수(슬라이드 번호 포함), 제외된 라벨 장, 폴백 여부.
         "visit_slides": scan["visits"],
         "label_excluded": scan["excluded"],
@@ -1798,7 +1863,7 @@ def patients():
     for d in sorted(root.iterdir()):
         if not d.is_dir() or d.name.startswith("_"):
             continue
-        rec = _scan_patient(d)
+        rec = _scan_patient(d, deep=False)
         found.append(rec) if rec else skipped.append(d.name)
     return {"patients": found, "skipped": skipped,
             "root": str(root.resolve()),
@@ -1810,6 +1875,23 @@ def patients():
                           _folder_pattern(), {"hospital_id"}),
                       "photo_pattern": cfg.naming.photo_pattern,
                       "slots": len(cfg.ppt.slot_names)}}
+
+
+@app.get("/api/patient")
+def patient_one(folder: str):
+    """환자 한 명 — **여기서** 덱을 연다.
+
+    목록(`/api/patients`)은 폴더 이름만 읽고 지나간다. 차수 이력이 실제로 필요한
+    순간은 사람이 그 환자를 열었을 때 하나뿐이므로, 비용도 그때 낸다.
+    한 번 읽은 덱은 (경로, 수정시각)으로 캐시되어 목록에도 그대로 실린다.
+    """
+    d = (ROOT / folder).resolve()
+    if not str(d).startswith(str(ROOT.resolve())) or not d.is_dir():
+        raise HTTPException(404, f"폴더를 찾을 수 없습니다: {folder}")
+    rec = _scan_patient(d, deep=True)
+    if rec is None:
+        raise HTTPException(400, f"등록된 이름 형식과 맞지 않는 폴더입니다: {d.name}")
+    return rec
 
 
 # ── 시작 화면 미리보기 — PPT에 실린 그림 ────────────────────────────────────

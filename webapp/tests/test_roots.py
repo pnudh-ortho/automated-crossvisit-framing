@@ -182,3 +182,22 @@ def test_예전_기억은_폴더_이름으로도_읽힌다(_isolate_paths, tmp_p
     d.mkdir()
     _settings({"root": str(a), "ppt_choice": {"홍길동_1_2": "옛덱.pptx"}})
     assert M._remembered_ppt(str(d)) == "옛덱.pptx"
+
+
+# ── 목록이 폴더를 얼마나 훑는가 ────────────────────────────────────────────
+def test_덱을_찾을_때_사진_폴더는_들어가지_않는다(_isolate_paths, tmp_path):
+    """이 앱이 만든 사진 폴더에는 덱이 있을 수 없다. 공유 폴더에서는 그 안을
+    한 장씩 훑는 왕복이 그대로 대기 시간이 된다."""
+    d = _isolate_paths / "홍길동_1_54321"
+    (d / "54321_A").mkdir(parents=True)
+    (d / "54321_A_raw").mkdir()
+    (d / "보관").mkdir()
+    for i in range(5):
+        (d / "54321_A" / f"54321_A ({i}).jpg").write_bytes(b"x")
+    (d / "홍길동(54321).pptx").write_bytes(b"x")
+    (d / "보관" / "옛덱.pptx").write_bytes(b"x")
+    (d / "54321_A" / "여기엔안둔다.pptx").write_bytes(b"x")
+
+    got = [p.name for p in M._patient_ppts(d, "54321")]
+    assert got == ["옛덱.pptx", "홍길동(54321).pptx"]     # 사진 폴더 안은 안 본다
+    assert not any(g.endswith(".jpg") for g in got)      # 사진은 애초에 안 담는다

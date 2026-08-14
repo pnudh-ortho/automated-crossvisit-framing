@@ -864,6 +864,26 @@ function resetSession(){
   syncTabs();
 }
 
+/* 환자를 연다 — 차수 이력이 아직 없으면 **여기서** 덱을 읽는다.
+
+   시작 화면은 폴더 이름만 보고 지나간다. 환자마다 덱을 여는 것이 목록이 뜨는
+   시간의 대부분이었는데(환자 8명에 0.8초, 100명이면 10초), 정작 차수가 필요한
+   순간은 그 환자를 열었을 때 하나뿐이다. 한 번 읽은 덱은 서버가 기억하므로
+   다음부터는 목록에도 그냥 실려 온다. */
+async function openPatient(folder){
+  const i = PATIENTS.findIndex(x => x.folder === folder);
+  if(i < 0) return null;
+  if(PATIENTS[i].pending){
+    try{
+      PATIENTS[i] = await api("/api/patient?folder=" + encodeURIComponent(folder));
+    }catch(e){ /* 못 읽어도 환자는 연다 — 차수 칸만 빈 채로 */ }
+  }
+  picked = PATIENTS[i];
+  drawList();
+  drawDetail();
+  return picked;
+}
+
 async function loadPatients(){
   try{
     const d = await api("/api/patients");
@@ -906,7 +926,10 @@ function drawList(){
       if(STAGED.length && picked && picked.folder !== p.folder &&
          !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다. 다른 환자로 넘어갈까요?`)) return;
       if(picked && picked.folder !== p.folder) resetSession();
-      picked = p; drawList(); drawDetail();
+      // 읽는 데 한 박자 걸릴 수 있다(공유 폴더면 더). 누른 줄에서 바로 알린다.
+      if(p.pending) b.querySelector(".hist").innerHTML =
+        `<span class="none">차수 읽는 중…</span>`;
+      openPatient(p.folder);
     };
     box.appendChild(b);
   }
@@ -927,6 +950,10 @@ function drawList(){
 /* 차수 이력 한 줄: 첫 차수와 마지막 차수만, 각자의 날짜와 함께.
    그 사이는 …으로 접는다 — 목록에서 알아야 할 건 "언제 시작해서 언제까지"다. */
 function visitLine(p){
+  // 아직 덱을 열지 않은 줄. "기록 없음"과 섞이면 안 된다 — 하나는 확인된 사실이고
+  // 다른 하나는 아직 안 본 것이다.
+  if(p.pending)
+    return `<span class="none" title="환자를 누르면 PPT에서 차수를 읽습니다">차수 …</span>`;
   const v = p.visits, dt = p.visit_dates || {};
   const warn = (v.length && !p.ppt) ? ` <span class="flag">⚠ PPT 없음</span>` : "";
   if(!v.length) return `<span class="none">기록 없음</span>` + warn;
@@ -969,11 +996,6 @@ function drawDetail(){
        ${visitConfirm(p, V)}
      </div>
 
-     <div class="sec sec-folder">
-       <h3>폴더 내용 <span class="aux ident">${esc(p.folder)}</span></h3>
-       <div class="flist" id="flist"><p class="empty">읽는 중…</p></div>
-     </div>
-
      <div class="sec">
        <h3>사진 추가 <span class="aux"><span id="stage-msg"></span><span id="staged-n"></span></span></h3>
        <div class="dropzone" id="dz">
@@ -992,6 +1014,11 @@ function drawDetail(){
          <input type="file" id="file-input" multiple accept="image/*" hidden>
        </div>
        <button class="btn primary wide" id="btn-go" disabled>자동 분류로 ▶</button>
+     </div>
+
+     <div class="sec sec-folder">
+       <h3>폴더 내용 <span class="aux ident">${esc(p.folder)}</span></h3>
+       <div class="flist" id="flist"><p class="empty">읽는 중…</p></div>
      </div>`;
 
   loadFolder(p.folder);
@@ -1203,8 +1230,7 @@ async function pickPpt(folder, name){
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({folder, ppt: name})});
     await loadPatients();
-    const hit = PATIENTS.find(x => x.folder === folder);
-    if(hit){ picked = hit; drawList(); drawDetail(); }
+    await openPatient(folder);            // 다른 덱이니 차수도 그 덱 것으로
   }catch(e){ alert(`바꾸지 못했습니다: ${e.message}`); }
 }
 
@@ -1319,17 +1345,15 @@ async function openSession(body, errId){  // 새 환자 모달 전용
               ortho_id: r.ids.ortho_id, visits: r.prev_visits, next_visit: r.visit,
               ppt: r.ppt_exists ? r.folder + ".pptx" : null, updated: "—"};
     await loadPatients();
-    const hit = PATIENTS.find(x => x.folder === r.folder);
-    if(hit) picked = hit;
-    drawList(); drawDetail();
+    // 목록 줄은 아직 차수를 안 읽었을 수 있다 — 여는 길은 openPatient 하나로 둔다
+    if(!await openPatient(r.folder)) drawDetail();
   }catch(e){
     if(err) err.textContent = e.message;
     // 이미 있는 환자를 새로 등록하려 한 경우 — 모달을 닫고 목록에서 바로 집어준다
     if(e.data?.error === "patient_exists"){
-      const hit = PATIENTS.find(p => p.folder === e.data.folder);
-      if(hit){
+      if(PATIENTS.some(p => p.folder === e.data.folder)){
         dlg().close();
-        picked = hit; drawList(); drawDetail();
+        await openPatient(e.data.folder);
         stageMsg(e.message, "err");
       }
     }
@@ -2524,6 +2548,14 @@ async function addRoot(){
 }
 el("btn-root").onclick = addRoot;
 el("btn-set").onclick = openSettings;
+/* 업데이트 확인 — 예전에는 켤 때 딱 한 번만 봤다. 켜 둔 채로 며칠 쓰는 사람은
+   새 버전이 나온 걸 알 길이 없어서, 확인하려고 프로그램을 다시 켜야 했다. */
+el("btn-upd-check").onclick = async () => {
+  const b = el("btn-upd-check"), t = b.textContent;
+  b.disabled = true; b.textContent = "확인 중…";
+  try{ await checkUpdate(true); }
+  finally{ b.disabled = false; b.textContent = t; }
+};
 // 피드백 — 구글 폼을 새 탭으로. 앱 상태와 무관하니 언제든 눌러도 안전하다.
 el("btn-fb").onclick = () =>
   window.open("https://forms.gle/k8MRUas5LwGAxFnB9", "_blank", "noopener");
@@ -2888,16 +2920,23 @@ async function checkWeights(){
 
 /* 확인이 실패하면 **사유를 보여준다.** 예전에는 조용히 돌아섰다 — 사용자 눈에는
    '최신입니다'와 똑같아서, 업데이트 통로가 끊긴 걸 아무도 몰랐다. */
-async function checkUpdate(){
+async function checkUpdate(manual){
   const u = await api("/api/update/check").catch(() => null);
   if(!u || !u.ok){
     const why = (u && u.reason) || "서버가 응답하지 않습니다";
-    if(!/개발용 설치본/.test(why))
+    // 켤 때는 개발용 설치본을 조용히 넘긴다. 눌러서 확인했으면 사유를 말해 준다 —
+    // 아무 일도 안 일어나면 확인이 된 건지 알 수 없다.
+    if(manual || !/개발용 설치본/.test(why))
       banner("warn", `<b>업데이트를 확인하지 못했습니다</b>
                       <span class="grow">${why}</span>`);
     return;
   }
-  if(!u.has_update) return;
+  if(!u.has_update){
+    if(manual)
+      banner("info", `<b>최신 버전입니다</b>` +
+        `<span class="grow">${u.app_from ? "v" + u.app_from : ""}</span>`);
+    return;
+  }
   const ver = u.app_to && u.app_to !== u.app_from
     ? `v${u.app_from} → <b>v${u.app_to}</b>` : `${u.behind}개 변경`;
   const wt = u.weights_changed.length
@@ -3142,8 +3181,7 @@ el("btn-commit").onclick = async () => {
     // 전 화면(옛 차수 이력·옛 폴더 내용)이 그대로 남아, 사람이 새로고침해야
     // 방금 만든 파일이 보였다.
     await loadPatients();
-    const hit = saved && PATIENTS.find(x => x.folder === saved);
-    if(hit){ picked = hit; drawList(); drawDetail(); }
+    if(saved) await openPatient(saved);   // 덱이 바뀌었으니 차수를 다시 읽는다
   }catch(e){
     err.textContent = e.message || "저장 실패";
     btn.textContent = "확정 저장"; btn.disabled = false;

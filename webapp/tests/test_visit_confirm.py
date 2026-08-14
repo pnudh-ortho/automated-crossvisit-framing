@@ -58,13 +58,35 @@ def patient():
         shutil.rmtree(d, ignore_errors=True)
 
 
-def test_확인줄_재료가_목록에_실린다(patient):
-    """인식된 차수·슬라이드 번호·제안 위치 — 화면이 이걸로 확인 줄을 그린다."""
+def test_목록은_덱을_열지_않는다(patient):
+    """시작 화면은 폴더 이름만 읽는다 — 환자 수만큼 PPT 를 여는 데 시간이 다 갔다.
+
+    차수 칸은 비어 오되 `pending` 이 서서, 화면이 "아직 안 읽음"과 "기록 없음"을
+    구별해 그릴 수 있어야 한다.
+    """
     c, _ = patient
     me = [p for p in c.get("/api/patients").json()["patients"]
           if p["folder"] == FOLDER]
     assert me, "환자가 목록에 없다"
-    p = me[0]
+    assert me[0]["pending"] is True
+    assert me[0]["visits"] == [] and me[0]["visit_slides"] == []
+    assert me[0]["ppt"], "덱을 열지 않아도 어느 덱인지는 안다"
+
+
+def test_한_번_읽은_덱은_목록에도_실린다(patient):
+    """읽은 것을 다시 감출 이유는 없다 — 한 번 연 환자는 목록에서도 이력이 보인다."""
+    c, _ = patient
+    c.get("/api/patient", params={"folder": FOLDER})
+    me = [p for p in c.get("/api/patients").json()["patients"]
+          if p["folder"] == FOLDER][0]
+    assert me["pending"] is False
+    assert [v["visit"] for v in me["visit_slides"]] == ["A", "B"]
+
+
+def test_확인줄_재료는_환자를_열_때_온다(patient):
+    """인식된 차수·슬라이드 번호·제안 위치 — 화면이 이걸로 확인 줄을 그린다."""
+    c, _ = patient
+    p = c.get("/api/patient", params={"folder": FOLDER}).json()
     assert [v["visit"] for v in p["visit_slides"]] == ["A", "B"]
     assert [v["slide_no"] for v in p["visit_slides"]] == [1, 2]
     assert p["next_visit"] == "C"

@@ -156,8 +156,11 @@ def test_사진은_읽지_않는다_차수는_PPT_라벨로(app):
     _, _, pdir = _commit(c, root, save_raw=True)
     rec = c.get("/api/patients").json()
     me = [p for p in rec["patients"] if p["ortho_id"] == ORTHO]
-    assert me and me[0]["visits"] == ["A"], me
+    assert me, rec
     assert "photos" not in me[0]                      # 사진 장수 집계는 없다
+    # 차수는 환자를 열 때 PPT 라벨에서 온다 — 사진 파일명은 어디서도 안 읽는다
+    one = c.get("/api/patient", params={"folder": me[0]["folder"]}).json()
+    assert one["visits"] == ["A"], one
     fc = c.get("/api/folder", params={"folder": pdir.name}).json()
     assert "visits" not in fc                         # 파일명 차수 해석도 없다
     # 자동 선택된 PPT 가 무엇인지 알려준다 — 화면이 "선택됨"으로 표시한다
