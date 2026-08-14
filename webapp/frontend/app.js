@@ -123,6 +123,7 @@ function drawBoard(){
   if(ED.slot && primaryOf(ED.slot)) pick(ED.slot);
   else { const f = SLOTS.find(x => primaryOf(x.key)); if(f) pick(f.key); }
   drawNoteOverlay();   // 판을 다시 그리면 오버레이도 날아간다
+  drawPeekBadge();     // 배지도 같이 날아간다 — 켜져 있으면 다시 세운다
 }
 
 async function renderSlot(key){
@@ -130,6 +131,16 @@ async function renderSlot(key){
   if(!cv || !p) return;
   const img = await getImg(p.thumb);
   const {w, h} = fitCanvas(cv, key);
+  // Tab 대보기 — 이 칸을 직전 차수 그림 **그대로** 채운다. 기준 그림은 이미 창
+  // 좌표라 지금 조정값(이동·회전·배율)을 얹지 않는다. 얹으면 기준이 아니게 된다.
+  if(PEEK.on){
+    const ref = await boardRefImg(key);
+    if(ref){
+      drawComposite(cv.getContext("2d"), w, h, ref,
+                    {dx:0, dy:0, scale:1, angle:0}, false, false);
+      return;
+    }
+  }
   // 겹쳐보기가 켜져 있으면 십자뷰의 다섯 슬롯도 전부 아나글리프로 그린다 —
   // 편집 중인 슬롯만 겹쳐 보이면 나머지 넷은 결국 하나씩 열어 봐야 한다.
   if(OV.on){
@@ -159,6 +170,63 @@ async function boardRefImg(slot){
   }catch(e){ img = null; }
   OV.board[slot] = {visit, img};
   return img;
+}
+
+/* ── 직전 차수 대보기 (Tab) ─────────────────────────────────────────────────
+   조정하다 보면 "직전 차수는 어땠더라"를 계속 묻게 된다. 겹쳐보기(아나글리프)는
+   **어긋난 곳을 짚는** 도구고, 구도 자체를 눈으로 대보려면 그 차수 그림을 그대로
+   봐야 한다. 그래서 십자뷰 다섯 칸만 직전 차수로 바꾸고 **편집기는 지금 사진을
+   그대로 둔다** — 조정하는 손과 대보는 눈이 서로를 가리지 않게. */
+const PEEK = {on: false, timer: null};
+
+/* 어느 차수를 대볼까 — 겹쳐보기에서 고른 차수를 그대로 따른다.
+   둘이 서로 다른 차수를 가리키면 무엇과 비교 중인지 알 수 없다. */
+function peekVisit(){
+  const lists = Object.values(OV.list || {}).filter(l => l && l.length);
+  if(!lists.length) return "";
+  if(OV.visit && lists.some(l => l.includes(OV.visit))) return OV.visit;
+  const l = lists[0];
+  return l[l.length - 1] || "";
+}
+
+function drawPeekBadge(){
+  if(!boardEl) return;
+  boardEl.classList.toggle("peeking", PEEK.on);
+  let b = boardEl.querySelector(".peekbadge");
+  if(!PEEK.on){ if(b) b.remove(); return; }
+  if(!b){
+    b = document.createElement("div");
+    b.className = "peekbadge";
+    boardEl.appendChild(b);
+  }
+  const v = peekVisit();
+  b.innerHTML = `<b>${v ? esc(v) + " 차수" : "직전 차수"}</b> 기준 보는 중` +
+                ` · <kbd>Tab</kbd> 으로 해제`;
+}
+
+/* 기준이 없을 때(초진) 아무 반응도 없으면 키가 안 먹은 건지 알 수 없다 */
+function flashPeekNote(text){
+  if(!boardEl) return;
+  let b = boardEl.querySelector(".peekbadge");
+  if(!b){
+    b = document.createElement("div");
+    b.className = "peekbadge";
+    boardEl.appendChild(b);
+  }
+  b.textContent = text;
+  clearTimeout(PEEK.timer);
+  PEEK.timer = setTimeout(() => { if(!PEEK.on) b.remove(); }, 1800);
+}
+
+function togglePeek(){
+  if(!PEEK.on && !peekVisit()){
+    flashPeekNote("직전 차수가 없습니다 — 대볼 기준이 없습니다");
+    return;
+  }
+  PEEK.on = !PEEK.on;
+  clearTimeout(PEEK.timer);
+  drawPeekBadge();
+  redrawBoardSlots();
 }
 
 function redrawBoardSlots(){
@@ -192,7 +260,8 @@ el("ov-visit").onchange = async e => {
   OV.board = {};               // 다섯 칸 전부 새 차수로 다시 받는다
   if(OV.on) await loadOverlayImg();
   renderEditor();
-  if(OV.on) redrawBoardSlots();
+  drawPeekBadge();                        // 대보기 중이면 배지의 차수도 바뀐다
+  if(OV.on || PEEK.on) redrawBoardSlots();
 };
 
 /* 어느 슬롯에 어느 차수를 겹쳐볼 수 있나. 세션마다 한 번만 물어본다. */
@@ -385,6 +454,12 @@ addEventListener("keydown", e => {
   const code = e.code;
   // FACE 탭도 같은 조작을 쓴다 — 대상만 자리(FED)로 바뀐다
   const face = TAB === "face";
+  // Tab — 십자뷰를 직전 차수로 대본다. 브라우저의 **포커스 이동을 가로채는** 것이라
+  // 이 화면에서만, 글 치는 칸이 아닐 때만 (위에서 이미 걸러졌다). Shift+Tab 은
+  // 넘겨준다 — 슬라이더에 포커스가 남았을 때 키보드만으로 빠져나갈 길은 있어야 한다.
+  if(code === "Tab" && !face && !e.shiftKey){
+    e.preventDefault(); togglePeek(); return;
+  }
   if(!face && (code.startsWith("Digit") || code.startsWith("Numpad"))){
     const s = SLOTS.find(x => x.hk === +code.slice(-1));
     if(s && primaryOf(s.key)){ pick(s.key); e.preventDefault(); }
@@ -859,6 +934,7 @@ function resetSession(){
   setStep("setup", "", "");
   ["pre","proc","fin"].forEach(v => setStep(v, "", "대기"));
   picked = null;
+  PEEK.on = false; clearTimeout(PEEK.timer);
   NOTES = null; NOTE_DIRTY.clear();
   renderVisitBadges();
   syncTabs();

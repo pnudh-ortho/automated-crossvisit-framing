@@ -968,6 +968,26 @@ body{
      편집 캔버스 폭이 종전과 같도록 맞춘 값이다. */
   grid-template-columns:minmax(0,1fr) 344px; gap:14px;}
 .board-wrap{min-width:0; min-height:0; display:flex;}
+/* 직전 차수 대보기 — 지금 화면이 **기준**이라는 표시. 켜 놓고 잊으면 조정하다
+   혼동하므로, 끌 때까지 판 위에 계속 떠 있고 칸에도 테를 두른다. */
+.peekbadge{
+  position:absolute; left:50%; top:9px; transform:translateX(-50%); z-index:6;
+  pointer-events:none; white-space:nowrap;
+  padding:4px 11px; border-radius:999px;
+  background:#000000b8; color:#fff; font-size:12px; letter-spacing:.02em;
+}
+.peekbadge b{color:#ffd166;}
+.peekbadge kbd{
+  font:600 11px var(--f-mono); padding:1px 5px; border-radius:4px;
+  background:#ffffff26; margin:0 1px;
+}
+.board.peeking .cell{outline:2px solid #ffd166; outline-offset:-2px;}
+/* 힌트는 범례 바로 뒤 — 오른쪽 끝으로 미는 일은 .ovkey 의 margin-left:auto 가 한다 */
+.ovhint{flex:none; color:var(--ink3); font-size:12px; white-space:nowrap;}
+.ovhint kbd{
+  font:600 11px var(--f-mono); padding:1px 5px; border-radius:4px;
+  border:1px solid var(--edge); background:var(--panel2); margin-right:4px;
+}
 .board{
   position:relative;   /* 노트 오버레이(.noteov)의 기준 */
   /* 노트 글자 크기를 판 폭에 비례시키기 위한 컨테이너. 100cqw = 판 폭이라
