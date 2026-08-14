@@ -638,11 +638,8 @@ async function drawRootPicker(path, host){
     try{
       const res = await api("/api/root", {method:"POST",
         headers:{"Content-Type":"application/json"}, body: JSON.stringify({path: r.path})});
-      setRootLabel(res.root);
-      resetSession();
       closePicker(host);
-      await loadPatients();
-      drawDetail();
+      await showRoot(res.root, res.roots);
     }catch(e){ el("pk-err").textContent = e.message; }
   };
 }
@@ -2454,6 +2451,23 @@ for(const id of ["f-name","f-ortho"]){
   el(id).oninput = syncPreview;
   el(id).onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); el("new-ok").click(); } };
 }
+/* 위치를 옮긴 뒤 화면을 그 위치의 것으로 갈아 끼운다.
+
+   설정 창을 닫는 것까지가 한 동작이다 — 위치를 골랐는데 창이 그대로 떠 있으면
+   목록이 그 뒤에 가려져, 갱신이 됐는데도 "안 뜬다"로 보인다.
+   검색어도 비운다. 앞 위치에서 치던 이름이 남아 있으면 새 위치의 환자가
+   전부 걸러져 빈 목록이 된다. */
+async function showRoot(root, roots){
+  if(HEALTH) HEALTH.root = root;
+  drawRoots(roots, root);
+  el("dlg-set").close();
+  resetSession();
+  el("find").value = "";
+  await loadPatients();
+  drawDetail();
+  loadMaint();
+}
+
 /* 고른 위치로 갈아탄다. 담아둔 사진은 옛 위치의 임시 폴더에 있으므로 함께 버린다. */
 async function selectRoot(path){
   const now = (ROOTS.find(r => r.current) || {}).path || "";
@@ -2467,11 +2481,7 @@ async function selectRoot(path){
     const r = await api("/api/root/select", {method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({path})});
-    if(HEALTH) HEALTH.root = r.root;
-    drawRoots(r.roots, r.root);
-    resetSession();
-    await loadPatients();
-    loadMaint();
+    await showRoot(r.root, r.roots);
   }catch(e){
     alert("그 위치로 바꾸지 못했습니다: " + (e.message || e));
     drawRoots();
@@ -2494,7 +2504,25 @@ el("set-forget").onclick = async () => {
   }catch(e){ alert(e.message || e); }
 };
 
-el("btn-root").onclick = openSettings;
+/* 저장 위치 더하기 — 폴더를 고르고, 고른 그 위치로 바로 옮겨 간다.
+   툴바의 ＋ 도 설정 창을 거치지 않고 여기로 온다. 위치를 더하려는 사람에게
+   설정 창은 한 번 더 눌러야 하는 문일 뿐이다. */
+async function addRoot(){
+  const got = await pickFolder(HEALTH && HEALTH.root);
+  if(got === null) return;
+  if(got === undefined){                 // 네이티브 창을 못 띄우면 앱 안 폴더 트리로
+    openSettings();
+    const host = el("set-picker"); host.hidden = false; drawRootPicker("", host);
+    return;
+  }
+  try{
+    const r = await api("/api/root", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: got})});
+    await showRoot(r.root, r.roots);
+  }catch(e){ alert("그 위치를 쓸 수 없습니다: " + (e.message || e)); }
+}
+el("btn-root").onclick = addRoot;
 el("btn-set").onclick = openSettings;
 // 피드백 — 구글 폼을 새 탭으로. 앱 상태와 무관하니 언제든 눌러도 안전하다.
 el("btn-fb").onclick = () =>
@@ -3001,23 +3029,7 @@ el("first-ok").onclick = async () => {
   }catch(e){ alert("그 위치를 쓸 수 없습니다: " + (e.message || e)); }
 };
 
-el("set-change").onclick = async () => {
-  // 첫 실행과 같은 네이티브 창. 못 띄우면 앱 안 폴더 트리로 물러난다.
-  const got = await pickFolder(HEALTH && HEALTH.root);
-  if(got === null) return;
-  if(got === undefined){
-    const host = el("set-picker"); host.hidden = false; drawRootPicker("", host);
-    return;
-  }
-  try{
-    const r = await api("/api/root", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify({path:got})});
-    if(HEALTH) HEALTH.root = r.root;
-    drawRoots(r.roots, r.root);        // 더한 곳이 바로 목록에 뜨도록
-    resetSession(); loadPatients(); loadMaint();
-    alert("저장 위치를 더했습니다:\n" + r.root);
-  }catch(e){ alert("그 위치를 쓸 수 없습니다: " + (e.message || e)); }
-};
+el("set-change").onclick = addRoot;
 for(const b of el("set-theme").children) b.onclick = () => setTheme(b.dataset.t);
 el("btn-refresh").onclick = loadPatients;
 /* 정합·프레이밍은 **여기서** 돈다.
