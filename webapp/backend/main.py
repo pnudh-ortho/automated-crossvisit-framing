@@ -1961,7 +1961,18 @@ def set_root(req: RootReq):
     ROOT = p.resolve()
     SESS_ROOT = ROOT / "_sessions_tmp"
     SESS_ROOT.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps({"root": str(ROOT)}, ensure_ascii=False, indent=2),
+    # **있던 설정을 지우지 않는다.** 예전에는 {"root": ...} 하나로 통째 덮어써서,
+    # 저장 위치를 한 번 바꾸면 이름 양식·개월 표기·여백 색·복사 설정·PPT 기억이
+    # 전부 사라졌다. 고친 항목만 얹는다 (prefs_set 과 같은 방식).
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            d = {}
+    except Exception:                                   # noqa: BLE001
+        d = {}
+    d["root"] = str(ROOT)
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
                              encoding="utf-8")
     return {"root": str(ROOT)}
 

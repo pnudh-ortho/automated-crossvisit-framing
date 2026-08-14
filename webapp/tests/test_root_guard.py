@@ -49,3 +49,25 @@ def test_드라이브가_돌아오면_그리로_되돌아간다(_isolate_paths, 
     r = M.root_recheck()
     assert r["ok"] is True and r["root"] == str(back)
     assert M.ROOT == back
+
+
+def test_저장_위치를_바꿔도_다른_설정이_남는다(_isolate_paths, tmp_path):
+    """예전에는 {"root": ...} 하나로 덮어써서 이름 양식·표기 설정이 다 날아갔다."""
+    _settings({
+        "root": str(_isolate_paths),
+        "folder_patterns": ["{seq}.{name}({ortho_id})"],
+        "ppt_patterns": ["{name}({ortho_id}).pptx"],
+        "months_unit": "half", "copy_shapes": "all", "letterbox_color": "FFFFFF",
+        "ppt_choice": {"홍길동_1_2": "보관/a.pptx"},
+    })
+    new_root = tmp_path / "새저장위치"
+    new_root.mkdir()
+    assert M.set_root(M.RootReq(path=str(new_root)))["root"] == str(new_root)
+
+    d = json.loads(M.SETTINGS_FILE.read_text(encoding="utf-8"))
+    assert d["root"] == str(new_root)                       # 바뀐 것은 이것뿐
+    assert d["folder_patterns"] == ["{seq}.{name}({ortho_id})"]
+    assert d["ppt_patterns"] == ["{name}({ortho_id}).pptx"]
+    assert d["months_unit"] == "half" and d["copy_shapes"] == "all"
+    assert d["letterbox_color"] == "FFFFFF"
+    assert d["ppt_choice"] == {"홍길동_1_2": "보관/a.pptx"}
