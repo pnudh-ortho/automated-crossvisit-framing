@@ -173,3 +173,25 @@ def test_촬영시각이_굽는_동안_바뀌지_않는다(app):
     cropped = (pdir / VDIR / f"{ORTHO}_A (1).jpg").stat().st_mtime
     raw = (pdir / RDIR / f"{ORTHO}_A (1)_raw.jpg").stat().st_mtime
     assert abs(cropped - raw) < 2, (cropped, raw)
+
+
+def test_구운_사진은_창_크기_그대로_들어간다():
+    """직전 차수 사진과 크기가 어긋나면 안 된다.
+
+    창에 맞춰 구운 사진은 창이 곧 제 크기인데, 배치를 cover-fit 에 맡기면 구운
+    파일의 **정수 픽셀 비율**로 크기를 다시 셈한다. 0.002cm 남짓이지만 소수 둘째
+    자리 경계를 넘으면 PowerPoint 에 8.38 이 8.39 로 보인다.
+    """
+    from coords import WindowCm, cover_fit_placement, emu_to_cm
+
+    for w, h in [(8.3833, 6.2900), (8.3805, 6.2938), (8.3750, 6.2875), (8.38, 6.29)]:
+        win = WindowCm(x=1.0, y=2.0, w=w, h=h)
+        pl = main._exact_placement(win)
+        assert (round(emu_to_cm(pl.ext_cx), 4), round(emu_to_cm(pl.ext_cy), 4)) == (w, h)
+        assert (round(emu_to_cm(pl.off_x), 4), round(emu_to_cm(pl.off_y), 4)) == (1.0, 2.0)
+        assert pl.rot == 0          # 회전은 픽셀에 구워져 있다
+
+    # cover-fit 은 실제로 어긋났다 — 이 테스트가 지키려는 것이 그 차이다
+    win = WindowCm(x=0, y=0, w=8.3805, h=6.2938)
+    off = cover_fit_placement(round(8.3805 * 200), round(6.2938 * 200), win)
+    assert round(emu_to_cm(off.ext_cy), 4) != 6.2938

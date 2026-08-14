@@ -399,6 +399,7 @@ def _place_faces(prs, s: "Session") -> dict[str, Path]:
         baked, bwh = _bake_window(photo, win, st, False, s.tmp / f"bake_face_{cell}.jpg")
         if baked:
             W.place_photo_in_window(slide, f"FACE_{cell}", win, baked, bwh,
+                                    placement=_exact_placement(win),
                                     letterbox_color=_letterbox_color())
             bakes.setdefault(pid, baked)
         else:
@@ -451,6 +452,7 @@ def _place_intraoral(prs, s: "Session") -> list[int]:
                                   s.tmp / f"bake_io_{slot}.jpg")
         if baked:
             W.place_photo_in_window(slide, f"IO_{slot}", win, baked, bwh,
+                                    placement=_exact_placement(win),
                                     letterbox_color=_letterbox_color())
         else:
             bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
@@ -461,6 +463,20 @@ def _place_intraoral(prs, s: "Session") -> list[int]:
                                     flip_v=photo.flip_v)
         filled.append(slide_no)
     return filled
+
+
+def _exact_placement(win: WindowCm) -> Placement:
+    """창과 **똑같은** 자리·크기의 배치.
+
+    창에 맞춰 구운 사진은 창이 곧 제 크기다. 그런데 배치를 안 주면 cover-fit 이
+    구운 파일의 **정수 픽셀 비율**로 크기를 다시 셈하는데, 그 값이 창 비율과 아주
+    조금 어긋난다. 0.002cm 남짓이지만 하필 소수 둘째 자리 경계를 넘으면
+    PowerPoint 에 8.38 이 8.39 로 보인다 — 직전 차수 사진과 크기가 달라 보인다.
+    """
+    e = EMU_PER_CM
+    return Placement(off_x=int(round(win.x * e)), off_y=int(round(win.y * e)),
+                     ext_cx=int(round(win.w * e)), ext_cy=int(round(win.h * e)),
+                     rot=0)
 
 
 def _bake_window(photo, win: WindowCm, st: EditorState, flip_v: bool, dst: Path):
@@ -3192,7 +3208,11 @@ def commit(sid: str, allow_missing: bool = False):
                 baked, bwh = _bake_window(photo, win, photo.editor, photo.flip_v,
                                           s.tmp / f"bake_{slot}.jpg")
                 if baked:
+                    # 창에 맞춰 구웠으므로 창 그대로 넣는다 — cover-fit 에 맡기면
+                    # 구운 파일의 정수 픽셀 비율로 크기를 다시 셈해 직전 차수
+                    # 사진과 0.01cm 어긋나 보인다.
                     W.place_photo_in_slot(slide, slot, baked, bwh,
+                                          placement=_exact_placement(win),
                                           letterbox_color=_letterbox_color())
                     tx.stage_file(baked, entry["file"])
                 else:
