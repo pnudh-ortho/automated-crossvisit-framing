@@ -1144,19 +1144,43 @@ async function loadFolder(folder){
     fillSlidePreviews(folder);
     if(!d.items.length){ box.innerHTML = `<p class="empty">폴더가 비어 있습니다</p>`; return; }
     // 구형 .ppt 는 그 줄에만 표시한다 — 무엇을 해야 하는지는 위 안내가 말한다
+    // 덱이 여럿이면 눌러서 고를 수 있다. 하나뿐이면 누를 것이 없으므로 종전 그대로.
+    const decks = d.items.filter(i => i.kind === "ppt").length;
     box.innerHTML = d.items.map(it =>
-      `<div class="frow" data-kind="${it.kind}">` +
+      `<div class="frow" data-kind="${it.kind}"${
+        it.kind === "ppt" && decks > 1 && !it.selected
+          ? ` data-pick="${esc(it.name)}" title="이 PPT 에 이어붙입니다"` : ""}>` +
         `<span class="ic">${it.kind === "ppt" ? "📄" : it.kind === "photo" ? "🖼" : "▫"}</span>` +
         `<span class="fn">${esc(it.name)}${it.selected ?
           ` <span class="sel">✓ 선택됨</span>` : ""}${
           /\.ppt$/i.test(it.name) ? ` <span class="old">구형</span>` : ""}</span>` +
         `<span class="fs">${fmtSize(it.size)}</span>` +
       `</div>`).join("");
+    for(const row of box.querySelectorAll(".frow[data-pick]"))
+      row.onclick = () => pickPpt(folder, row.dataset.pick);
   }catch(e){
     FOLDER = null;
     box.innerHTML = `<p class="empty">폴더가 아직 없습니다<br>확정할 때 만들어집니다</p>`;
   }
 }
+/* 이어붙일 덱을 바꾼다. 고른 값은 환자별로 기억되므로 다음 차수도 이 덱으로 간다.
+   차수 이력·정합 기준이 모두 이 파일에서 나오므로 목록과 상세를 다시 그린다. */
+async function pickPpt(folder, name){
+  if(STAGED.length){
+    alert("사진을 담은 뒤에는 PPT 를 바꿀 수 없습니다.\n" +
+          "담아둔 사진을 비우거나 확정한 뒤에 골라 주세요.");
+    return;
+  }
+  try{
+    await api("/api/folder/ppt", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({folder, ppt: name})});
+    await loadPatients();
+    const hit = PATIENTS.find(x => x.folder === folder);
+    if(hit){ picked = hit; drawList(); drawDetail(); }
+  }catch(e){ alert(`바꾸지 못했습니다: ${e.message}`); }
+}
+
 const fmtSize = n => n < 1024 ? `${n} B`
   : n < 1048576 ? `${(n/1024).toFixed(0)} KB` : `${(n/1048576).toFixed(1)} MB`;
 

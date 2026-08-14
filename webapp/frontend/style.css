@@ -381,7 +381,12 @@ body{
    넘칠 때만 그 안에서 스크롤한다 — 모니터 높이가 달라도 규칙이 같다. */
 .detail{display:flex; flex-direction:column; overflow:auto; min-height:0;}
 .detail > .sec{flex:none;}
-.detail > .sec-folder{flex:1 1 auto; min-height:0; display:flex; flex-direction:column;}
+/* 남는 높이는 폴더 내용이 가져간다. 다만 **제 내용보다 작아지지는 않는다** —
+   flex 는 남는 자리를 나눌 때뿐 아니라 모자랄 때도 이 칸부터 줄이는데, 안에 든
+   목록에는 최소 높이가 걸려 있어서 칸만 줄고 목록은 그대로였다. 그러면 목록이
+   아래 '사진 추가' 위로 삐져나온다. 모자라면 이 칸을 줄이는 대신 패널이 스크롤된다. */
+.detail > .sec-folder{flex:1 1 auto; min-height:min-content;
+  display:flex; flex-direction:column;}
 .detail .panel + .panel{margin-top:0;}
 /* 첫 섹션: 왼쪽은 글, 오른쪽은 PPT 슬라이드 미리보기.
    높이는 환자 목록 4줄과 맞춰 두 칸이 나란히 자리를 잡게 한다. */
@@ -636,6 +641,9 @@ body{
 .frow .old{font:700 11px/1 var(--f-ui); color:var(--warn); white-space:nowrap;}
 .frow .fs{font:12.5px/1 var(--f-mono); color:var(--ink3); text-align:right;}
 .frow[data-kind="ppt"] .fn{color:var(--accent); font-weight:600;}
+/* 고를 수 있는 덱 — 덱이 둘 이상일 때만 눌린다 */
+.frow[data-pick]{cursor:pointer;}
+.frow[data-pick]:hover{background:var(--accent-soft);}
 
 /* ── 사진 투입 ───────────────────────────────────────────────────────────
    표적을 십자로 그린다 — 채워야 할 5칸이 곧 이 앱의 산출물이고, 사진을 끌고

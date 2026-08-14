@@ -1682,12 +1682,11 @@ def _scan_patient(d: Path) -> dict | None:
         return None
     entries = _patient_files(d)      # 하위 폴더 정리 환자 — 두 단계까지
     files = [e.name for e in entries]
-    ppt_name = _find_ppt(files, ids)
+    picked = _find_ppt(entries, d, ids)
+    ppt_name = picked.relative_to(d).as_posix() if picked else None
     scan = _EMPTY_SCAN
-    if ppt_name:
-        p = next((e for e in entries if e.name == ppt_name), None)
-        if p is not None:
-            scan = _ppt_visit_letters(p)
+    if picked is not None:
+        scan = _ppt_visit_letters(picked)
     visits = sorted({v["visit"] for v in scan["visits"]}, key=N.letter_to_num)
 
     # 차수별 날짜 — 라벨의 "26.08.12" 를 목록 표기(2026.08.12)로 편다.
@@ -1785,9 +1784,7 @@ def ppt_preview(folder: str):
                             label="폴더명")
     except N.NamingError:
         raise HTTPException(404, "폴더명이 규칙에 맞지 않습니다")
-    cand = _patient_files(d)
-    name = _find_ppt([e.name for e in cand], ids)
-    path = next((e for e in cand if e.name == name), None) if name else None
+    path = _find_ppt(_patient_files(d), d, ids)
     if path is None:
         return {"slots": {}, "faces": []}
     key, mt = str(path), path.stat().st_mtime
@@ -1995,13 +1992,39 @@ def folder_contents(folder: str):
                  else "photo" if f.suffix.lower() in IMG_EXT else "other"),
     } for f in entries]
     # 이 환자의 PPT 로 자동 선택된 파일 — 화면이 "선택됨"으로 표시한다.
-    sel = _find_ppt([e.name for e in entries], ids) if ids else None
-    if sel:
+    picked = _find_ppt(entries, d, ids) if ids else None
+    sel = picked.relative_to(d).as_posix() if picked else None
+    if picked is not None:
         for it, e in zip(items, entries):
-            if e.name == sel:
+            if e == picked:
                 it["selected"] = True
                 break
     return {"folder": d.name, "path": str(d), "items": items, "ppt": sel}
+
+
+class PptPickReq(BaseModel):
+    folder: str
+    ppt: str            # 환자 폴더 기준 상대경로
+
+
+@app.post("/api/folder/ppt")
+def folder_pick_ppt(req: PptPickReq):
+    """이어붙일 덱을 사람이 고른다.
+
+    고르는 규칙(바로 아래 우선 · 마지막에 쓴 것 기억)이 대부분 맞지만, 한 번
+    어긋나면 되돌릴 길이 있어야 한다 — 잘못 기억된 채로 두면 이후 모든 차수가
+    엉뚱한 덱으로 가고, 한 환자의 기록이 둘로 갈린다.
+    """
+    root = ROOT.resolve()
+    d = (root / req.folder).resolve()
+    if not str(d).startswith(str(root)) or not d.is_dir():
+        raise HTTPException(404, f"환자 폴더를 찾을 수 없습니다: {req.folder}")
+    p = (d / req.ppt).resolve()
+    if d not in p.parents or p.suffix.lower() != ".pptx" or not p.is_file():
+        raise HTTPException(400, "그 폴더 안의 .pptx 파일이어야 합니다")
+    rel = p.relative_to(d).as_posix()
+    _remember_ppt(d.name, rel)
+    return {"ok": True, "ppt": rel}
 
 
 class OpenReq(BaseModel):
@@ -2052,12 +2075,12 @@ def session_open(req: OpenReq):
 
     visits: list[str] = []            # 차수 이력의 진실은 PPT 뿐이다
     ppt_path = d / _gen_ppt_name(ids)
-    if not ppt_path.exists() and d.is_dir():
-        # 옛 형식 이름이거나 하위 폴더에 있어도 찾아낸다
-        cand = {p.name: p for p in _patient_files(d)}
-        hit = _find_ppt(list(cand), ids)
-        if hit:
-            ppt_path = cand[hit]
+    if d.is_dir():
+        # 옛 형식 이름이거나 하위 폴더에 있어도 찾아낸다. 기억해 둔 파일이 있으면
+        # 생성 이름보다 그쪽이 이긴다 — 지난번에 이어붙인 덱으로 계속 가야 한다.
+        hit = _find_ppt(_patient_files(d), d, ids)
+        if hit is not None:
+            ppt_path = hit
     has_ppt = ppt_path.exists()
 
     # mode = PPT를 어떻게 만들 것인가. 기존 PPT가 있어야만 'revisit'(이어붙이기).
@@ -3234,6 +3257,8 @@ def commit(sid: str, allow_missing: bool = False):
                        {"event": "commit_failed", "error": str(e)})
         raise HTTPException(500, f"확정 실패(롤백됨): {e}")
 
+    # 다음에도 같은 덱으로 이어지도록 이번에 쓴 파일을 기억한다
+    _remember_ppt(s.patient_dir.name, ppt_name)
     result = {"ok": True, "patient_dir": str(s.patient_dir),
               "ppt": ppt_name, "visit": s.visit,
               "files": [p.relative_to(s.patient_dir).as_posix() for p in moved]}
@@ -3619,21 +3644,68 @@ def _parse_ppt_name(name: str):
     raise last
 
 
-def _find_ppt(names: list[str], ids) -> str | None:
-    """이 환자의 PPT 파일명 찾기 — 생성 형식 우선, 없으면 등록 형식들로 파싱."""
+def _remembered_ppt(folder: str) -> str:
+    """이 환자에게 마지막으로 이어붙인 PPT (환자 폴더 기준 상대경로)."""
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("ppt_choice") or {}
+        return str(d.get(folder) or "")
+    except Exception:                                   # noqa: BLE001
+        return ""
+
+
+def _remember_ppt(folder: str, rel: str) -> None:
+    """확정한 뒤 그 파일을 기억해 둔다 — 다음에도 같은 덱으로 이어진다."""
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:                                   # noqa: BLE001
+        d = {}
+    choice = d.get("ppt_choice")
+    if not isinstance(choice, dict):
+        choice = {}
+    if choice.get(folder) == rel:
+        return
+    choice[folder] = rel
+    d["ppt_choice"] = choice
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _find_ppt(entries: list[Path], base: Path, ids) -> Path | None:
+    """이 환자의 PPT 파일 고르기. 후보가 여럿이면 아래 순서로 하나를 정한다.
+
+    ① **마지막에 이어붙인 그 파일** — 한 환자의 기록이 두 덱으로 갈리지 않게,
+       확정할 때 기억해 둔 것을 가장 먼저 쓴다.
+    ② **환자 폴더 바로 아래**에 있는 것 — 하위 폴더로 치운 것은 대개 보관본이다.
+    ③ 생성 형식과 이름이 같은 것.
+    ④ 그래도 남으면 이름 오름차순.
+
+    후보는 `.pptx` 중 등록된 이름 형식으로 읽히고 교정번호가 이 환자인 것뿐이다.
+    상대경로를 쓰므로 하위 폴더에 같은 이름이 있어도 서로 다른 후보로 다룬다.
+    """
+    remembered = _remembered_ppt(base.name)
     gen = _gen_ppt_name(ids)
-    if gen in names:
-        return gen
-    for n in names:
-        if not n.lower().endswith(".pptx"):
+    best = None
+    for p in entries:
+        if p.suffix.lower() != ".pptx" or p.name.startswith("~$"):
             continue
         try:
-            got = _parse_ppt_name(n)
+            got = _parse_ppt_name(p.name)
         except N.NamingError:
             continue
-        if got.ortho_id == ids.ortho_id:
-            return n
-    return None
+        if got.ortho_id != ids.ortho_id:
+            continue
+        rel = p.relative_to(base).as_posix()
+        rank = (0 if rel == remembered else 1,      # ① 기억해 둔 것
+                len(Path(rel).parts) - 1,           # ② 얕을수록 먼저
+                0 if p.name == gen else 1,          # ③ 생성 형식 이름
+                rel.lower())                        # ④ 이름순
+        if best is None or rank < best[0]:
+            best = (rank, p)
+    return best[1] if best else None
 
 
 def _folder_pattern() -> str:
