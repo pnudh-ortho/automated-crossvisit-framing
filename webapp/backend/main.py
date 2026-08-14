@@ -1070,6 +1070,53 @@ def _save_raw() -> bool:
         return False
 
 
+def _saved_roots() -> list[str]:
+    """등록해 둔 저장 위치들. 현재 위치가 목록에 없으면 앞에 끼워 돌려준다."""
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:                                   # noqa: BLE001
+        d = {}
+    out: list[str] = []
+    for p in [*(d.get("roots") or []), d.get("root") or ""]:
+        if isinstance(p, str) and p and p not in out:
+            out.append(p)
+    return out
+
+
+def _write_roots(paths: list[str], current: str) -> None:
+    """목록과 현재 위치를 저장한다. 다른 설정은 건드리지 않는다."""
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            d = {}
+    except Exception:                                   # noqa: BLE001
+        d = {}
+    d["roots"] = [p for p in paths if p]
+    d["root"] = current
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                             encoding="utf-8")
+
+
+def _switch_root(p: Path) -> None:
+    """현재 저장 위치를 바꾼다 — **함께 움직여야 하는 것들을 한자리에서**.
+
+    감사 로그가 특히 그렇다. 예전에는 시작할 때 한 번 정해져서 위치를 바꿔도
+    따라가지 않았고, 저장 위치가 여럿이면 A 자료의 기록이 B 에 쌓인다.
+    열려 있던 세션은 옛 경로를 가리키므로 임시 업로드까지 함께 버린다.
+    """
+    global ROOT, SESS_ROOT, LOG_FILE
+    for s in list(SESSIONS.values()):
+        discard_session(s)
+    ROOT = p.resolve()
+    SESS_ROOT = ROOT / "_sessions_tmp"
+    SESS_ROOT.mkdir(parents=True, exist_ok=True)
+    if not cfg.paths.log_file:              # config 가 정한 자리가 있으면 그대로 둔다
+        LOG_FILE = ROOT / "_audit_log.jsonl"
+    _VISITS_CACHE.clear()
+    _PV_CACHE.clear()
+
+
 def _default_root() -> Path:
     r"""첫 실행에서 제시할 저장 위치.
 
@@ -1938,17 +1985,10 @@ def root_recheck():
     설정은 건드리지 않는다. 경로가 살아 있으면 그리로 되돌아가고, 아니면 어디에
     무엇이 없는지 그대로 알려준다.
     """
-    global ROOT, SESS_ROOT
     saved = _saved_root()
     if saved is None:
         return {"ok": False, "path": _saved_root_str(), "root": str(ROOT)}
-    for s in list(SESSIONS.values()):     # 임시 업로드는 옛 루트에 있다
-        discard_session(s)
-    ROOT = saved
-    SESS_ROOT = ROOT / "_sessions_tmp"
-    SESS_ROOT.mkdir(parents=True, exist_ok=True)
-    _VISITS_CACHE.clear()
-    _PV_CACHE.clear()
+    _switch_root(saved)
     return {"ok": True, "root": str(ROOT)}
 
 
@@ -1959,7 +1999,6 @@ class RootReq(BaseModel):
 @app.post("/api/root")
 def set_root(req: RootReq):
     """저장 위치 변경. 열려 있던 세션은 옛 경로를 가리키므로 함께 버린다."""
-    global ROOT, SESS_ROOT
     p = Path(req.path).expanduser()
     if not p.is_dir():
         # 첫 실행에서는 아직 없는 폴더를 고를 수 있어야 한다. 다만 **부모는 있어야**
@@ -1970,27 +2009,53 @@ def set_root(req: RootReq):
             p.mkdir(parents=False)
         except OSError as e:
             raise HTTPException(400, f"폴더를 만들 수 없습니다: {p} ({e.strerror})")
-    # 열려 있던 세션은 옛 루트를 가리키므로 임시 업로드까지 함께 버린다.
-    # 루트를 바꾼 뒤에는 옛 _sessions_tmp가 청소 대상 밖으로 나가 영영 남는다.
-    for s in list(SESSIONS.values()):
-        discard_session(s)
-    ROOT = p.resolve()
-    SESS_ROOT = ROOT / "_sessions_tmp"
-    SESS_ROOT.mkdir(parents=True, exist_ok=True)
-    # **있던 설정을 지우지 않는다.** 예전에는 {"root": ...} 하나로 통째 덮어써서,
-    # 저장 위치를 한 번 바꾸면 이름 양식·개월 표기·여백 색·복사 설정·PPT 기억이
-    # 전부 사라졌다. 고친 항목만 얹는다 (prefs_set 과 같은 방식).
-    try:
-        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        if not isinstance(d, dict):
-            d = {}
-    except Exception:                                   # noqa: BLE001
-        d = {}
-    d["root"] = str(ROOT)
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                             encoding="utf-8")
-    return {"root": str(ROOT)}
+    _switch_root(p)
+    # 고른 위치를 목록에 더한다 — 여러 곳을 오가는 사람이 매번 폴더를 찾지 않게.
+    roots = _saved_roots()
+    if str(ROOT) not in roots:
+        roots.append(str(ROOT))
+    _write_roots(roots, str(ROOT))
+    return {"root": str(ROOT), "roots": _roots_json()}
+
+
+def _roots_json() -> list[dict]:
+    """목록 한 줄씩 — 지금 보고 있는 곳인가, 지금 닿는 곳인가."""
+    cur = str(ROOT)
+    return [{"path": p, "current": p == cur,
+             "exists": Path(p).expanduser().is_dir()}
+            for p in _saved_roots()]
+
+
+@app.get("/api/roots")
+def roots_list():
+    return {"roots": _roots_json(), "current": str(ROOT)}
+
+
+class RootSelReq(BaseModel):
+    path: str
+
+
+@app.post("/api/root/select")
+def root_select(req: RootSelReq):
+    """등록해 둔 위치로 갈아탄다. 목록에 없는 곳은 받지 않는다 —
+    새 위치는 폴더를 골라 더하는 길(`/api/root`)로만 들어온다."""
+    if req.path not in _saved_roots():
+        raise HTTPException(400, "목록에 없는 저장 위치입니다")
+    p = Path(req.path).expanduser()
+    if not p.is_dir():
+        raise HTTPException(404, f"지금은 닿지 않는 위치입니다: {p}")
+    _switch_root(p)
+    _write_roots(_saved_roots(), str(ROOT))
+    return {"root": str(ROOT), "roots": _roots_json()}
+
+
+@app.post("/api/root/forget")
+def root_forget(req: RootSelReq):
+    """목록에서만 뺀다 — 폴더와 그 안의 환자 자료는 그대로 둔다."""
+    if req.path == str(ROOT):
+        raise HTTPException(400, "지금 쓰는 위치는 뺄 수 없습니다")
+    _write_roots([p for p in _saved_roots() if p != req.path], str(ROOT))
+    return {"roots": _roots_json()}
 
 
 @app.get("/api/folder")
@@ -2050,7 +2115,7 @@ def folder_pick_ppt(req: PptPickReq):
     if d not in p.parents or p.suffix.lower() != ".pptx" or not p.is_file():
         raise HTTPException(400, "그 폴더 안의 .pptx 파일이어야 합니다")
     rel = p.relative_to(d).as_posix()
-    _remember_ppt(d.name, rel)
+    _remember_ppt(str(d), rel)
     return {"ok": True, "ppt": rel}
 
 
@@ -3289,7 +3354,7 @@ def commit(sid: str, allow_missing: bool = False):
         raise HTTPException(500, f"확정 실패(롤백됨): {e}")
 
     # 다음에도 같은 덱으로 이어지도록 이번에 쓴 파일을 기억한다
-    _remember_ppt(s.patient_dir.name, ppt_name)
+    _remember_ppt(str(s.patient_dir), ppt_name)
     result = {"ok": True, "patient_dir": str(s.patient_dir),
               "ppt": ppt_name, "visit": s.visit,
               "files": [p.relative_to(s.patient_dir).as_posix() for p in moved]}
@@ -3683,7 +3748,10 @@ def _remembered_ppt(folder: str) -> str:
     """
     try:
         d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("ppt_choice") or {}
-        return str(d.get(N.nfc(folder)) or "")
+        # 열쇠는 환자 폴더의 **전체 경로**다 — 저장 위치가 여럿이면 폴더 이름만으로는
+        # 서로 다른 환자가 같은 열쇠를 쓴다. 옛 기록(이름만)은 읽어만 준다.
+        return str(d.get(N.nfc(folder))
+                   or d.get(N.nfc(Path(folder).name)) or "")
     except Exception:                                   # noqa: BLE001
         return ""
 
@@ -3722,7 +3790,7 @@ def _find_ppt(entries: list[Path], base: Path, ids) -> Path | None:
     후보는 `.pptx` 중 등록된 이름 형식으로 읽히고 교정번호가 이 환자인 것뿐이다.
     상대경로를 쓰므로 하위 폴더에 같은 이름이 있어도 서로 다른 후보로 다룬다.
     """
-    remembered = N.nfc(_remembered_ppt(base.name))
+    remembered = N.nfc(_remembered_ppt(str(base)))
     gen = N.nfc(_gen_ppt_name(ids))
     best = None
     for p in entries:

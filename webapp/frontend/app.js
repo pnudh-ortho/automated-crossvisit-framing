@@ -650,10 +650,40 @@ async function drawRootPicker(path, host){
 function closePicker(host){
   if(host){ host.hidden = true; host.innerHTML = ""; } else { drawDetail(); }
 }
-function setRootLabel(path){
-  for(const id of ["rootpath","set-rootpath"]){
-    const n = el(id); if(n){ n.textContent = path; n.title = path; }
+let ROOTS = [];
+
+/* 저장 위치는 여러 곳을 등록해 두고 고른다. 지금 닿지 않는 곳(외장을 안 꽂았거나
+   공유 폴더가 끊긴 곳)도 목록에는 남긴다 — 지워 버리면 어디에 뒀는지조차
+   잊는다. 대신 고를 수는 없게 흐려 둔다. */
+function drawRoots(list, current){
+  if(list) ROOTS = list;
+  const cur = current || (ROOTS.find(r => r.current) || {}).path || "";
+  for(const r of ROOTS) r.current = (r.path === cur);
+  for(const id of ["root-sel", "set-root-sel"]){
+    const sel = el(id); if(!sel) continue;
+    sel.innerHTML = "";
+    for(const r of ROOTS){
+      const op = document.createElement("option");
+      op.value = r.path;
+      op.textContent = r.path + (r.exists ? "" : "  · 연결 안 됨");
+      op.disabled = !r.exists && !r.current;
+      sel.appendChild(op);
+    }
+    sel.value = cur;
+    sel.title = cur;
   }
+}
+
+async function loadRoots(current){
+  const d = await api("/api/roots").catch(() => null);
+  if(d) drawRoots(d.roots, current || d.current);
+}
+
+/* 지금 보고 있는 위치를 알린다. 목록에 없는 곳이면(방금 더한 폴더) 목록을 다시 받는다. */
+function setRootLabel(path){
+  if(!path) return;
+  if(ROOTS.some(r => r.path === path)) drawRoots(null, path);
+  else loadRoots(path);
 }
 
 /* ── 설정 창 ─────────────────────────────────────────────────────────────── */
@@ -2424,6 +2454,46 @@ for(const id of ["f-name","f-ortho"]){
   el(id).oninput = syncPreview;
   el(id).onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); el("new-ok").click(); } };
 }
+/* 고른 위치로 갈아탄다. 담아둔 사진은 옛 위치의 임시 폴더에 있으므로 함께 버린다. */
+async function selectRoot(path){
+  const now = (ROOTS.find(r => r.current) || {}).path || "";
+  if(!path || path === now) return;
+  if(STAGED.length &&
+     !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다.\n저장 위치를 바꿀까요?`)){
+    drawRoots();                       // 고른 것을 되돌린다
+    return;
+  }
+  try{
+    const r = await api("/api/root/select", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path})});
+    if(HEALTH) HEALTH.root = r.root;
+    drawRoots(r.roots, r.root);
+    resetSession();
+    await loadPatients();
+    loadMaint();
+  }catch(e){
+    alert("그 위치로 바꾸지 못했습니다: " + (e.message || e));
+    drawRoots();
+  }
+}
+for(const id of ["root-sel", "set-root-sel"])
+  el(id).onchange = e => selectRoot(e.target.value);
+
+/* 목록에서만 뺀다 — 폴더와 그 안의 환자 자료는 건드리지 않는다. */
+el("set-forget").onclick = async () => {
+  const path = el("set-root-sel").value;
+  if(!path) return;
+  if(!confirm("목록에서만 뺍니다 — 폴더와 그 안의 자료는 그대로 남습니다.\n\n" + path))
+    return;
+  try{
+    const r = await api("/api/root/forget", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path})});
+    drawRoots(r.roots);
+  }catch(e){ alert(e.message || e); }
+};
+
 el("btn-root").onclick = openSettings;
 el("btn-set").onclick = openSettings;
 // 피드백 — 구글 폼을 새 탭으로. 앱 상태와 무관하니 언제든 눌러도 안전하다.
@@ -2943,8 +3013,9 @@ el("set-change").onclick = async () => {
     const r = await api("/api/root", {method:"POST",
       headers:{"Content-Type":"application/json"}, body: JSON.stringify({path:got})});
     if(HEALTH) HEALTH.root = r.root;
+    drawRoots(r.roots, r.root);        // 더한 곳이 바로 목록에 뜨도록
     resetSession(); loadPatients(); loadMaint();
-    alert("저장 위치를 바꿨습니다:\n" + r.root);
+    alert("저장 위치를 더했습니다:\n" + r.root);
   }catch(e){ alert("그 위치를 쓸 수 없습니다: " + (e.message || e)); }
 };
 for(const b of el("set-theme").children) b.onclick = () => setTheme(b.dataset.t);

@@ -58,8 +58,8 @@
       <div class="toolbar">
         <div class="rootbar">
           <span class="eyebrow">저장 위치</span>
-          <span class="ident" id="rootpath">—</span>
-          <button class="btn" id="btn-root">폴더 변경</button>
+          <select class="ident rootsel" id="root-sel" title="저장 위치 고르기"></select>
+          <button class="btn" id="btn-root" title="저장 위치 더하기">＋ 추가</button>
         </div>
         <input class="find" id="find" autocomplete="off"
                placeholder="폴더 이름 검색">
@@ -223,8 +223,10 @@
   <div class="sec">
     <h4>저장 위치</h4>
     <div class="rootbar">
-      <span class="ident" id="set-rootpath">—</span>
-      <button class="btn" id="set-change">변경</button>
+      <select class="ident rootsel" id="set-root-sel"></select>
+      <button class="btn" id="set-change">＋ 추가</button>
+      <button class="btn" id="set-forget"
+              title="목록에서만 뺍니다 — 폴더와 그 안의 자료는 그대로 둡니다">빼기</button>
     </div>
     <div id="set-picker" hidden></div>
   </div>

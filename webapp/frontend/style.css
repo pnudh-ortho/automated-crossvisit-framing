@@ -299,6 +299,16 @@ body{
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   direction:rtl; text-align:left;
 }
+/* 저장 위치 고르기 — 여러 곳을 등록해 두고 오간다.
+   테두리·바탕은 바깥 .rootbar 가 이미 그리므로 셀렉트는 투명하게 얹는다. */
+.rootbar .rootsel{
+  flex:1 1 auto; min-width:0; height:23px; padding:0 2px;
+  font:13px var(--f-mono); color:var(--ink2);
+  background:transparent; border:0; outline:0; cursor:pointer;
+  text-overflow:ellipsis;
+}
+.rootbar .rootsel option{color:var(--ink); background:var(--panel2);}
+.rootbar .rootsel option:disabled{color:var(--ink3);}
 .rootbar .btn{flex:none; height:23px; padding:0 9px; font-size:13px;
   display:inline-flex; align-items:center;}
 
