@@ -763,7 +763,9 @@ async function syncPrefs(){
   el("nsz-soap").value = ns.NOTE_SOAP || "";
   el("nsz-ll").value = ns.NOTE_LL || "";
   el("nsz-next").value = ns.NOTE_NEXT || "";
-  el("set-letterbox").value = LETTERBOX;
+  const lb = LETTERBOX.replace("#", "").toUpperCase();
+  for(const b of el("set-letterbox").children)
+    b.setAttribute("aria-pressed", b.dataset.c === lb);
 }
 for(const [id, key] of [["nsz-soap", "NOTE_SOAP"], ["nsz-ll", "NOTE_LL"],
                         ["nsz-next", "NOTE_NEXT"]]){
@@ -780,13 +782,11 @@ for(const b of el("set-unit").children) b.onclick = async () => {
   if(NOTES) loadNotes();
 };
 /* 여백 색 — 화면·저장 사진·PPT 가 같은 값을 쓴다. 바꾸면 판을 다시 그린다. */
-el("set-letterbox").onchange = async e => {
-  const v = (e.target.value || "").replace("#", "");
-  if(!/^[0-9A-Fa-f]{6}$/.test(v)) return;
-  const p = await setPref({letterbox_color: v});
+for(const b of el("set-letterbox").children) b.onclick = async () => {
+  const p = await setPref({letterbox_color: b.dataset.c});
   if(p && p.letterbox_color){
     LETTERBOX = "#" + p.letterbox_color;
-    renderEditor(); redrawBoardSlots();
+    syncPrefs(); renderEditor(); redrawBoardSlots();
   }
 };
 
@@ -2027,7 +2027,11 @@ function drawNoteOverlay(){
   const sl = NOTES.slide;
   if(!layer){ layer = document.createElement("div"); layer.className = "noteov"; boardEl.appendChild(layer); }
   layer.innerHTML = "";
+  drawPrevLines(layer);
   for(const key of noteOrder()){
+    // 자유 기입 칸(②④⑤)은 판에 올리지 않는다 — 앱에서 적지 않기로 했다.
+    // 그 상자들은 직전 차수 것을 물려받거나 빈 채로 두고 PowerPoint 에서 적는다.
+    if(!(NOTES.preview || {}).hasOwnProperty(key)) continue;
     const r = NOTES.layout[key]; if(!r) continue;
     const box = document.createElement("div");
     box.className = "nbox" + ((NOTES.overrides || {})[key] ? " edited" : "");
@@ -2077,6 +2081,34 @@ function drawNoteOverlay(){
     box.appendChild(rst);
     layer.appendChild(box);
   }
+}
+
+/* 직전 차수 슬라이드에 그려져 있던 선 — 확정하면 그 자리로 따라온다.
+   검수 중에 어디로 갈지 보이지 않으면 사진을 맞춘 뒤에야 알게 된다.
+   보여주기만 한다: 자리를 옮기는 것은 PowerPoint 에서 할 일이다. */
+function drawPrevLines(layer){
+  const list = (NOTES && NOTES.prev_lines) || [];
+  if(!list.length) return;
+  const sl = NOTES.slide;
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "prevlines");
+  svg.setAttribute("viewBox", `0 0 ${sl.w} ${sl.h}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  for(const ln of list){
+    const e = document.createElementNS(NS, "line");
+    e.setAttribute("x1", ln.x1); e.setAttribute("y1", ln.y1);
+    e.setAttribute("x2", ln.x2); e.setAttribute("y2", ln.y2);
+    // 원본 굵기를 따르되 너무 가늘면 안 보인다 — 최소 굵기를 둔다
+    if(ln.width_pt)
+      e.setAttribute("stroke-width",
+                     Math.max(0.08, ln.width_pt * sl.w / 720).toFixed(3));
+    const t = document.createElementNS(NS, "title");
+    t.textContent = `${ln.name} — 직전 차수 슬라이드의 선. 확정하면 이 자리로 들어갑니다`;
+    e.appendChild(t);
+    svg.appendChild(e);
+  }
+  layer.appendChild(svg);
 }
 
 const noteOrder = () => (NOTES && NOTES.order) || [];
@@ -2205,14 +2237,37 @@ function noteFieldRow(f){
     }
     wrap.appendChild(seg);
 
-    // 기준일 이력이 여럿인 드문 경우만 — 자동 모드에서 과거 기준일을 고른다
-    if(mode === "auto" && (st.dates || []).length > 1){
+    // 자동 모드에서는 **기준일을 늘 보여주고 고칠 수 있게** 한다.
+    // 예전에는 이력이 둘 이상일 때만 고르는 상자를 냈다 — 이력에 없는 날짜를
+    // 넣을 길이 없었고, 하나뿐인 기간은 무엇을 기준으로 세는지도 안 보였다.
+    if(mode === "auto"){
+      // 후보는 덱에서 읽은 차수 날짜 전부 + 기간 줄에 적혀 있던 기준일 + 이번 차수.
+      // 기준일은 대개 "어느 차수부터" 라서 차수 글자를 함께 보인다.
+      // 목록은 드롭다운으로 낸다 — datalist 는 브라우저마다 안 펼쳐진다.
+      const cur = st.start || (st.dates || [])[0] || "";
+      const opts = st.options || (st.dates || []).map(d => ({date: d, visit: ""}));
+      const cap = document.createElement("span");
+      cap.className = "pdate-cap";
+      cap.textContent = "기준일";
       const sel = document.createElement("select");
-      sel.className = "ovsel";
-      const cur = st.start || st.dates[0];
-      sel.innerHTML = st.dates.map(d =>
-        `<option value="${d}"${d === cur ? " selected" : ""}>기준일 ${d}</option>`).join("");
+      sel.className = "pdate";
+      const seen = new Set();
+      for(const o of opts){
+        if(seen.has(o.date)) continue;
+        seen.add(o.date);
+        const op = document.createElement("option");
+        op.value = o.date;
+        op.textContent = o.visit ? `${o.date} · ${o.visit}` : o.date;
+        sel.appendChild(op);
+      }
+      if(cur && !seen.has(cur)){            // 목록에 없는 값도 잃지 않는다
+        const op = document.createElement("option");
+        op.value = cur; op.textContent = cur;
+        sel.insertBefore(op, sel.firstChild);
+      }
+      sel.value = cur;
       sel.onchange = () => send({start: sel.value, keep: false});
+      wrap.appendChild(cap);
       wrap.appendChild(sel);
     }
     lab.appendChild(wrap);

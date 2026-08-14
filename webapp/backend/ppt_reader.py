@@ -536,6 +536,37 @@ def last_status_style(prs, cfg) -> dict | None:
     return best
 
 
+def note_role(sh, slide_w_cm: float) -> str | None:
+    """이 도형이 규약 상자 다섯 중 어느 역할인가 — 이름이 아니라 **내용과 자리**로.
+
+    수제 덱의 상자에는 이름 규약이 없다. 라벨과 기간 칸은 글로, 나머지 세 칸은
+    사분면 위치로 알아본다.
+
+    판정이 한 곳에 있어야 '통째 복사 상속' 과 '나머지 도형 복사' 가 **같은 상자를
+    두 번** 넣지 않는다. 실제로 그랬다 — '전부 복사' 를 켜면 이미 물려받은 날짜/차수·
+    Tx/Rx/App 상자가 한 벌 더 얹혀 글자가 겹쳤다.
+
+    반환: "label" | "status" | NOTE_SOAP | NOTE_LL | NOTE_NEXT | None
+    """
+    if not getattr(sh, "has_text_frame", False):
+        return None
+    t = sh.text_frame.text or ""
+    if any(m in t for m in _PERIOD_MARKS):
+        return "status"
+    _v, dt, kind = parse_info_box(t)
+    if dt and kind != "unknown":
+        return "label"
+    if not t.strip():
+        return None                         # 빈 상자는 대응으로 안 본다
+    x, y = emu_to_cm(sh.left), emu_to_cm(sh.top)
+    half = slide_w_cm / 2
+    if x < half and y < 1.2:
+        return None                         # 라벨 자리인데 라벨이 아니다
+    return ("NOTE_LL" if x < half and y >= 12.0
+            else "NOTE_SOAP" if x < half
+            else "NOTE_NEXT" if y >= 6.0 else None)
+
+
 def last_label_status_xml(prs, cfg) -> dict:
     """수제 PPT 마지막 차수의 노트 상자들 **원본 XML** — 통째 복사 상속용.
 
@@ -555,24 +586,7 @@ def last_label_status_xml(prs, cfg) -> dict:
             continue
         found: dict = {}
         for sh in slide.shapes:
-            if not getattr(sh, "has_text_frame", False):
-                continue
-            t = sh.text_frame.text or ""
-            if "Tx. Period" in t or "Rx. Period" in t:
-                found["status"] = sh
-                continue
-            _v, dt, kind = parse_info_box(t)
-            if dt and kind != "unknown":
-                found["label"] = sh
-                continue
-            if not t.strip():
-                continue                    # 빈 상자는 대응으로 안 본다
-            x, y = emu_to_cm(sh.left), emu_to_cm(sh.top)
-            if x < half and y < 1.2:
-                continue                    # 라벨 자리인데 라벨이 아니다
-            key = ("NOTE_LL" if x < half and y >= 12.0
-                   else "NOTE_SOAP" if x < half
-                   else "NOTE_NEXT" if y >= 6.0 else None)
+            key = note_role(sh, sw)
             if key:
                 found[key] = sh
         if "label" in found or "status" in found:   # 차수 슬라이드만 채택

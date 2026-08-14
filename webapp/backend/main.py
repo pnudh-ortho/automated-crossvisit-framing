@@ -704,6 +704,24 @@ def _note_auto(s: "Session") -> dict:
     }
 
 
+def _period_options(s: "Session", k: str) -> list[str]:
+    """기준일로 고를 만한 날짜 — 최신순.
+
+    기간 줄에 적혀 있던 기준일 + **덱에서 파싱한 차수 날짜 전부** + 이번 차수.
+    기준일은 대개 "어느 차수부터" 라서, 이력에 적힌 것만 주면 처음 정하는 기간은
+    고를 것이 하나도 없다.
+    """
+    hist = (s.period_hist.get(k) or {}).get("dates") or []
+    today = (_photo_date(s) or datetime.now()).strftime(cfg.ppt.info_date_format)
+    # 날짜 → 차수 글자. 어느 차수의 날짜인지 보여야 "그 차수부터" 를 고를 수 있다.
+    letter = {v["date"]: v["visit"] for v in (s.visit_dates or []) if v.get("date")}
+    seen = {d for d in (*hist, *letter, today) if d}
+    return [{"date": d, "visit": ("이번 차수" if d == today and d not in letter
+                                  else letter.get(d, ""))}
+            for d in sorted(seen, key=lambda d: Rd._date_key(d) or (0, 0, 0),
+                            reverse=True)]
+
+
 def _note_defaults(s: "Session") -> dict:
     """자동값을 끼운 칸별 기본값. 빈 칸에만 쓰인다."""
     auto = _note_auto(s)
@@ -767,6 +785,7 @@ def _notes_json(s: "Session") -> dict:
         # today = 이 차수의 날짜(촬영일) — 기준일 후보 목록의 "이 차수" 항목이다.
         "periods": {
             k: {"dates": (s.period_hist.get(k) or {}).get("dates", []),
+                "options": _period_options(s, k),
                 "last": (s.period_hist.get(k) or {}).get("last") or "",
                 "start": s.period_start.get(k, ""),
                 "keep": bool(s.period_keep.get(k)),
@@ -784,6 +803,9 @@ def _notes_json(s: "Session") -> dict:
         "templates": _note_templates(s),    # 지금 쓰이는 서식
         "templates_default": dict(cfg.notes.boxes),
         "slide": {"w": CASE_SLIDE_CM[0], "h": CASE_SLIDE_CM[1]},
+        # 직전 차수 슬라이드의 선 — 설정이 '복사 안 함' 이면 따라오지 않으므로 안 낸다
+        "prev_lines": ([] if _copy_shapes() == "none"
+                       else list(getattr(s, "prev_lines", []) or [])),
         "preview": _note_text(s),
         # 줄 끝 괄호(날짜)를 작게 쓰는 크기. 화면 오버레이도 같은 규칙을 써야
         # 슬라이드에서 보일 모습과 어긋나지 않는다.
@@ -1177,6 +1199,10 @@ class Session:
         # 임상의가 "이 차수부터 시작" 을 체크하면 그 차수 날짜로 정해진다.
         # 기간별 이력 {"tx": {"dates":[최신순], "last": "직전 줄"}}
         self.period_hist: dict[str, dict] = {}
+        # 덱에서 읽은 차수와 날짜 — 기준일 후보로 화면에 낸다
+        self.visit_dates: list[dict] = []
+        # 직전 차수 슬라이드에 그려져 있던 선 — 검수 판에 그대로 겹쳐 보여준다
+        self.prev_lines: list[dict] = []
         # 사람이 고른 기준일. 안 고르면 이력의 최신값이 쓰인다.
         self.period_start: dict[str, str] = {}
         # "이전 차수 값 그대로" — 개월을 다시 안 세고 직전 줄을 그대로 쓴다.
@@ -1688,7 +1714,7 @@ def _scan_patient(d: Path) -> dict | None:
         # 새 슬라이드를 **어느 장 뒤에** 넣을지. 날짜가 가장 늦은 차수 슬라이드다 —
         # "몇 번째가 된다" 보다 "몇 번 뒤" 가 사람이 슬라이드를 세는 방식이다.
         "suggest_after": (max(scan["visits"],
-                              key=lambda v: (Rd._date_key(v["date"]) or (0,),
+                              key=lambda v: (N.letter_to_num(v["visit"]),
                                              v["slide_no"]))["slide_no"]
                           if scan["visits"] else None),
         # PPT 를 못 찾았을 때: 폴더의 PPT 파일마다 못 알아본 이유 한 줄.
@@ -2079,6 +2105,16 @@ def session_open(req: OpenReq):
             s.status_style = None
             s.inherit_sp = {}
         s.period_hist = {k: _period_history(seen, lab) for k, lab in PERIOD_KEYS.items()}
+        # 기준일은 대개 "어느 차수부터" 다 — 파싱한 차수 날짜를 후보로 남긴다
+        s.visit_dates = [{"visit": v["visit"], "date": v["date"]}
+                         for v in scan["visits"] if v.get("date")]
+        # 새 장이 이어붙을 자리 = 차수 글자가 가장 큰 장. 거기 그려진 선을 읽어
+        # 검수 판에 겹쳐 보여준다 — 확정하면 그 자리로 따라오기 때문이다.
+        if scan["visits"]:
+            src_no = max(scan["visits"],
+                         key=lambda v: (N.letter_to_num(v["visit"]),
+                                        v["slide_no"]))["slide_no"]
+            s.prev_lines = _slide_lines(prs, [src_no]).get(src_no, [])
     elif s.visit == "A":
         # 오늘이 초진이다 — 경과 개월은 0.
         s.first_date = datetime.now().strftime(cfg.ppt.info_date_format)
@@ -3092,7 +3128,8 @@ def commit(sid: str, allow_missing: bool = False):
                     CD.replace_with_copied_box(slide, key, inherit[key])
             # 사람이 그려 둔 선·화살표 등 — 설정에 따라 직전 장에서 가져온다
             if s.mode == "revisit":
-                _inherit_shapes(src_slide, slide, _copy_shapes())
+                _inherit_shapes(src_slide, slide, _copy_shapes(),
+                                emu_to_cm(prs.slide_width), set(inherit))
 
             # 2) 구내 슬롯 삽입 — 상자의 대표(0번)만 슬라이드에 들어간다
             #    파일명은 전부 _build_plan() 이 정한 것을 쓴다(미리보기와 동일 보장).
@@ -3207,39 +3244,28 @@ def commit(sid: str, allow_missing: bool = False):
 def _revisit_insert_index(prs) -> int:
     """새 차수 슬라이드가 들어갈 자리.
 
-    ① 슬라이드마다 라벨(날짜 + 초진/재진)을 찾아 **날짜가 가장
-       늦은 차수 슬라이드 바로 다음**. 문서 순서가 아니라 날짜로 고르므로 장
-       순서가 뒤섞인 PPT 에서도 마지막 차수 뒤에 붙는다. 날짜가 같으면 뒤에
-       있는 장을 마지막으로 본다. 텍스트뿐인 장(환자정보 등)을 차수로 오인하지
-       않도록 사진이 한 장이라도 있는 장만 후보다.
-    ② 라벨이 하나도 없으면: PHOTO_ 이름, 또는 유효 십자뷰(가로 8cm 이상
+    ① **차수 글자가 가장 큰 십자뷰 슬라이드 바로 다음.** 예전에는 날짜가 가장
+       늦은 장을 골랐는데, 라벨 날짜는 손으로 적다 보니 오타가 난다 — J 가 K 보다
+       뒤 날짜인 덱이 실제로 있었고, 그때 새 장이 K 앞으로 들어갔다. 차수 글자는
+       순서 그 자체라 그런 흔들림이 없다 (2026-08-14 결정).
+    ② 글자를 하나도 못 읽으면: PHOTO_ 이름, 또는 유효 십자뷰(가로 8cm 이상
        사진 5장)인 마지막 장 다음.
     ③ 그것도 없으면 문서 맨 뒤.
     """
-    best = None            # (날짜, 문서위치) — 튜플 비교로 최신을 고른다
+    scan = Rd.scan_ppt_visits(prs, cfg)
+    if scan["visits"]:
+        last = max(scan["visits"],
+                   key=lambda v: (N.letter_to_num(v["visit"]), v["slide_no"]))
+        return last["slide_no"]        # n 번 장 뒤 = 0-기반 삽입 위치 n
     last_io = -1
     for i, slide in enumerate(prs.slides):
         shapes = list(slide.shapes)
-        pics = sum(1 for sh in shapes
-                   if getattr(sh, "shape_type", None) == 13)      # PICTURE
         big = sum(1 for sh in shapes
                   if getattr(sh, "shape_type", None) == 13
                   and emu_to_cm(sh.width) >= 8.0)
         has_photo = any(sh.name.startswith(W.PHOTO_NAME_PREFIX) for sh in shapes)
         if has_photo or big >= 5:      # 유효 십자뷰 기준 — 가로 8cm 이상 5장
             last_io = i
-        if not (has_photo or big >= 5):    # 유효 십자뷰만 삽입 기준 후보
-            continue
-        for sh in slide.shapes:
-            if not getattr(sh, "has_text_frame", False):
-                continue
-            _v, date, kind = Rd.parse_info_box(sh.text_frame.text or "")
-            if date and kind != "unknown":
-                if best is None or (date, i) > best:
-                    best = (date, i)
-                break
-    if best is not None:
-        return best[1] + 1
     return last_io + 1 if last_io >= 0 else len(prs.slides._sldIdLst)
 
 
@@ -3266,7 +3292,8 @@ def _copy_shapes() -> str:
 _FREE_NOTE_BOXES = (CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT)
 
 
-def _inherit_shapes(src, dst, mode: str) -> int:
+def _inherit_shapes(src, dst, mode: str, slide_w_cm: float = 0.0,
+                    inherited: set | None = None) -> int:
     """직전 차수 슬라이드의 도형을 새 슬라이드로 복사한다.
 
     "lines" 는 직선·연결선만 — 정중선·교합평면처럼 매 차수 같은 자리를 가리키는
@@ -3276,6 +3303,14 @@ def _inherit_shapes(src, dst, mode: str) -> int:
     자유 기입 상자(좌상단 s/p·좌하단·우하단)의 글은 "all" 에서만 물려받는다.
     다른 모드에서는 상속으로 딸려 온 글을 지운다 — 수제 덱은 상자를 통째로
     복사해 오므로 지우지 않으면 지난 차수 글이 그대로 남는다.
+
+    규약 상자 다섯은 이 경로로 오지 않는다. 이름이 있으면 이름으로, 이름이 없는
+    수제 상자는 **역할로** 가려낸다(`Rd.note_role`) — 이름만 보면 이미 물려받은
+    날짜/차수·Tx/Rx/App 이 한 벌 더 얹혀 글자가 겹친다.
+
+    `inherited` 는 이번에 **실제로 물려받은 역할들**이다. 역할이 같다고 무조건
+    빼면 안 된다: 앱이 만든 직전 슬라이드는 물려받는 것이 하나도 없는데, 거기에
+    손으로 그려 둔 글상자가 노트 자리에 있다는 이유로 통째로 버려졌다.
     """
     if src is None or dst is None:
         return 0
@@ -3294,6 +3329,16 @@ def _inherit_shapes(src, dst, mode: str) -> int:
             CD.set_note_text(dst, key, "")
     if mode == "none":
         return n
+    # 규약 상자로 **실제로 물려받은 그 도형만** 건너뛴다. 역할이 같다고 다 버리면
+    # 같은 구역에 글상자가 둘일 때 하나만 상속되고 나머지는 소리 없이 사라진다.
+    # 어느 것이 상속되는지는 last_label_status_xml 과 같은 규칙(뒤엣것이 이긴다).
+    taken: dict[str, object] = {}
+    if slide_w_cm and inherited:
+        for sh in src.shapes:
+            role = Rd.note_role(sh, slide_w_cm)
+            if role in inherited:
+                taken[role] = sh
+    skip = {id(sh._element) for sh in taken.values()}
     spTree = dst.shapes._spTree
     for sh in src.shapes:
         name = str(getattr(sh, "name", ""))
@@ -3301,6 +3346,8 @@ def _inherit_shapes(src, dst, mode: str) -> int:
             continue
         if getattr(sh, "shape_type", None) == 13:       # PICTURE — 사진은 새로 넣는다
             continue
+        if id(sh._element) in skip:
+            continue                        # 이미 규약 상자로 물려받은 그 도형
         if mode == "lines" and getattr(sh, "shape_type", None) != _LINE_TYPE:
             continue
         new = copy.deepcopy(sh._element)

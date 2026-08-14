@@ -201,8 +201,8 @@ notes:
     - {key: cc,         label: "C/C",         hint: "주소(chief complaint)",
        lines: 2, group: patient}
     # ── 이번 차수의 노트 ─────────────────────────────────────────────────────
-    - {key: wire_u,     label: "상악 와이어", hint: "018 NT /c loose cinch"}
-    - {key: wire_l,     label: "하악 와이어", hint: "016 NT /c loose cinch"}
+    # 와이어 칸도 두지 않는다 — 우상단 상자에서 앱이 채우는 것은 기간 세 줄뿐이고,
+    # 나머지는 직전 차수 것을 물려받거나 PowerPoint 에서 적는다 (2026-08-14 결정).
     # default 에는 자동 계산값을 끼울 수 있다: {first_date} {today} {months}
     # {visit} {visit_label}. 빈 칸에만 채워지고, 사람이 고치면 그쪽이 이긴다.
     # 치료·장치 시작은 초진보다 늦을 수 있다. "이 차수부터 시작" 을 체크하면 그
@@ -213,23 +213,18 @@ notes:
        default: "{months_rx} month{rx_paren}"}
     - {key: app_period, label: "App. Period", hint: "0 month",
        default: "{months_app} month{app_paren}"}
-    - {key: subj,       label: "s) 주관적",   hint: "n/s",            lines: 3}
-    - {key: plan,       label: "p) 처치",     hint: "AWC",            lines: 4}
-    - {key: next,       label: "n) 다음",     hint: "AWC, ATE 고려",  lines: 4}
-    # ④ 좌하단은 양식에 없던 자리다 — 무엇을 적을지 정해지면 서식을 손보면 된다.
-    - {key: ll,         label: "좌하단 메모",  hint: "자유 기재",       lines: 4}
+    # 자유 기입 칸(s)/p)·좌하단·n) 다음)은 두지 않는다 — 그 세 상자는 앱에서
+    # 쓰지 않고, 직전 차수 것을 물려받거나 비운 채로 두고 PowerPoint 에서 적는다
+    # (2026-08-14 결정). 상자 자체는 그대로 만들어지고 글자 크기 설정도 유효하다.
   # 줄 끝 괄호(Rx. Period 뒤의 초진 날짜 등)는 작게 쓴다 — 양식이 그렇게 돼 있다.
   date_pt: 9
   # 단, 날짜 칸의 "(초진 A)" 는 날짜가 아니라 차수 표시다 — 본문과 같은 크기로 둔다.
   date_pt_except: [NOTE_DATE]
   # 박스별 서식. {필드}가 비면 그 줄은 사라진다.
   boxes:
-    # Tx. 위에 빈 줄 3개 — 양식이 그 높이에서 글을 시작한다. 와이어를 안 채우면
-    # U:/L: 줄이 사라지면서 양식 원본과 똑같이 '빈 줄 3개 + Tx.' 가 된다.
-    NOTE_STATUS: "U: {wire_u}\nL: {wire_l}\n\n\n\nTx. Period: {tx_period}\nRx. Period: {rx_period}\nApp. Period: {app_period}"
-    NOTE_SOAP:   "s) {subj}\np) {plan}"
-    NOTE_LL:     "{ll}"
-    NOTE_NEXT:   "n) {next}"
+    # Tx. 위에 빈 줄 3개 — 양식이 그 높이에서 글을 시작한다. 와이어 줄이 있던
+    # 자리이기도 하다: 그 줄을 없앤 뒤에도 글 시작 높이는 양식 그대로여야 한다.
+    NOTE_STATUS: "\n\n\nTx. Period: {tx_period}\nRx. Period: {rx_period}\nApp. Period: {app_period}"
 
 # ── 첫 슬라이드(환자정보) 자동 입력 ──────────────────────────────────────────
 # 양식 1번 슬라이드의 "Hospital No. / Case No. / Pt. name : / C/C :" 줄을 채운다.

@@ -58,18 +58,18 @@ def sid(patient):
 def test_fields_are_declared(sid):
     js = client.get(f"/api/notes/{sid}").json()
     keys = [f["key"] for f in js["fields"]]
-    assert "wire_u" in keys and "subj" in keys and "next" in keys
+    assert "tx_period" in keys and "rx_period" in keys
+    # 앱이 채우는 것은 기간 세 줄뿐이다 — 자유 기입 칸도 와이어도 두지 않는다
+    assert not ({"subj", "plan", "next", "ll", "wire_u", "wire_l"} & set(keys)), keys
     # preview 는 서식 박스 + 날짜 칸이다. 날짜는 서식이 아니라 차수 라벨에서
     # 오지만, 검수 화면 오버레이가 네 칸을 한자리에서 보여줘야 해서 같이 나간다.
     assert set(js["preview"]) == set(M.cfg.notes.boxes) | {"NOTE_DATE"}
 
 
 def test_empty_fields_drop_their_lines():
-    """빈 칸이 만든 줄은 사라져야 한다 — 슬라이드에 'U: '만 남으면 안 된다."""
-    out = M._render_notes({"wire_u": "018 NT", "tx_period": "3 month"})
+    """빈 칸이 만든 줄은 사라져야 한다 — 슬라이드에 'Rx. Period:' 만 남으면 안 된다."""
+    out = M._render_notes({"tx_period": "3 month"})
     status = out["NOTE_STATUS"]
-    assert "U: 018 NT" in status
-    assert "L:" not in status                 # 하악은 안 채웠다
     assert "Tx. Period: 3 month" in status
     assert "Rx. Period" not in status         # 안 채웠다
     assert "App. Period" not in status
@@ -80,9 +80,9 @@ def test_empty_fields_drop_their_lines():
 
 
 def test_whitespace_only_counts_as_empty():
-    out = M._render_notes({"wire_u": "   ", "wire_l": "016 NT"})
-    assert "U:" not in out["NOTE_STATUS"]
-    assert "L: 016 NT" in out["NOTE_STATUS"]
+    out = M._render_notes({"tx_period": "   ", "rx_period": "3 month"})
+    assert "Tx. Period" not in out["NOTE_STATUS"]
+    assert "Rx. Period: 3 month" in out["NOTE_STATUS"]
 
 
 def test_unknown_field_rejected(sid):
@@ -92,28 +92,33 @@ def test_unknown_field_rejected(sid):
 
 def test_values_round_trip(sid):
     r = client.post("/api/notes", json={"session_id": sid,
-                                        "values": {"subj": "n/s", "plan": "AWC"}})
+                                        "values": {"tx_period": "3 month"}})
     js = r.json()
-    assert js["values"]["subj"] == "n/s"
-    assert js["preview"]["NOTE_SOAP"] == "s) n/s\np) AWC"
+    assert js["values"]["tx_period"] == "3 month"
+    assert "Tx. Period: 3 month" in js["preview"]["NOTE_STATUS"]
     # 다시 읽어도 남아 있다
-    assert client.get(f"/api/notes/{sid}").json()["values"]["plan"] == "AWC"
+    assert client.get(f"/api/notes/{sid}").json()["values"]["tx_period"] == "3 month"
+
+
+def test_free_note_fields_are_gone(sid):
+    """②④⑤ 와 와이어는 앱에서 적지 않는다 — 값을 보내면 거절한다."""
+    for k in ("subj", "plan", "next", "ll", "wire_u", "wire_l"):
+        r = client.post("/api/notes", json={"session_id": sid, "values": {k: "x"}})
+        assert r.status_code == 400, (k, r.text)
 
 
 @pytest.mark.skipif(not M.CASE_ANCHORS, reason="케이스 양식이 없습니다")
 def test_commit_writes_notes_onto_cross_slide(sid, patient):
-    client.post("/api/notes", json={"session_id": sid, "values": {
-        "wire_u": "018 NT /c loose cinch", "tx_period": "0 month",
-        "subj": "n/s", "plan": "bonding", "next": "AWC",
-    }})
+    client.post("/api/notes", json={"session_id": sid,
+                                    "values": {"tx_period": "0 month"}})
     assert client.post(f"/api/commit/{sid}?allow_missing=true").status_code == 200
 
     prs = T.load_presentation(patient / N.ppt_filename(IDS, M.cfg.naming.ppt_pattern))
     cross = prs.slides[CD.cross_slide_index(prs)]
-    assert CD.get_note_text(cross, CD.NOTE_SOAP) == "s) n/s\np) bonding"
-    assert CD.get_note_text(cross, CD.NOTE_NEXT) == "n) AWC"
+    # 자유 기입 상자는 만들어지되 앱이 글을 넣지 않는다
+    assert CD.get_note_text(cross, CD.NOTE_SOAP) == ""
     status = CD.get_note_text(cross, CD.NOTE_STATUS)
-    assert "U: 018 NT /c loose cinch" in status and "L:" not in status
+    assert "Tx. Period: 0 month" in status and "U:" not in status
     # 차수 표시는 노트와 별개로 자기 박스에 적힌다
     assert "초진" in CD.get_note_text(cross, CD.NOTE_DATE)
 
@@ -181,7 +186,7 @@ def test_add_note_box_creates_a_real_textbox():
 def test_blank_lines_survive_rendering():
     """양식의 빈 줄은 글의 시작 높이를 잡는다 — 다듬어 없애면 안 된다."""
     out = M._render_notes({"tx_period": "3 month"},
-                          {"B": "U: {wire_u}\n\n\nTx. Period: {tx_period}"})
+                          {"B": "U: {rx_period}\n\n\nTx. Period: {tx_period}"})
     # 칸이 빈 줄(U:)만 사라지고 빈 줄 두 개는 남는다
     assert out["B"] == "\n\nTx. Period: 3 month", repr(out["B"])
     print("PASS 빈 줄 보존, 빈 칸 줄만 제거")

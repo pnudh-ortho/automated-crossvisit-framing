@@ -243,7 +243,8 @@
     </details>
   </div>
   <div class="sec">
-    <h4>개인화</h4>
+    <details class="fold">
+    <summary>개인화 <small class="sub">— 테마 · 표기 · 저장 방식</small></summary>
     <div class="setrow">
       <span>테마</span>
       <div class="seg" id="set-theme">
@@ -276,9 +277,11 @@
       <input type="checkbox" id="set-raw">
     </div>
     <div class="setrow">
-      <span class="settl">여백 색<small class="sub">사진을 돌리거나 줄일 때 드러나는 빈 자리 —
-        검수 화면·저장되는 사진·PPT 가 이 색을 함께 씁니다</small></span>
-      <input type="color" class="lbcolor" id="set-letterbox">
+      <span class="settl">여백 색<small class="sub">사진을 돌리거나 줄일 때 드러나는
+        빈 여백을 채우는 색</small></span>
+      <div class="seg" id="set-letterbox">
+        <button data-c="FFFFFF">흰색</button><button data-c="808080">회색</button><button data-c="000000">검은색</button>
+      </div>
     </div>
     <div class="setrow">
       <span class="settl">새 노트 상자 글자 크기<small class="sub">복사해 온 상자는 원본 크기 유지 (pt)</small></span>
@@ -288,6 +291,7 @@
         <input type="number" class="nsz" id="nsz-next" min="6" max="40" title="우하단">
       </span>
     </div>
+    </details>
   </div>
   <menu><button class="btn" id="set-close">닫기</button></menu>
 

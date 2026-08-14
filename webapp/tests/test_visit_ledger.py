@@ -102,3 +102,14 @@ def test_라벨_없는_장은_차수가_아니다(prs):
     _slide(prs, "환자정보", 5)
     out = Rd.scan_ppt_visits(prs, main.cfg)
     assert out["visits"] == [] and out["excluded"] == []
+
+
+def test_삽입_자리는_날짜가_아니라_차수_글자로_고른다(prs):
+    """라벨 날짜는 손으로 적다 보니 오타가 난다 — J 가 K 보다 뒤 날짜인 덱이 있었다.
+
+    날짜로 고르면 새 장이 K 앞으로 들어간다. 차수 글자는 순서 그 자체라 안 흔들린다.
+    """
+    _slide(prs, "25.03.17 (재진 I)", 5)
+    _slide(prs, "25.05.19 (재진 J)", 5)     # 오타 — K 보다 뒤 날짜
+    _slide(prs, "25.04.30 (재진 K)", 5)
+    assert main._revisit_insert_index(prs) == 3      # K(3번 장) 뒤 = 0-기반 3

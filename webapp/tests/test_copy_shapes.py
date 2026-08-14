@@ -88,3 +88,71 @@ def test_복사_안_함(deck):
 def test_기본값은_선만_복사(tmp_path, monkeypatch):
     monkeypatch.setattr(M, "SETTINGS_FILE", tmp_path / "settings.json", raising=False)
     assert M._copy_shapes() == "lines"
+
+
+def test_이름_없는_규약_상자는_두_번_넣지_않는다():
+    """수제 덱의 라벨·기간·노트 상자는 이미 통째로 물려받은 것들이다.
+
+    이름으로만 걸러내면 규약명이 없는 그 상자들이 '전부 복사' 로 한 벌 더 얹혀
+    글자가 겹친다. 이름이 아니라 **역할**(내용·자리)로 가려낸다.
+    """
+    from pptx import Presentation
+    from pptx.util import Emu
+    import main as _M
+    import ppt_reader as _Rd
+
+    EMU, SW = _M.EMU_PER_CM, 25.4
+    prs = Presentation()
+    src, dst = (prs.slides.add_slide(prs.slide_layouts[6]) for _ in range(2))
+
+    def box(sl, name, text, x, y):
+        b = sl.shapes.add_textbox(Emu(int(x * EMU)), Emu(int(y * EMU)),
+                                  Emu(int(8 * EMU)), Emu(int(2 * EMU)))
+        b.name, b.text_frame.text = name, text
+        return b
+
+    box(src, "TextBox 1", "24.09.04 (재진 C)", 0.4, 0.4)              # 라벨
+    box(src, "TextBox 2", "Tx. Period: 3 month (24.06.05)", 17.1, 0.6)  # 기간
+    box(src, "TextBox 3", "s) n/s", 0.1, 1.5)                          # 좌상단 노트
+    _line(src)
+    # 새 슬라이드에는 규약 상자가 이미 있다(통째 복사 상속의 결과)
+    box(dst, _M.cfg.ppt.info_box_name, "26.08.14 (재진 D)", 0.4, 0.4)
+    box(dst, CD.NOTE_STATUS, "Tx. Period: 5 month (24.06.05)", 17.1, 0.6)
+
+    assert _Rd.note_role(src.shapes[0], SW) == "label"
+    assert _Rd.note_role(src.shapes[1], SW) == "status"
+
+    # 실제 커밋은 "이번에 물려받은 역할" 을 함께 넘긴다
+    _M._inherit_shapes(src, dst, "all", SW, {"label", "status", CD.NOTE_SOAP})
+    names = [str(sh.name) for sh in dst.shapes]
+    assert "정중선" in names                       # 선은 넘어온다
+    assert not [n for n in names if n.startswith("TextBox")], names
+    assert names.count(_M.cfg.ppt.info_box_name) == 1
+    assert names.count(CD.NOTE_STATUS) == 1
+
+
+def test_물려받은_것이_없으면_글상자를_버리지_않는다():
+    """앱이 만든 직전 슬라이드에는 물려받을 상자가 없다.
+
+    그런데도 '노트 자리에 있다' 는 이유로 손으로 그려 둔 글상자를 버렸다 —
+    전부 복사인데 아무것도 안 따라오는 것처럼 보였다.
+    """
+    from pptx import Presentation
+    from pptx.util import Emu
+    import main as _M
+
+    EMU, SW = _M.EMU_PER_CM, 25.4
+    prs = Presentation()
+    src, dst = (prs.slides.add_slide(prs.slide_layouts[6]) for _ in range(2))
+    for name, x, y in (("INFO_BOX", 0.4, 0.4), (CD.NOTE_STATUS, 17.1, 0.6)):
+        b = src.shapes.add_textbox(Emu(int(x * EMU)), Emu(int(y * EMU)),
+                                   Emu(int(8 * EMU)), Emu(int(2 * EMU)))
+        b.name, b.text_frame.text = name, "24.09.04 (재진 C)"
+    memo = src.shapes.add_textbox(Emu(int(0.2 * EMU)), Emu(int(13 * EMU)),
+                                  Emu(int(6 * EMU)), Emu(int(2 * EMU)))
+    memo.name, memo.text_frame.text = "TextBox 9", "손으로 적은 메모"
+
+    _M._inherit_shapes(src, dst, "all", SW, set())      # 물려받은 역할 없음
+    names = [str(sh.name) for sh in dst.shapes]
+    assert "TextBox 9" in names, names                  # 그대로 따라온다
+    assert "INFO_BOX" not in names and CD.NOTE_STATUS not in names

@@ -489,12 +489,12 @@ body{
 .setrow > input[type="checkbox"]{width:16px; height:16px; flex:none;}
 .setrow .nsz{width:48px; padding:3px 6px; font-size:14px; border:1px solid var(--edge);
   border-radius:6px; background:var(--panel); color:var(--ink);}
-.setrow .lbcolor{width:44px; height:26px; flex:none; padding:2px;
-  border:1px solid var(--edge); border-radius:6px; background:var(--panel);
-  cursor:pointer;}
 /* 오른쪽 컨트롤 묶음(숫자칸 셋)은 플렉스로 묶는다 — 좁아져도 줄바꿈되지 않게.
    왼쪽 설명이 대신 말줄임된다. */
 .setrow > .row{display:flex; align-items:center; flex:none;}
+/* 선택 버튼 묶음도 줄어들지 않는다. 버튼 글자는 접히지 않게 해 뒀으므로, 상자만
+   좁아지면 글자가 테두리를 뚫고 나간다 — 대신 왼쪽 설명이 말줄임된다. */
+.setrow > .seg{flex:none;}
 #set-picker{margin-top:10px;}
 .modal .sub{margin:3px 0 0; font-size:13px; color:var(--ink2);}
 
@@ -563,6 +563,15 @@ body{
   background:var(--panel); border:1px solid var(--edge-soft); border-radius:6px;}
 .modal menu{display:flex; justify-content:flex-end; gap:8px; margin:16px 0 0; padding:0;}
 
+/* 직전 차수 슬라이드에서 따라올 선. 보여주기만 한다 — 클릭을 가로채지 않는다.
+   실선으로 그리면 사진 위의 진짜 계측선처럼 보인다: 아직 안 들어간 것이라 점선. */
+.prevlines{position:absolute; inset:0; width:100%; height:100%; z-index:4;
+  overflow:visible; pointer-events:none;}
+/* 굵기는 **뷰박스 단위**(슬라이드 cm)다 — non-scaling-stroke 를 걸면 이 값이
+   화면 픽셀로 읽혀 0.06px 짜리 실선이 되고, 그러면 아무것도 안 보인다. */
+.prevlines line{stroke:#3ad0d0; stroke-width:.08; stroke-dasharray:.3 .2;
+  stroke-linecap:round; opacity:.9;}
+
 /* ── 차수 확인 줄 — 자동분류 전에 사람이 한 번 보는 곳 ─────────────────────── */
 /* 이름표(왼쪽)와 미리보기(오른쪽) **아래** 한 줄을 통째로 쓴다 — 이 줄이
    이름표 안에 있으면 그 칸이 넓어져 미리보기가 다음 줄로 밀려난다. */
@@ -581,6 +590,11 @@ body{
 .vconfirm input:disabled{opacity:.55;}
 .vconfirm .vc-err{color:var(--bad); font-size:12.5px;}
 .vconfirm .vc-aux{color:var(--ink3); font-size:12.5px;}
+/* 기간 기준일 — 늘 보이고, 이력에 없는 날짜도 직접 넣을 수 있다 */
+.pdate-cap{margin-left:2px; color:var(--ink3);}
+.pdate{font:12.5px var(--f-mono); color:var(--ink); padding:2px 6px;
+  background:var(--panel); border:1px solid var(--edge); border-radius:6px;
+  max-width:100%;}
 /* 진행 전 미리 일러두는 한 줄. 경고(vc-warn)와 색을 나눈다 — 늘 떠 있는 안내라
    경고색을 쓰면 정작 이상할 때의 경고가 묻힌다. */
 .vconfirm .vc-note{flex:1 1 100%; color:var(--ink3); font-size:12.5px; line-height:1.5;}

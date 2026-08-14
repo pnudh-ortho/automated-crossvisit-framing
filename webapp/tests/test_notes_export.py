@@ -117,8 +117,8 @@ def test_revisit_slide_gets_note_boxes_and_keeps_the_text(patient):
     assert r.json()["visit"] == "B", r.json()
 
     _stage_photo(sid2, "b.jpg")
-    client.post("/api/notes", json={"session_id": sid2, "values": {
-        "subj": "n/s", "plan": "AWC", "next": "ATE 고려", "wire_u": "016 NT"}})
+    client.post("/api/notes", json={"session_id": sid2,
+                                    "values": {"tx_period": "1 month"}})
     _commit(sid2)
 
     prs = T.load_presentation(patient / PPT)
@@ -126,9 +126,9 @@ def test_revisit_slide_gets_note_boxes_and_keeps_the_text(patient):
     added = [sl for sl in prs.slides if CD.NOTE_SOAP in _shape_names(sl)]
     assert len(added) >= 2, "재진 슬라이드에 노트 칸이 생기지 않았다"
     new = added[-1]
-    assert CD.get_note_text(new, CD.NOTE_SOAP) == "s) n/s\np) AWC"
-    assert CD.get_note_text(new, CD.NOTE_NEXT) == "n) ATE 고려"
-    assert "U: 016 NT" in CD.get_note_text(new, CD.NOTE_STATUS)
+    # 자유 기입 상자는 자리만 만들어지고 글은 앱이 넣지 않는다
+    assert CD.get_note_text(new, CD.NOTE_SOAP) == ""
+    assert "Tx. Period: 1 month" in CD.get_note_text(new, CD.NOTE_STATUS)
     # 날짜는 십자뷰 양식이 이미 들고 있는 INFO_BOX 가 맡는다 — 겹쳐 적지 않는다
     assert CD.NOTE_DATE not in _shape_names(new)
     assert "재진" in T.find_shape(new, M.cfg.ppt.info_box_name).text_frame.text
