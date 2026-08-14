@@ -51,11 +51,13 @@ echo [1/4] Git found.
 REM -- [2/4] Python ------------------------------------------------
 REM The "python" under WindowsApps is a 2-byte Store stub that only
 REM opens the Store, so probe the py launcher first.
+REM -- 3.10 or newer only: the app uses `str | None`, which 3.9 cannot parse.
+REM -- An older Python counts as "not found" so winget installs a current one.
 set PYOK=0
-py -3 --version >nul 2>&1
+py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
 if not errorlevel 1 set PYOK=1
 if "%PYOK%"=="0" (
-  python --version >nul 2>&1
+  python -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
   if not errorlevel 1 set PYOK=1
 )
 if "%PYOK%"=="1" goto haspy

@@ -53,7 +53,13 @@ bash ~/Downloads/install.command
 
 It installs the Xcode command line tools if needed (git + python3),
 asks where to install, clones the repository, sets up the virtual
-environment, and offers a desktop shortcut. A downloaded script loses
+environment, and offers a desktop shortcut.
+
+**Python 3.10 or newer** is required — the code uses `str | None`, which
+3.9 cannot parse. macOS ships 3.9 with the command line tools, so the
+installer looks for a newer one and tells you how to get it if there is
+none. A virtual environment built with an older Python is rebuilt on the
+next launch. A downloaded script loses
 its execute bit, hence `bash` for this first run — everything the
 installer creates opens with a double-click afterwards.
 

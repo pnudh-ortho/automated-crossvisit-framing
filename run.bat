@@ -9,7 +9,14 @@ REM  code page (CP949 on Korean Windows); UTF-8 Korean here would be
 REM  parsed as commands.  User-facing Korean text is printed by Python.
 REM ---------------------------------------------------------------
 
-if exist ".venv\Scripts\python.exe" goto run
+REM -- The app uses 3.10 syntax; a venv built with an older Python dies at
+REM -- import time.  Rebuild it rather than failing every launch.
+if not exist ".venv\Scripts\python.exe" goto findpy
+".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+if not errorlevel 1 goto run
+echo [setup] The virtual environment uses an old Python - rebuilding...
+rmdir /s /q ".venv"
+:findpy
 
 REM -- find a real Python.  The one under WindowsApps is a 2-byte Store
 REM -- stub that just opens the Microsoft Store, so prefer the py launcher.
@@ -25,6 +32,8 @@ for /f "delims=" %%p in ('where python 2^>nul') do (
 if not defined PYEXE goto nopython
 
 :make
+%PYEXE% -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+if errorlevel 1 goto oldpython
 echo [setup] Creating virtual environment...
 %PYEXE% -m venv .venv
 if errorlevel 1 goto nopython
@@ -42,6 +51,15 @@ call ".venv\Scripts\activate.bat"
 :loop
 python webapp\backend\main.py
 if %ERRORLEVEL% EQU 42 goto loop
+goto done
+
+:oldpython
+echo.
+echo [error] The Python found on this PC is older than 3.10.
+echo         Install a newer one, then run this again:
+echo           https://www.python.org/downloads/
+echo.
+pause
 goto done
 
 :nopython

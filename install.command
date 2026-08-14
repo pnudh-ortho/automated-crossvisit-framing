@@ -27,8 +27,38 @@ if ! xcode-select -p >/dev/null 2>&1; then
   echo
 fi
 git --version >/dev/null 2>&1 || { echo "[오류] git 을 찾지 못했습니다."; exit 1; }
-python3 --version >/dev/null 2>&1 || { echo "[오류] python3 를 찾지 못했습니다."; exit 1; }
-echo "[1/4] git·python3 확인."
+
+# ── 파이썬 고르기 — 3.10 이상이어야 한다 ────────────────────────
+# macOS 가 기본으로 주는 python3 는 3.9 다(Xcode Command Line Tools). 이 앱은
+# `str | None` 같은 3.10 문법을 쓰므로, 3.9 로 만든 가상환경은 켜자마자 죽는다.
+# 실제로 그렇게 설치된 맥이 있었다 — 설치는 끝났는데 실행이 안 됐다.
+py_ok() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' \
+          >/dev/null 2>&1; }
+
+find_python() {
+  for c in python3.13 python3.12 python3.11 python3.10; do
+    command -v "$c" >/dev/null 2>&1 && py_ok "$c" && { echo "$c"; return; }
+  done
+  command -v python3 >/dev/null 2>&1 && py_ok python3 && echo python3
+}
+
+need_python() {
+  echo
+  echo "[오류] Python 3.10 이상이 필요합니다."
+  echo "       macOS 기본 python3 는 3.9 라 이 프로그램이 뜨지 않습니다."
+  echo
+  echo "  둘 중 하나로 설치해 주세요"
+  echo "    1) https://www.python.org/downloads/  에서 최신판 내려받아 설치"
+  echo "    2) 터미널에서:  brew install python@3.12"
+  echo
+  echo "  설치한 뒤 이 창을 닫고 다시 실행해 주세요."
+  read -r -p "  Enter 를 누르면 닫습니다..."
+  exit 1
+}
+
+PY="$(find_python)"
+[ -n "$PY" ] || need_python
+echo "[1/4] git 확인 · $("$PY" -V)"
 
 # ── [2/4] 설치 위치 ─────────────────────────────────────────────
 echo "[2/4] 설치 위치를 고릅니다 — 폴더 선택 창이 열립니다."
@@ -56,7 +86,12 @@ fi
 # ── [4/4] 가상환경 ──────────────────────────────────────────────
 echo "[4/4] 가상환경과 의존성을 설치합니다 (처음엔 몇 분 걸립니다)..."
 cd "$DEST" || exit 1
-[ -x .venv/bin/python ] || python3 -m venv .venv \
+# 옛 파이썬으로 만든 가상환경이 남아 있으면 버리고 다시 만든다
+if [ -x .venv/bin/python ] && ! py_ok .venv/bin/python; then
+  echo "      가상환경이 오래된 파이썬으로 만들어져 있습니다 — 다시 만듭니다."
+  rm -rf .venv
+fi
+[ -x .venv/bin/python ] || "$PY" -m venv .venv \
   || { echo "[오류] 가상환경을 만들지 못했습니다."; exit 1; }
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install -r webapp/requirements.txt \
