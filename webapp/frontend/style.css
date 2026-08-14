@@ -1148,6 +1148,10 @@ body{
    내용이 나오기도 전에 쓰였다. 사이드바에 든 것은 단계 버튼 넷이고 목록 한 줄은
    두 줄짜리다 — 둘 다 실제 필요보다 넓었다.
 
+   사이드바는 한 번 184 까지 줄였다가 212 로 되돌렸다. 계산상으로는 184 도 들어가지만
+   화면에서 답답했다 — 여기 든 것은 지금 어느 단계인가라는 **자리 감각**이라, 빠듯하게
+   맞추면 그 감각이 먼저 상한다.
+
    글자도 한 단 낮춘다. **한 벌로 함께** 낮추는 것이 중요하다 — 눈에 띄는 몇 개만
    줄이면 어떤 글자는 작아지고 어떤 글자는 그대로라 위계가 흐트러져 더 어수선해
    보인다. 여기 적힌 것이 주 작업 화면(환자·분류·검수)에 실제로 뜨는 글자 전부다.
@@ -1157,20 +1161,21 @@ body{
    이기는데, 여기서 줄이는 값들(.prow·.frow·.dropzone…)의 원래 규칙이 위쪽에 있어
    앞에 두면 그대로 덮여 아무 일도 일어나지 않는다. 실제로 한 번 그렇게 넣었다. */
 @media (max-width:1500px), (max-height:860px){
-  :root{ --rail:184px; --ctl-h:30px; }
+  :root{ --rail:212px; --ctl-h:30px; }
   body{ font-size:13px; }
 
   /* 사이드바 */
-  .rail{ padding:12px 8px; }
-  .rail > .eyebrow{ padding:0 8px; margin-bottom:7px; }
-  .nav{ padding:7px 10px 7px 9px; gap:1px 7px; grid-template-columns:15px 1fr; }
+  .rail{ padding:13px 9px; }
+  .rail > .eyebrow{ padding:0 9px; margin-bottom:8px; }
+  .nav{ padding:8px 11px 8px 10px; gap:1px 8px; grid-template-columns:16px 1fr; }
   .nav .nm{ font-size:13px; }
   .nav .st{ font-size:12px; }
-  /* 라틴 부제는 19자 고정폭("PRE-PROCESSING (AI)")이라 좁아진 폭에 그대로는 못
-     들어간다 — 자간부터 내려놓는다. 한글 이름이 먼저 읽히고 이건 아래 남는
-     보조라 여기서 양보시킨다. 넘칠 때 줄을 바꾸면 사이드바가 세로로 늘어나므로
-     말줄임으로 막는다: 글꼴이 기기마다 조금씩 달라 계산이 빗나가도 판은 그대로다. */
-  .nav .code{ font-size:11px; letter-spacing:0;
+  /* 라틴 부제는 19자 고정폭("PRE-PROCESSING (AI)")이라 사이드바 폭을 그대로 다
+     받아낸다. 여기 남는 자리는 153px 이고 11.5px·자간 .05em 이면 약 142px —
+     한글 이름이 먼저 읽히고 이건 아래 남는 보조라 이만큼만 양보시킨다.
+     넘칠 때 줄을 바꾸면 사이드바가 세로로 늘어나므로 말줄임으로 막는다:
+     글꼴이 기기마다 조금씩 달라 계산이 빗나가도 판은 흐트러지지 않는다. */
+  .nav .code{ font-size:11.5px; letter-spacing:.05em;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .head{ padding:9px 16px; }
   .head .btn{ height:27px; }
