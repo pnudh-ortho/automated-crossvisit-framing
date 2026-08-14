@@ -2071,7 +2071,7 @@ function drawPool(){
         const used = at[p.id];
         return `<figure draggable="true" data-pid="${p.id}"${used ? ' class="used"' : ""}` +
                (used ? ` data-at="${esc(used)}"` : "") +
-               ` title="${used ? esc(used) + "에 놓임 · 눌러서 옮기기" : "눌러서 켜진 자리에 넣기"}">` +
+               ` title="${used ? esc(used) + "에 놓임 · 눌러서 크게 보기" : "눌러서 크게 보기 · 끌어서 자리에 넣기"}">` +
                `<img src="${p.thumb}" alt="" draggable="false"></figure>`;
       }).join("")
     : `<p class="empty">얼굴 상자가 비어 있습니다</p>`;
@@ -2104,14 +2104,41 @@ function ownerCell(pid){
   return faceCells().map(c => c.cell).find(k => slots[k] === pid) || null;
 }
 
+/* 사진 크게 보기.
+
+   얼굴 자리를 정하려면 정면·45도·측면이 갈려야 하는데 상자의 썸네일 크기로는
+   그 차이가 잘 안 보인다. `/api/thumb` 은 원본을 그대로 내려주므로 키워도
+   흐려지지 않는다.
+
+   누르면 배정되던 자리를 확대가 가져가므로, **배정은 이 창 안에서** 할 수 있게
+   둔다 — 크게 보고 나서 어디에 넣을지 정하는 편이 순서로도 자연스럽다.
+   끌어다 놓는 길은 그대로다. */
+function openPhoto(pid){
+  const p = facePhoto(pid);
+  if(!p) return;
+  el("lb-img").src = p.thumb;
+  const at = ownerCell(pid), cell = at && cellOf(at);
+  el("lb-name").textContent =
+    (cell ? `${slideName(cell)} ${posName(cell.pos)} 에 놓임` : "아직 자리 없음") +
+    (p.taken_at ? ` · 촬영 ${p.taken_at.slice(0, 19)}` : "");
+  const c = cellOf(FED.cell), b = el("lb-assign");
+  const can = !!(c && !c.from && faceSlots()[c.cell] !== pid);
+  b.hidden = !can;
+  if(can){
+    b.textContent = `${slideName(c)} ${posName(c.pos)} 자리에 넣기`;
+    b.onclick = () => { el("dlg-photo").close(); assignFace(FED.cell, pid); };
+  }
+  el("dlg-photo").showModal();
+}
+el("lb-close").onclick = () => el("dlg-photo").close();
+// 사진 바깥(어두운 바탕)을 누르면 닫힌다 — 창을 닫는 가장 흔한 손버릇이다
+el("dlg-photo").onclick = e => { if(e.target.id === "dlg-photo") el("dlg-photo").close(); };
+
 function bindPoolDnD(){
   const pool = el("face-pool");
   pool.querySelectorAll("figure").forEach(f => {
     f.ondragstart = e => e.dataTransfer.setData("text/plain", f.dataset.pid);
-    f.onclick = () => {
-      const c = cellOf(FED.cell);
-      if(c && !c.from) assignFace(FED.cell, f.dataset.pid);
-    };
+    f.onclick = () => openPhoto(f.dataset.pid);
   });
   pool.ondragover  = e => { e.preventDefault(); pool.classList.add("over"); };
   pool.ondragleave = () => pool.classList.remove("over");

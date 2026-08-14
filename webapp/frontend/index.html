@@ -219,6 +219,16 @@
   <menu><button class="btn" id="doc-close">닫기</button></menu>
 </dialog>
 
+<!-- 사진 크게 보기 — 정면/45도/측면은 썸네일 크기로는 잘 안 갈린다 -->
+<dialog class="lightbox" id="dlg-photo">
+  <img id="lb-img" alt="">
+  <div class="lbbar">
+    <span class="lbname" id="lb-name"></span>
+    <button class="btn" id="lb-assign" hidden></button>
+    <button class="btn" id="lb-close">닫기</button>
+  </div>
+</dialog>
+
 <!-- 설정 — 저장 위치와 개인화를 한 곳에 -->
 <dialog class="modal wide" id="dlg-set">
   <h3>설정</h3>

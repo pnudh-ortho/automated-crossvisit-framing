@@ -3061,7 +3061,17 @@ def face_assign(req: FaceAssignReq):
     """
     얼굴 사진을 케이스 덱의 한 자리에 배정한다.
 
-    한 사진은 한 자리에만 놓인다 — 다른 자리에 이미 있었다면 그쪽을 비운다.
+    한 사진은 한 자리에만 놓인다. 이미 다른 자리에 있던 사진을 옮기면 **두 자리를
+    맞바꾼다** — 목표 자리에 있던 사진은 옮겨온 사진이 떠난 자리로 간다.
+
+    예전에는 목표 자리를 그냥 덮어썼다. 그러면 한 번 옮길 때마다 떠난 자리는 비고
+    목표 자리에 있던 사진은 판에서 **통째로 사라졌다**. 아홉 자리를 채워 둔 판에서
+    두 번 옮기면 일곱 자리만 남았고, 화면에서는 "양식 순서대로 안 들어간다"로
+    보였다. 옮기기는 자리를 바꾸는 일이지 사진을 버리는 일이 아니다.
+
+    상자(풀)에서 새로 끌어온 사진이면 맞바꿀 상대가 없다 — 목표 자리에 있던 사진은
+    상자로 돌아간다(자리에서만 빠지고 사진 자체는 그대로다).
+
     파생 자리(10·11)는 슬라이드 4 좌측을 따라가므로 직접 배정할 수 없다.
     """
     s = get_session(req.session_id)
@@ -3069,26 +3079,35 @@ def face_assign(req: FaceAssignReq):
         raise HTTPException(400, f"배정할 수 없는 자리입니다: {req.cell}")
 
     before = s.face_slots.get(req.cell)
+    touched = {req.cell}
     if req.photo_id is None:
         s.face_slots.pop(req.cell, None)
     else:
         photo = _photo(s, req.photo_id)
         if photo.id not in s.face:
             raise HTTPException(400, "얼굴 상자에 있는 사진만 배정할 수 있습니다")
-        for k, pid in list(s.face_slots.items()):
-            if pid == photo.id:
-                # 사진이 떠난 자리의 구도는 남겨 둘 이유가 없다
-                del s.face_slots[k]
-                s.face_editors.pop(k, None)
-                s.face_framing.pop(k, None)
+        src_cell = next((k for k, pid in s.face_slots.items()
+                         if pid == photo.id), None)
+        if src_cell == req.cell:                     # 제자리 — 손댈 것이 없다
+            return {"face_slots": _face_slots_json(s),
+                    "face_editors": _face_editors_json(s),
+                    "face_framing": dict(s.face_framing)}
+        if src_cell is not None:
+            touched.add(src_cell)
+            if before:
+                s.face_slots[src_cell] = before      # 맞바꾼다
+            else:
+                del s.face_slots[src_cell]
         s.face_slots[req.cell] = photo.id
+
     # 자리의 사진이 바뀌면 그 자리에 잡아 둔 구도는 다른 사진 기준이라 무의미하다.
-    # 새 사진에는 다시 프레이밍을 걸어 준다(예측은 사진 단위로 캐시돼 있다).
-    if s.face_slots.get(req.cell) != before:
-        s.face_editors.pop(req.cell, None)
-        s.face_framing.pop(req.cell, None)
-        if s.face_slots.get(req.cell):
-            s.face_framing[req.cell] = _frame_face_cell(s, req.cell)
+    # 자리마다 창 크기도 다르므로 맞바꾼 쪽도 함께 다시 잡는다(예측은 사진 단위로
+    # 캐시돼 있어 다시 계산해도 모델을 또 돌리지는 않는다).
+    for c in touched:
+        s.face_editors.pop(c, None)
+        s.face_framing.pop(c, None)
+        if s.face_slots.get(c):
+            s.face_framing[c] = _frame_face_cell(s, c)
     return {"face_slots": _face_slots_json(s), "face_editors": _face_editors_json(s),
             "face_framing": dict(s.face_framing)}
 
