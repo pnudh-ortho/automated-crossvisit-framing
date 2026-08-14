@@ -113,3 +113,21 @@ def test_삽입_자리는_날짜가_아니라_차수_글자로_고른다(prs):
     _slide(prs, "25.05.19 (재진 J)", 5)     # 오타 — K 보다 뒤 날짜
     _slide(prs, "25.04.30 (재진 K)", 5)
     assert main._revisit_insert_index(prs) == 3      # K(3번 장) 뒤 = 0-기반 3
+
+
+def test_조금_작게_놓인_사진도_십자뷰로_본다(prs):
+    """수제 덱마다 사진을 조금씩 작게 잡는다. 8.0cm 문턱에서는 7.9cm 로 놓인 덱이
+    통째로 "십자뷰 아님" 으로 밀려나 차수 이력이 비었다."""
+    _slide(prs, "24.06.05 (초진 A)", 5, width_cm=7.9)
+    out = Rd.scan_ppt_visits(prs, main.cfg)
+    assert [v["visit"] for v in out["visits"]] == ["A"]
+    assert out["excluded"] == [] and out["fallback"] is False
+
+
+def test_로고나_썸네일은_여전히_안_센다(prs):
+    """문턱을 낮춰도 작은 그림과는 확연히 갈려야 한다 — 안 그러면 아무 장이나
+    십자뷰가 되고, 차수 장부가 통째로 어긋난다."""
+    _slide(prs, "24.06.05 (초진 A)", 5, width_cm=Rd.CROSS_MIN_W_CM - 0.1)
+    out = Rd.scan_ppt_visits(prs, main.cfg)
+    # 십자뷰로 인정되는 장이 하나도 없으니 라벨 장 전체로 물러난다(폴백)
+    assert out["fallback"] is True

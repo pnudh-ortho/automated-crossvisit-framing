@@ -1297,6 +1297,10 @@ class Session:
         self.face_editors: dict[str, EditorState] = {}
         # 자리별 구도 근거: 'model'(프레이밍 예측) | 'cover'(cover-fit)
         self.face_framing: dict[str, str] = {}
+        # 사람이 TEMPLATE 탭에서 자리를 직접 고치거나 구도를 잡았는가.
+        # 그 전까지는 **얼굴 상자의 순서가 기준**이라 상자를 바꾸면 자리도 따라간다.
+        # 한 번 손을 대면 그 손이 상자 순서보다 먼저다 — '자동 배치' 로만 되돌린다.
+        self.face_manual: bool = False
         # 사진별 프레이밍 예측 캐시. 예측은 **사진에만** 달렸고 자리(창)에는
         # 달리지 않아서, 자리를 바꿔 배치해도 다시 추론할 필요가 없다.
         self.face_frames: dict[str, object] = {}
@@ -2527,6 +2531,7 @@ def drop_photo(sid: str, pid: str):
     _unassign(s, pid)
     s.photos = [p for p in s.photos if p.id != pid]
     photo.path.unlink(missing_ok=True)
+    _resync_faces(s)
     return {"photos": [_photo_json(s, p) for p in s.photos]}
 
 
@@ -2818,6 +2823,26 @@ def _put(s, photo, key, at=None) -> None:
 def _unassign(s, pid): _detach(s, pid)
 
 
+def _resync_faces(s: "Session") -> None:
+    """얼굴 상자가 바뀌었으면 템플릿 자리도 따라오게 한다.
+
+    이 단계의 약속은 "상자의 n번째 사진 → 양식의 n번째 자리" 하나다. 그런데 그
+    대응을 만드는 `_auto_assign_faces` 는 분류할 때 딱 한 번만 돌았다. 그래서
+
+      · 상자에서 한 장을 빼면 그 자리만 빈 채 남고 뒤가 당겨지지 않았고,
+      · 순서를 바꾸면 옮긴 사진이 **어느 자리에도 없는** 상태가 됐다.
+
+    화면에서는 "양식 순서대로 안 들어간다"로 보였고, 되돌릴 길은 다음 단계
+    TEMPLATE 탭의 '자동 배치' 뿐이었다 — 자동 분류 화면에서는 그런 버튼이 있는
+    줄도 모른다.
+
+    사람이 자리를 직접 고르거나 구도를 잡은 뒤에는 건드리지 않는다.
+    """
+    if s.face_manual:
+        return
+    _auto_assign_faces(s)
+
+
 class AssignReq2(BaseModel):
     session_id: str
     photo_id: str
@@ -2834,6 +2859,7 @@ def assign(req: AssignReq2):
         _put(s, photo, req.slot, at=req.at)
     else:
         _detach(s, photo.id)
+    _resync_faces(s)
     return {"review": _review_json(s), "photos": [_photo_json(s, p) for p in s.photos]}
 
 
@@ -2938,6 +2964,8 @@ class FaceAutoReq(BaseModel):
 def face_auto(req: FaceAutoReq):
     """얼굴 자리를 촬영 순서대로 다시 배치한다(손으로 고친 것도 덮어쓴다)."""
     s = get_session(req.session_id)
+    # 다시 상자 순서를 따르기로 한 것이다 — 손으로 고쳤던 표시를 푼다
+    s.face_manual = False
     placed = _auto_assign_faces(s)
     framed = sum(1 for v in s.face_framing.values() if v == "model")
     return {"placed": placed, "cells": len(FACE_CELLS), "framed": framed,
@@ -3068,6 +3096,8 @@ def face_assign(req: FaceAssignReq):
     if req.cell not in FACE_CELLS:
         raise HTTPException(400, f"배정할 수 없는 자리입니다: {req.cell}")
 
+    # 여기서부터는 사람이 고른 배치다 — 상자 순서가 이걸 덮지 않는다
+    s.face_manual = True
     before = s.face_slots.get(req.cell)
     if req.photo_id is None:
         s.face_slots.pop(req.cell, None)
@@ -3117,6 +3147,8 @@ def face_adjust(req: FaceAdjustReq):
     bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
     st = _clamp(EditorState(req.dx, req.dy, req.scale, req.angle), win, bw, bh)
     s.face_editors[req.cell] = st
+    # 잡아 둔 구도도 사람의 손이다. 상자를 다시 세운다고 이걸 지워서는 안 된다.
+    s.face_manual = True
     return {"clamped_scale": st.scale}
 
 
@@ -3161,10 +3193,35 @@ def adjust(req: AdjustReq):
 
 # ── 이미지 서빙 ───────────────────────────────────────────────────────────────
 @app.get("/api/thumb/{sid}/{pid}")
-def thumb(sid: str, pid: str):
+def thumb(sid: str, pid: str, w: int = 0):
+    """사진 한 장. `w` 를 주면 그 폭으로 줄여서 준다.
+
+    분류 화면의 카드는 100~150px 로 보이는데 여기서 원본(2500x3500·1.5MB)을
+    그대로 내려주고 있었다. 상자 사이로 한 장 옮길 때마다 카드를 전부 다시 만드는
+    구조라, 브라우저가 그 원본들을 **매번 다시 디코드**했다 — 놓고 나서 화면이
+    바뀌기까지 걸리던 시간이 그것이다.
+
+    JPEG 은 줄여서 디코드할 수 있어(`draft`) 만드는 값도 싸고, 한 번 만들면
+    세션 임시 폴더에 남아 다음부터는 파일만 내보낸다. 편집기·겹쳐보기는 `w` 없이
+    불러 원본 화질을 그대로 쓴다.
+    """
     s = get_session(sid)
     p = _photo(s, pid)
-    return FileResponse(p.path)
+    if w <= 0:
+        return FileResponse(p.path)
+    w = max(64, min(int(w), 1024))
+    dst = s.tmp / f"card_{p.id}_{w}.jpg"
+    if not dst.exists():
+        from PIL import Image as _Im, ImageOps as _Ops      # noqa: PLC0415
+        try:
+            with _Im.open(p.path) as im:
+                im.draft("RGB", (w, w))     # 1/2·1/4·1/8 로 바로 디코드
+                im = _Ops.exif_transpose(im).convert("RGB")
+                im.thumbnail((w, w))
+                im.save(dst, "JPEG", quality=80)
+        except Exception:                                   # noqa: BLE001
+            return FileResponse(p.path)
+    return FileResponse(dst)
 
 
 @app.get("/api/reference/{sid}/{slot}")
@@ -3597,6 +3654,8 @@ def _photo_json(s, p: Photo):
             "flip_v": p.flip_v,
             "taken_at": p.taken_at.isoformat(sep=" ", timespec="milliseconds") if p.taken_at else None,
             "thumb": f"/api/thumb/{s.id}/{p.id}",
+            # 상자의 카드처럼 작게 보이는 자리에 쓴다 — 원본을 내려받을 이유가 없다
+            "card": f"/api/thumb/{s.id}/{p.id}?w=320",
             "editor": {"dx": round(p.editor.dx_px, 2), "dy": round(p.editor.dy_px, 2),
                        "scale": round(p.editor.scale, 4), "angle": round(p.editor.angle_deg, 3)}}
 

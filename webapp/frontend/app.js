@@ -518,7 +518,7 @@ const othersOf = () => STAGED.filter(p => !p.slot);
 function photoCard(p, isPrimary, binKey){   // binKey는 PPT 배지 표시에만 쓰인다
   const low = p.confidence < 0.75;
   return `<figure class="ph-card${isPrimary ? " primary" : ""}" draggable="true" data-pid="${p.id}">` +
-    `<img src="${p.thumb}" alt="" draggable="false"${p.flip_v ? ` class="fv"` : ""}>` +
+    `<img src="${p.card || p.thumb}" alt="" draggable="false"${p.flip_v ? ` class="fv"` : ""} loading="lazy">` +
     (isPrimary && binKey !== "FACE" ? `<span class="tagp">PPT</span>` : "") +
     `<figcaption${low ? ` class="low"` : ""}>${p.label || "—"} ${Math.round((p.confidence || 0) * 100)}%</figcaption>` +
     `</figure>`;
@@ -1384,7 +1384,7 @@ function drawStaged(){
   if(empty) empty.hidden = STAGED.length > 0;
   el("dz").classList.toggle("filled", STAGED.length > 0);
   box.innerHTML = STAGED.map(p =>
-    `<figure class="th"><img src="${p.thumb}" alt="">` +
+    `<figure class="th"><img src="${p.card || p.thumb}" alt="" loading="lazy">` +
     `<button class="x" data-pid="${p.id}" title="빼기">×</button></figure>`).join("") +
     (STAGED.length ? `<button class="th add" id="th-add" title="사진 더 추가">＋</button>` : "");
   for(const b of box.querySelectorAll(".x"))
@@ -2072,7 +2072,7 @@ function drawPool(){
         return `<figure draggable="true" data-pid="${p.id}"${used ? ' class="used"' : ""}` +
                (used ? ` data-at="${esc(used)}"` : "") +
                ` title="${used ? esc(used) + "에 놓임 · 눌러서 옮기기" : "눌러서 켜진 자리에 넣기"}">` +
-               `<img src="${p.thumb}" alt="" draggable="false"></figure>`;
+               `<img src="${p.card || p.thumb}" alt="" draggable="false" loading="lazy"></figure>`;
       }).join("")
     : `<p class="empty">얼굴 상자가 비어 있습니다</p>`;
   const cells = faceCells();

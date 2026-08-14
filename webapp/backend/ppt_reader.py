@@ -225,6 +225,12 @@ def _visit_text(slide, cfg) -> str:
     return ""
 
 
+# 십자뷰로 볼 사진의 최소 가로. 수제 덱마다 사진을 조금씩 작게 잡아서, 8.0 에서는
+# 7.9cm 로 놓인 덱이 통째로 십자뷰가 아닌 것으로 밀려났다. 로고·썸네일과는 여전히
+# 확연히 갈리는 값이다. 두 군데에서 쓰므로 **여기 하나만** 둔다.
+CROSS_MIN_W_CM = 7.8
+
+
 # 기간 칸을 글로 알아볼 때 쓰는 머리말. main.PERIOD_KEYS 와 같은 문자열이다
 # (여기서 main 을 임포트하면 순환이 된다).
 _PERIOD_MARKS = ("Tx. Period", "Rx. Period", "App. Period")
@@ -278,11 +284,11 @@ def read_visit_slide(slide, slide_index: int, cfg, px_per_cm: float,
     # 어긋나 있어도 십자 형태만 유지되면 맞는다. 복원 창은 각 사진의 실제
     # 중심에 슬롯 창 크기를 씌워 픽셀 스케일(px_per_cm)을 앱 규약과 맞춘다.
     if not vs.slots and (vs.date or vs.kind != "unknown"):
-        # 유효 십자뷰 기준: **가로 8cm 이상 사진이 5장** (2026-08-12 결정).
+        # 유효 십자뷰 기준: **가로 CROSS_MIN_W_CM 이상 사진이 5장**.
         # 로고·썸네일 같은 작은 그림이 섞여 있어도 판정이 안 흔들린다.
         pics = [sh for sh in slide.shapes
                 if getattr(sh, "shape_type", None) == 13
-                and emu_to_cm(sh.width) >= 8.0]
+                and emu_to_cm(sh.width) >= CROSS_MIN_W_CM]
         if len(pics) >= 5:
             ctr = [(emu_to_cm(p.left) + emu_to_cm(p.width) / 2,
                     emu_to_cm(p.top) + emu_to_cm(p.height) / 2) for p in pics]
@@ -381,14 +387,14 @@ def _cross_like(slide) -> bool:
     """십자뷰 슬라이드인가 — 도형 메타데이터만 본다(픽셀 복원 없음).
 
     앱 슬라이드는 슬롯 이름(PHOTO_SLOT_*)으로, 수제 슬라이드는 read_visit_slide
-    폴백과 같은 기준(폭 8cm 이상 사진 5장)으로 판정한다. 접두를 SLOT 까지 보는
+    폴백과 같은 기준(폭 CROSS_MIN_W_CM 이상 사진 5장)으로 판정한다. 접두를 SLOT 까지 보는
     이유: 얼굴 슬라이드의 PHOTO_FACE_* 가 십자뷰로 오인되면 안 된다.
     """
     big = 0
     for sh in slide.shapes:
         if str(getattr(sh, "name", "")).startswith(PHOTO_NAME_PREFIX + "SLOT"):
             return True
-        if getattr(sh, "shape_type", None) == 13 and emu_to_cm(sh.width) >= 8.0:
+        if getattr(sh, "shape_type", None) == 13 and emu_to_cm(sh.width) >= CROSS_MIN_W_CM:
             big += 1
     return big >= 5
 
@@ -400,7 +406,7 @@ def scan_ppt_visits(prs, cfg) -> dict:
     전제). 판정 순서는 라벨 확인 → 사진 기하 확인 — 라벨 없는 장은 기하 검사
     비용도 내지 않는다. 라벨은 있는데 십자뷰가 아닌 장(얼굴·엑스레이 등)은
     excluded 로 돌려 화면이 "왜 제외됐는지" 보여줄 수 있게 한다. 십자뷰를
-    하나도 못 알아본 덱만 라벨 장 전체로 물러난다(fallback) — 8cm 문턱에 걸린
+    하나도 못 알아본 덱만 라벨 장 전체로 물러난다(fallback) — 가로 문턱에 걸린
     수제 덱에서 이력이 통째로 사라지는 것을 막는다.
 
     반환: {"visits":  [{visit, date, slide_no}...],   # 차수 장부 (글자 부여 완료)

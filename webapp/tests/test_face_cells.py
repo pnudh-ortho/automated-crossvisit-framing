@@ -183,3 +183,69 @@ def test_commit_places_faces_on_assigned_slides(session_with_faces, patient):
     # 얼굴 사진 이름은 구내 슬롯으로 오인되면 안 된다(ppt_reader가 창을 못 찾아 건너뛴다)
     cross = prs.slides[CD.cross_slide_index(prs)]
     assert not any(sh.name.startswith("PHOTO_FACE_") for sh in cross.shapes)
+
+
+# ── 상자 순서가 곧 양식 순서 ───────────────────────────────────────────────
+# 이 단계의 약속은 "얼굴 상자의 n번째 사진 → 양식의 n번째 자리" 하나다. 그 대응이
+# 분류할 때 한 번만 만들어져서, 상자를 바꿔도 자리가 따라오지 않았다.
+ORDER = M.cfg.case_deck.face_auto_order
+
+
+def _slots(sid):
+    return client.post(f"/api/classify/{sid}").json()["review"]["face_slots"]
+
+
+def test_상자_맨_앞으로_끌면_양식_첫_자리로_간다(session_with_faces):
+    sid, _ = session_with_faces
+    s0 = _slots(sid)
+    a, b, c = (s0.get(k) for k in ORDER[:3])
+    assert a and b and c, s0
+
+    got = client.post("/api/assign",
+                      json={"session_id": sid, "photo_id": c,
+                            "slot": "FACE", "at": 0}).json()["review"]["face_slots"]
+    assert [got.get(k) for k in ORDER[:3]] == [c, a, b]
+
+
+def test_상자에서_빼면_뒤가_당겨진다(session_with_faces):
+    """가운데가 빈 채로 남으면 안 된다 — 상자에는 여덟 장인데 양식에는 구멍이 났다."""
+    sid, _ = session_with_faces
+    s0 = _slots(sid)
+    a, b, c = (s0.get(k) for k in ORDER[:3])
+
+    got = client.post("/api/assign",
+                      json={"session_id": sid, "photo_id": a,
+                            "slot": None, "at": None}).json()["review"]["face_slots"]
+    assert [got.get(k) for k in ORDER[:3]] == [b, c, None]
+
+
+def test_손으로_고친_뒤에는_상자가_덮지_않는다(session_with_faces):
+    """사람의 손이 상자 순서보다 먼저다. 되돌리려면 '자동 배치' 를 누른다."""
+    sid, _ = session_with_faces
+    s0 = _slots(sid)
+    a, b = s0.get(ORDER[0]), s0.get(ORDER[1])
+
+    client.post("/api/face/assign",
+                json={"session_id": sid, "cell": ORDER[1], "photo_id": a})
+    got = client.post("/api/assign",
+                      json={"session_id": sid, "photo_id": b,
+                            "slot": "FACE", "at": 0}).json()["review"]["face_slots"]
+    assert got.get(ORDER[1]) == a          # 손으로 놓은 자리는 그대로
+
+    # '자동 배치' 는 다시 상자 순서를 따르기로 하는 것이다
+    got = client.post("/api/face/auto",
+                      json={"session_id": sid}).json()["review"]["face_slots"]
+    assert got.get(ORDER[0]) == b
+
+
+def test_카드용_그림은_원본보다_훨씬_작다(session_with_faces):
+    """상자의 카드는 100~150px 로 보인다. 원본을 내려주면 한 장 옮길 때마다
+    브라우저가 그 원본들을 전부 다시 디코드한다 — 놓고 나서 굼뜨던 이유다."""
+    sid, face = session_with_faces
+    pid = face[0]["id"]
+    assert face[0]["card"].endswith("w=320")
+
+    big = client.get(f"/api/thumb/{sid}/{pid}")
+    small = client.get(f"/api/thumb/{sid}/{pid}", params={"w": 320})
+    assert big.status_code == 200 and small.status_code == 200
+    assert len(small.content) * 2 < len(big.content), (len(small.content), len(big.content))
