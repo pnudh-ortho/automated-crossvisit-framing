@@ -9,6 +9,26 @@ REM  code page (CP949 on Korean Windows); UTF-8 Korean here would be
 REM  parsed as commands.  User-facing Korean text is printed by Python.
 REM ---------------------------------------------------------------
 
+REM -- Run from a copy.  cmd.exe reads a .bat by BYTE OFFSET and re-opens the
+REM -- file after every command, so an update that rewrites this file while the
+REM -- app is running leaves cmd reading the new file at the old offset -- in
+REM -- the middle of a line.  That is how a PC with Python 3.12 was told its
+REM -- Python was "older than 3.10": the fragment failed and the next line was
+REM -- "if errorlevel 1 goto oldpython".  The copy in TEMP is never rewritten.
+REM --
+REM -- The whole branch is ONE parenthesised block on purpose: cmd parses a
+REM -- block into memory before running it, so the "exit /b" below is already
+REM -- buffered and is not re-read from the rewritten file when the copy ends.
+if not defined CROCS_HOME (
+  set "CROCS_HOME=%~dp0."
+  copy /y "%~f0" "%TEMP%\crocs_run.bat" >nul 2>&1
+  if exist "%TEMP%\crocs_run.bat" (
+    call "%TEMP%\crocs_run.bat"
+    exit /b
+  )
+)
+if defined CROCS_HOME cd /d "%CROCS_HOME%"
+
 REM -- The app uses 3.10 syntax; a venv built with an older Python dies at
 REM -- import time.  Rebuild it rather than failing every launch.
 if not exist ".venv\Scripts\python.exe" goto findpy
@@ -56,6 +76,8 @@ goto done
 :oldpython
 echo.
 echo [error] The Python found on this PC is older than 3.10.
+echo         Found:
+%PYEXE% --version
 echo         Install a newer one, then run this again:
 echo           https://www.python.org/downloads/
 echo.
