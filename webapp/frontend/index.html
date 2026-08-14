@@ -73,7 +73,13 @@
         <button class="btn primary" id="btn-new-pt">＋ 새 환자</button>
       </div>
       <div class="setup">
-        <div class="card plist" id="plist"></div>
+        <!-- 목록과 그 아래 예고 버튼. 버튼은 카드 밖에 둔다 — 목록을 다시 그릴 때
+             카드 안은 통째로 갈아끼워지므로 안에 두면 매번 사라진다. -->
+        <div class="pcol">
+          <div class="card plist" id="plist"></div>
+          <button class="btn wide soon" type="button" disabled
+                  title="준비 중입니다">⚡Fastest Lap Mode⚡(8월말 예정)</button>
+        </div>
         <div class="card detail" id="detail"></div>
       </div>
     </div>

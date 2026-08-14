@@ -324,6 +324,16 @@ body{
 .find:focus{border-color:var(--accent); outline:none;}
 .find::placeholder{color:var(--ink3);}
 
+/* 목록 카드 + 그 아래 예고 버튼. 카드가 남는 높이를 다 먹고 버튼은 제 높이만. */
+.pcol{display:flex; flex-direction:column; gap:8px; min-height:0;}
+.pcol > .plist{flex:1 1 auto;}
+/* 아직 못 쓰는 기능을 미리 알리는 버튼 — 눌리지 않는다는 게 보여야 한다.
+   목록 아래 자리를 차지하는 예고라 보통 버튼보다 높이를 넉넉히 준다. */
+.btn.soon{flex:none; height:52px; margin-top:0; font-size:14px; font-weight:700;
+  letter-spacing:.01em;}
+.btn.soon:disabled{opacity:1; color:var(--ink3); background:var(--panel2);
+  border-color:var(--edge-soft); cursor:default;}
+
 .plist{overflow:auto; min-height:0;}
 /* 1행: 폴더 이름 / 2행: 차수 이력 */
 .prow{
