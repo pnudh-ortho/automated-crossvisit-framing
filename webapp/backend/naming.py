@@ -11,11 +11,23 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 
 class NamingError(ValueError):
     """식별자 검증/파싱 실패."""
+
+
+def nfc(s: str) -> str:
+    """한글을 **조합형(NFC)** 으로 맞춘다.
+
+    macOS 는 파일·폴더 이름의 한글을 자모로 분해해(NFD) 저장한다. 눈에는 같은
+    "홍길동" 이지만 문자열로는 다르고(19자 vs 25자), 이름 규칙의 `[가-힣]` 은
+    조합된 글자만 받으므로 맥에서는 한글 폴더가 통째로 인식에서 빠졌다.
+    파일시스템에서 읽은 이름은 비교·파싱 전에 여기를 거친다.
+    """
+    return unicodedata.normalize("NFC", s or "")
 
 
 # 이름 허용 문자. 한글·영문 혼용을 허용하되 세 가지를 의도적으로 막는다.
@@ -55,7 +67,7 @@ def validate_identifiers(
     이름·병원번호는 요구(require_*)가 꺼져 있으면 비워 둘 수 있고, 값이
     있을 때는 요구 여부와 무관하게 형식을 검사한다.
     """
-    name = (name or "").strip()
+    name = nfc(name).strip()
     hospital_id = (hospital_id or "").strip()
     ortho_id = (ortho_id or "").strip()
     if (name or require_name) and not re.fullmatch(
@@ -187,7 +199,7 @@ def parse_pattern(
     """폴더명/PPT 파일명 → 식별자. 자릿수 불일치 시 즉시 오류."""
     field_regex = default_field_regex(hospital_digits, ortho_digits, name_regex)
     rx = compile_pattern(pattern, field_regex)
-    m = rx.match(text)
+    m = rx.match(nfc(text))          # 맥에서 온 이름은 분해형일 수 있다
     if not m:
         raise NamingError(
             f"{label}이 패턴과 불일치: '{text}'  (기대 형식: {pattern})"

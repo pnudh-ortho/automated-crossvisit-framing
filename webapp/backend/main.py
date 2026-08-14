@@ -3656,10 +3656,14 @@ def _parse_ppt_name(name: str):
 
 
 def _remembered_ppt(folder: str) -> str:
-    """이 환자에게 마지막으로 이어붙인 PPT (환자 폴더 기준 상대경로)."""
+    """이 환자에게 마지막으로 이어붙인 PPT (환자 폴더 기준 상대경로).
+
+    열쇠는 폴더 이름이다 — 맥에서 읽은 이름은 자모가 분해돼 있어(NFD) 그대로
+    비교하면 방금 적어 둔 값도 못 찾는다. 넣을 때도 찾을 때도 조합형으로 맞춘다.
+    """
     try:
         d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("ppt_choice") or {}
-        return str(d.get(folder) or "")
+        return str(d.get(N.nfc(folder)) or "")
     except Exception:                                   # noqa: BLE001
         return ""
 
@@ -3670,6 +3674,7 @@ def _remember_ppt(folder: str, rel: str) -> None:
         d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except Exception:                                   # noqa: BLE001
         d = {}
+    folder, rel = N.nfc(folder), N.nfc(rel)
     choice = d.get("ppt_choice")
     if not isinstance(choice, dict):
         choice = {}
@@ -3697,8 +3702,8 @@ def _find_ppt(entries: list[Path], base: Path, ids) -> Path | None:
     후보는 `.pptx` 중 등록된 이름 형식으로 읽히고 교정번호가 이 환자인 것뿐이다.
     상대경로를 쓰므로 하위 폴더에 같은 이름이 있어도 서로 다른 후보로 다룬다.
     """
-    remembered = _remembered_ppt(base.name)
-    gen = _gen_ppt_name(ids)
+    remembered = N.nfc(_remembered_ppt(base.name))
+    gen = N.nfc(_gen_ppt_name(ids))
     best = None
     for p in entries:
         if p.suffix.lower() != ".pptx" or p.name.startswith("~$"):
@@ -3710,10 +3715,11 @@ def _find_ppt(entries: list[Path], base: Path, ids) -> Path | None:
         if got.ortho_id != ids.ortho_id:
             continue
         rel = p.relative_to(base).as_posix()
-        rank = (0 if rel == remembered else 1,      # ① 기억해 둔 것
+        key = N.nfc(rel)
+        rank = (0 if key == remembered else 1,      # ① 기억해 둔 것
                 len(Path(rel).parts) - 1,           # ② 얕을수록 먼저
-                0 if p.name == gen else 1,          # ③ 생성 형식 이름
-                rel.lower())                        # ④ 이름순
+                0 if N.nfc(p.name) == gen else 1,   # ③ 생성 형식 이름
+                key.lower())                        # ④ 이름순
         if best is None or rank < best[0]:
             best = (rank, p)
     return best[1] if best else None
