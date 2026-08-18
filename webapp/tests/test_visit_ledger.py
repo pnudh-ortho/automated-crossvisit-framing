@@ -131,3 +131,25 @@ def test_로고나_썸네일은_여전히_안_센다(prs):
     out = Rd.scan_ppt_visits(prs, main.cfg)
     # 십자뷰로 인정되는 장이 하나도 없으니 라벨 장 전체로 물러난다(폴백)
     assert out["fallback"] is True
+
+
+def test_표기_지문은_직전_차수에서_온다(prs):
+    """장 순서가 아니라 **차수 글자**가 기준이다.
+
+    확인 줄에서 새 장을 넣을 자리를 직접 고를 수 있고 사람이 파워포인트에서 장을
+    옮기기도 해서, 순서와 차수가 어긋난 덱이 실제로 나온다. 그때 정합은 D 를
+    기준 삼는데 표기는 C 를 따라 쓰면 한 화면이 서로 다른 두 장을 가리킨다.
+    """
+    _slide(prs, "24.05.17 (재진 B)", 5)
+    _slide(prs, "24.07.18 (F/U D)", 5)      # 차수 글자가 가장 큼 — 정합 기준
+    _slide(prs, "24.06.14 (재진 C)", 5)      # 장 순서로는 이쪽이 마지막
+    out = Rd.scan_ppt_visits(prs, main.cfg)
+    assert out["label_fp"]["word"] == "F/U"
+
+
+def test_글자가_없는_덱은_순서로_물러난다(prs):
+    """글자가 하나도 없으면 고를 기준이 없다 — 마지막 장을 쓴다."""
+    _slide(prs, "24.05.17 (재진)", 5)
+    _slide(prs, "24.06.14 (F/U)", 5)
+    out = Rd.scan_ppt_visits(prs, main.cfg)
+    assert out["label_fp"]["word"] == "F/U"

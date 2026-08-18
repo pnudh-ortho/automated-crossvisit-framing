@@ -64,7 +64,12 @@ body{
 /* 풀네임은 흐리게, 약자를 이루는 글자(C·Ro·C·s)만 굵고 진하게 */
 .mark .full{font-weight:400; color:var(--ink3);}
 .mark .full b{font-weight:700; color:var(--ink);}
+/* 헤더의 빈 자리. 영상 링크 양옆에 하나씩 두어 그 사이 가운데에 놓는다 —
+   화면 정중앙에 못으로 박으면 폭이 좁아질 때 오른쪽 버튼들과 겹친다. */
 .head .sp{flex:1;}
+/* 기능 설명 영상 — 버튼 모양이지만 링크다(밑줄과 방문 색을 걷어낸다). */
+.head .howto{flex:none; text-decoration:none; color:var(--ink);}
+.head .howto:visited{color:var(--ink);}
 .pchip{
   display:flex; align-items:center; gap:9px; padding:5px 11px;
   background:var(--panel2); border:1px solid var(--edge); border-radius:7px;
@@ -619,6 +624,10 @@ body{
   background:var(--panel); border:1px solid var(--edge); border-radius:6px;
   padding:3px 7px;}
 .vconfirm input:disabled{opacity:.55;}
+/* 표기 고르기 — 옆의 차수 입력칸과 같은 치수로 맞춘다 */
+.vconfirm select{font:inherit; font-family:var(--f-mono); color:var(--ink);
+  background:var(--panel); border:1px solid var(--edge); border-radius:6px;
+  padding:3px 6px;}
 .vconfirm .vc-err{color:var(--bad); font-size:12.5px;}
 .vconfirm .vc-aux{color:var(--ink3); font-size:12.5px;}
 /* 기간 기준일 — 늘 보이고, 이력에 없는 날짜도 직접 넣을 수 있다 */
@@ -967,7 +976,16 @@ body{
   /* 344 = 종전 316 + dock 패딩(13*2) + 테두리(1*2). dock에 배경을 준 뒤에도
      편집 캔버스 폭이 종전과 같도록 맞춘 값이다. */
   grid-template-columns:minmax(0,1fr) 344px; gap:14px;}
-.board-wrap{min-width:0; min-height:0; display:flex;}
+/* position:relative — 대보기/크게보기 배지가 이 칸을 기준으로 뜬다. 판(.board)이
+   아니라 그 바깥을 기준으로 삼는 이유: 크게 보는 동안 판은 숨고 편집 캔버스가
+   이 자리에 들어오는데, 배지는 두 경우 모두 같은 자리에 있어야 한다. */
+.board-wrap{min-width:0; min-height:0; display:flex; position:relative;}
+/* 크게 보기 — 편집 캔버스가 판이 있던 자리를 그대로 물려받는다. 요소를 옮기는
+   것이라 그림도, 드래그·휠 핸들러도 따라온다: 편집기가 두 벌이 되지 않는다. */
+#ed-canvas.zoom{
+  height:100%; width:auto; max-width:100%; margin:0 auto;
+  border-radius:9px;
+}
 /* 직전 차수 대보기 — 지금 화면이 **기준**이라는 표시. 켜 놓고 잊으면 조정하다
    혼동하므로, 끌 때까지 판 위에 계속 떠 있고 칸에도 테를 두른다. */
 .peekbadge{

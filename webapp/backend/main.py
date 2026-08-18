@@ -716,7 +716,8 @@ def _note_auto(s: "Session") -> dict:
         "months_app": per["app"][0], "app_date": per["app"][1], "app_paren": per["app"][2],
         "visit": s.visit or "",
         "visit_label": _render_label(today, s.visit or "",
-                                     getattr(s, "label_fp", None)),
+                                     getattr(s, "label_fp", None),
+                                     getattr(s, "visit_word", None)),
     }
 
 
@@ -1290,6 +1291,9 @@ class Session:
         self.slot_windows: dict[str, WindowCm] = dict(SLOT_WINDOWS)
         # 케이스 덱의 얼굴 자리 배정. 자리이름 -> photo_id.
         # 분류기가 정면/45도/측면을 구분하지 못하므로 사람이 직접 고른다.
+        # 라벨에 쓸 낱말. 사람이 확인 줄에서 고른 것이고, 안 고르면 그 덱이 쓰던
+        # 낱말(label_fp["word"])을 따른다.
+        self.visit_word: str | None = None
         self.face_slots: dict[str, str] = {}
         # 얼굴 자리별 편집기 값. 사진이 아니라 **자리**에 매단다 — 같은 사진이
         # 슬라이드 4 좌측과 10·11(분석)에 함께 쓰이는데, 창 크기가 달라 구도를
@@ -1737,7 +1741,8 @@ DECK_EXT = (".pptx", ".ppt", ".show")
 _VISITS_CACHE: dict[str, tuple[float, dict]] = {}
 
 
-_EMPTY_SCAN = {"visits": [], "excluded": [], "fallback": False, "slides": 0}
+_EMPTY_SCAN = {"visits": [], "excluded": [], "fallback": False, "slides": 0,
+               "label_fp": None}
 
 
 def _ppt_visit_letters(path: Path, allow_open: bool = True) -> dict | None:
@@ -1859,6 +1864,8 @@ def _scan_patient(d: Path, deep: bool = True) -> dict | None:
         "label_excluded": scan["excluded"],
         "label_fallback": scan["fallback"],
         "ppt_slides": scan["slides"],
+        # 이 덱이 쓰던 낱말(재진 · F/U · 디본딩). 확인 줄의 기본값이 된다.
+        "visit_word": (scan.get("label_fp") or {}).get("word"),
         # 새 슬라이드를 **어느 장 뒤에** 넣을지. 날짜가 가장 늦은 차수 슬라이드다 —
         # "몇 번째가 된다" 보다 "몇 번 뒤" 가 사람이 슬라이드를 세는 방식이다.
         "suggest_after": (max(scan["visits"],
@@ -1895,6 +1902,7 @@ def patients():
                       "folder_pattern": N.strip_recognition(
                           _folder_pattern(), {"hospital_id"}),
                       "photo_pattern": cfg.naming.photo_pattern,
+                      "visit_words": list(Rd.VISIT_WORDS),
                       "slots": len(cfg.ppt.slot_names)}}
 
 
@@ -2231,6 +2239,7 @@ class OpenReq(BaseModel):
     # 확인 줄에서 고친 값 — 이번 차수 글자, 새 슬라이드를 넣을 자리
     visit: str | None = None
     insert_after: int | None = None   # 이 번호의 슬라이드 **뒤**에 (0 = 맨 앞)
+    visit_word: str | None = None     # 라벨에 쓸 낱말 (재진 · F/U · 디본딩)
 
 
 @app.post("/api/session")
@@ -2307,10 +2316,11 @@ def session_open(req: OpenReq):
         if ppt_letters:
             visits = sorted({*visits, *ppt_letters}, key=N.letter_to_num)
             s.visit = N.next_visit_letter(visits)
-        # 재진 라벨은 이 덱의 표기(마지막 십자뷰 라벨의 지문)를 따른다
-        with_label = [vs for vs in seen if getattr(vs, "label_text", "")]
-        s.label_fp = (Rd.label_fingerprint(with_label[-1].label_text)
-                      if with_label else None)
+        # 재진 라벨은 이 덱의 표기를 따른다 — **직전 차수 슬라이드**의 지문이다.
+        # 규칙을 여기서 다시 쓰지 않고 장부가 셈해 둔 것을 그대로 받는다: 예전에는
+        # 여기서 "순서상 마지막 라벨"을 따로 골라, 장 순서가 차수와 어긋난 덱에서
+        # 확인 줄과 실제로 적히는 표기가 갈릴 수 있었다.
+        s.label_fp = scan.get("label_fp")
         s.first_date = _first_visit_date(seen)
         try:
             # 수제 라벨 위치·폰트 상속 — 있으면 좋은 것이라, 어떤 실패도
@@ -2352,6 +2362,13 @@ def session_open(req: OpenReq):
             raise HTTPException(
                 400, f"슬라이드 위치는 0~{last} 사이여야 합니다 (0 = 맨 앞)")
         s.insert_after = int(req.insert_after)
+    if req.visit_word:
+        # 목록에 없는 낱말은 받지 않는다 — 라벨은 다음 차수에 되읽어야 하는 글이라,
+        # 아무 글자나 들어가면 그 덱의 차수 이력이 거기서 끊긴다.
+        w = req.visit_word.strip()
+        if w.lower() not in {x.lower() for x in Rd.VISIT_WORDS}:
+            raise HTTPException(400, f"쓸 수 없는 표기입니다: {w}")
+        s.visit_word = w
     SESSIONS[s.id] = s
 
     return {"session_id": s.id, "mode": s.mode, "visit": s.visit,
@@ -3353,7 +3370,8 @@ def commit(sid: str, allow_missing: bool = False):
                 # 차수는 A가 아니다 — 그때 '(초진)'이라고 쓰면 기록이 틀린다.
                 # 두 서식 모두 {visit} 를 쓴다 — "(초진 A)" 처럼 차수 글자가 붙는다
                 info_text = _render_label(date_str, s.visit,
-                                          getattr(s, "label_fp", None))
+                                          getattr(s, "label_fp", None),
+                                          getattr(s, "visit_word", None))
             else:
                 stage_ppt = s.tmp / ppt_name
                 shutil.copyfile(s.ppt_path, stage_ppt)
@@ -3375,7 +3393,8 @@ def commit(sid: str, allow_missing: bool = False):
                         slide, NOTE_BOXES,
                         skip={CD.NOTE_DATE} if T.find_shape(slide, cfg.ppt.info_box_name) is not None else set())
                 info_text = _render_label(date_str, s.visit,
-                                          getattr(s, "label_fp", None))
+                                          getattr(s, "label_fp", None),
+                                          getattr(s, "visit_word", None))
             # 검은 마스크(MASK_*)는 **모든 경우** 제거한다 (2026-08-12 결정).
             # 근거: ① 사진을 창 크기로 구워 넣어 초과가 없고, ② 슬라이드 배경
             # 자체가 검정(000000)이라 시각적으로 동일하며, ③ 수제 레이아웃 상속
@@ -3857,7 +3876,8 @@ def _label_format() -> str:
         return "tight"
 
 
-def _render_label(date_str: str, visit: str, fp: dict | None = None) -> str:
+def _render_label(date_str: str, visit: str, fp: dict | None = None,
+                  word: str | None = None) -> str:
     """차수 라벨 한 벌.
 
     새 PPT: 설정의 두 표기 중 하나 — **새 PPT 에만 적용**. 기존 PPT 이어쓰기:
@@ -3874,7 +3894,10 @@ def _render_label(date_str: str, visit: str, fp: dict | None = None) -> str:
                 + ("." if fp.get("trailing_dot") else ""))
     else:
         date = date_str
-    kind = "초진" if visit == "A" else "재진"
+    # 낱말은 ① 사람이 확인 줄에서 고른 것 ② 그 덱이 쓰던 것 ③ 기본값 순.
+    # 첫 차수는 낱말이 아니라 "초진"이다 — 고를 것이 없다.
+    kind = ("초진" if visit == "A"
+            else (word or (fp or {}).get("word") or "재진"))
     # 띄어쓰기까지 그 덱을 따른다 — "18(재진 C)" 인 덱에 "18 (재진 D)" 를 적으면
     # 같은 슬라이드 묶음 안에서 표기가 갈린다.
     inner = (f"{kind}{' ' if fp.get('letter_space', True) else ''}{visit}"

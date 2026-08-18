@@ -11,13 +11,15 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
+import main  # noqa: E402
 import ppt_reader as Rd  # noqa: E402
 
 
 def test_fingerprint_tight():
     fp = Rd.label_fingerprint("26.08.12 (재진 B)")
     assert fp == {"spaced": False, "trailing_dot": False, "paren": True,
-                  "paren_space": True, "letter_space": True, "has_letter": True}
+                  "paren_space": True, "letter_space": True, "has_letter": True,
+                  "word": "재진"}
 
 
 def test_띄어쓰기가_흔들려도_그대로_따라_쓴다():
@@ -105,3 +107,52 @@ def test_모든_띄어쓰기_조합을_그대로_따라_쓴다(combo):
     want = _label(*combo, date="26.08.14", visit="G")
     got = main._render_label("26.08.14", "G", Rd.label_fingerprint(src))
     assert got == want, f"{src!r} → {got!r} (기대 {want!r})"
+
+
+# ── 차수 낱말 — 재진 · F/U · 디본딩 ────────────────────────────────────────
+# 병원마다 관행이 갈린다. 예전에는 "재진" 하나만 알아서, 다른 낱말을 쓰는 덱은
+# 날짜만 읽히고 **적혀 있는 차수 글자를 버린 채** 날짜순으로 다시 매겨졌다.
+@pytest.mark.parametrize("text, visit", [
+    ("24.09.04 (재진 B)", "B"),
+    ("24.09.04 (F/U C)", "C"),
+    ("24.09.04 (f/u C)", "C"),
+    ("24.10.02 (디본딩 D)", "D"),
+    ("24.11.01 F/U E", "E"),
+])
+def test_낱말이_달라도_차수_글자를_읽는다(text, visit):
+    v, _date, kind = Rd.parse_info_box(text)
+    assert (v, kind) == (visit, "revisit")
+
+
+@pytest.mark.parametrize("text", ["24.09.04 (F/U)", "24.10.02 (디본딩)"])
+def test_글자가_없어도_차수_슬라이드로_센다(text):
+    """글자 없는 라벨은 날짜순으로 이어받는다 — "재진" 일 때와 같은 규칙이다."""
+    v, date, kind = Rd.parse_info_box(text)
+    assert kind == "revisit" and v is None and date
+
+
+@pytest.mark.parametrize("text, word", [
+    ("24.09.04 (재진 B)", "재진"),
+    ("24.09.04 (F/U C)", "F/U"),
+    ("24.10.02 (디본딩)", "디본딩"),
+    ("24.06.05 (초진 A)", None),      # 초진은 낱말이 아니라 첫 차수 표시다
+])
+def test_지문이_그_덱의_낱말을_담는다(text, word):
+    assert Rd.label_fingerprint(text)["word"] == word
+
+
+def test_F_U_덱에_이어_쓰면_F_U_로_적힌다():
+    """예전에는 무슨 덱이든 "재진"으로 적어서, F/U 덱 한가운데 한 장만 표기가 갈렸다."""
+    fp = Rd.label_fingerprint("24.09.04 (F/U C)")
+    assert main._render_label("24.10.02", "D", fp) == "24.10.02 (F/U D)"
+
+
+def test_사람이_고른_표기가_덱보다_먼저다():
+    """확인 줄에서 고르는 값이다 — 디본딩처럼 그 차수만 다른 경우가 있다."""
+    fp = Rd.label_fingerprint("24.09.04 (F/U C)")
+    assert main._render_label("24.10.02", "D", fp, "디본딩") == "24.10.02 (디본딩 D)"
+
+
+def test_F_U_덱도_차수_글자를_이어_붙인다():
+    """지문이 낱말을 못 알아보면 has_letter 가 False 가 되어 글자가 안 붙었다."""
+    assert Rd.label_fingerprint("24.09.04 (F/U C)")["has_letter"] is True

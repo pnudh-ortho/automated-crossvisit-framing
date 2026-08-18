@@ -59,7 +59,22 @@ class VisitSlide:
 # 들어가거나 재진에 차수 글자가 없기도 하다. 날짜는 공백을 허용해 읽고
 # YY.MM.DD 로 정규화하며, 재진의 차수 글자는 없어도 재진으로 인정한다.
 _DATE = re.compile(r"(\d{2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})")
-_REVISIT = re.compile(r"재진\s*\(?([A-Z]+)?")
+# 차수 슬라이드에 쓰는 낱말. 병원마다 관행이 갈려 "재진" 말고도 "F/U", "디본딩"
+# 으로 적는다. 여기 한 줄만 늘리면 **읽기·표기 지문·새 라벨 쓰기**가 모두 따라간다.
+#
+# 설정 파일이 아니라 코드에 두는 이유: parse_info_box 는 note_role 처럼 설정을 들고
+# 다니지 않는 자리에서도 불린다. 예전에 같은 이유로 밖에서 패턴을 심는 방식을
+# 걷어낸 적이 있어(set_label_patterns) 그 길로 되돌아가지 않는다.
+#
+# 순서는 **화면에 보일 순서**다 — 확인 줄의 선택칸이 이대로 뜨고 첫 항목이 기본값이
+# 된다. 정규식을 만들 때만 긴 것부터 다시 세운다(짧은 낱말이 먼저 걸리면 남은 글자가
+# 차수로 새어 든다).
+VISIT_WORDS = ("재진", "F/U", "디본딩")
+
+_WORD_ALT = "|".join(re.escape(w) for w in sorted(VISIT_WORDS, key=len, reverse=True))
+# 대소문자 무시는 **낱말에만** 건다. 정규식 전체에 걸면 뒤의 ([A-Z]+) 가 소문자까지
+# 차수로 집어삼킨다 — "F/U 후" 의 '후' 같은 글자가 차수가 된다.
+_REVISIT = re.compile(rf"((?i:{_WORD_ALT}))\s*\(?\s*([A-Z]+)?")
 _FIRST = re.compile(r"초진")
 
 
@@ -86,7 +101,7 @@ def parse_info_box(text: str) -> tuple[str | None, str | None, str]:
         return "A", date, "first"
     m = _REVISIT.search(text or "")
     if m:
-        return m.group(1), date, "revisit"
+        return m.group(2), date, "revisit"      # (1)=낱말, (2)=차수 글자
     return None, date, "unknown"
 
 
@@ -94,22 +109,28 @@ def label_fingerprint(text: str) -> dict | None:
     """라벨 원문의 표기 지문 — 새 라벨이 그 덱의 모양을 그대로 따라 쓰게 한다.
 
     한 덱 안에서도 손으로 적은 라벨은 띄어쓰기가 흔들린다("18(재진 C)" · "18 (재진F)").
-    큰 틀(날짜 + 괄호 안 초진/재진 + 차수 글자)은 그대로이므로, 흔들리는 다섯 곳만
-    본다: 점 뒤 공백 · 날짜 끝 마침표 · 괄호 유무 · 괄호 앞 공백 · 차수 글자 앞 공백
+    큰 틀(날짜 + 괄호 안 낱말 + 차수 글자)은 그대로이므로, 흔들리는 다섯 곳만 본다:
+    점 뒤 공백 · 날짜 끝 마침표 · 괄호 유무 · 괄호 앞 공백 · 차수 글자 앞 공백
     (그리고 글자가 있는지). 마지막 차수 슬라이드를 기준으로 삼는다.
+
+    **낱말도 함께 담는다.** 예전에는 띄어쓰기만 담아서, F/U 로 적힌 덱에 이어 쓸 때
+    그 한 장만 "재진"이 되어 표기가 갈렸다. 같은 이유로 낱말을 못 알아보면 차수
+    글자도 없는 것으로 읽혀(has_letter=False) 새 슬라이드에 글자가 안 붙었다.
     """
     m = re.search(r"(\d{2})\s*\.(\s*)\d{1,2}\s*\.\s*(\d{1,2})(\s*\.)?", text or "")
     if not m:
         return None
     # 날짜 뒤 — 괄호(있다면)와 초진/재진, 그리고 차수 글자까지의 사이 공백
-    k = re.search(r"(\s*)(\()?\s*(?:초진|재진)(\s*)([A-Z]+)?", text or "")
+    k = re.search(rf"(\s*)(\()?\s*((?i:초진|{_WORD_ALT}))(\s*)([A-Z]+)?", text or "")
     return {
         "spaced": bool(m.group(2)),
         "trailing_dot": bool(m.group(4)),
         "paren": bool(k.group(2)) if k else True,
         "paren_space": bool(k.group(1)) if k else True,
-        "letter_space": bool(k.group(3)) if k else True,
-        "has_letter": bool(k.group(4)) if k else False,
+        "letter_space": bool(k.group(4)) if k else True,
+        "has_letter": bool(k.group(5)) if k else False,
+        # 이 덱이 쓰던 낱말. 초진은 낱말이 아니라 첫 차수 표시라 담지 않는다.
+        "word": (k.group(3) if k and k.group(3) != "초진" else None),
     }
 
 
@@ -435,7 +456,21 @@ def scan_ppt_visits(prs, cfg) -> dict:
         vs.slots = {"_": None}    # 글자 부여 규칙이 보는 '차수 슬라이드' 표식
     assign_letterless_visits(picked)
     chosen = {id(vs) for vs in picked}
+    # 표기 지문 — **직전 차수 슬라이드**에서 뽑는다. 정합 기준으로 삼는 바로 그
+    # 장이고(main._choose_refs 와 같은 규칙: 차수 글자가 가장 큰 장), 화면의 확인
+    # 줄은 이걸 낱말 기본값으로 쓴다.
+    #
+    # 슬라이드 **순서**로 고르면 안 된다. 확인 줄에서 새 장을 넣을 자리를 직접
+    # 고를 수 있고 사람이 파워포인트에서 장을 옮기기도 해서, 순서와 차수가 어긋난
+    # 덱이 실제로 나온다. 그러면 정합은 D 를 기준 삼는데 표기는 C 를 따라 쓰는,
+    # 한 화면 안에서 두 장을 가리키는 상태가 된다.
+    labeled_cross = [vs for vs in picked if getattr(vs, "label_text", "")]
+    ref = max((vs for vs in labeled_cross if vs.visit),
+              key=lambda vs: naming.letter_to_num(vs.visit), default=None)
+    if ref is None and labeled_cross:      # 글자가 하나도 없는 덱 — 순서로 물러난다
+        ref = labeled_cross[-1]
     return {
+        "label_fp": label_fingerprint(ref.label_text) if ref is not None else None,
         "visits": [{"visit": vs.visit, "date": vs.date,
                     "slide_no": vs.slide_index + 1}
                    for vs in picked if vs.visit],

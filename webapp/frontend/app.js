@@ -179,6 +179,46 @@ async function boardRefImg(slot){
    그대로 둔다** — 조정하는 손과 대보는 눈이 서로를 가리지 않게. */
 const PEEK = {on: false, timer: null};
 
+/* 크게 보기 — 지금 조정 중인 사진 한 장만 판 자리에 크게 놓는다.
+
+   **새 창을 띄우지 않는다.** 편집 캔버스 요소를 그 자리로 **옮긴다** — 그림도
+   드래그·휠 핸들러도 요소에 붙어 있으므로 그대로 따라오고, 편집기가 두 벌이 되지
+   않는다. 오른쪽 슬라이더는 제자리에 남는다.
+
+   크게 보는 이유는 결국 직전 차수와 대보기인데, 나란히 놓고 눈을 옮기는 것보다
+   **같은 자리에서 깜빡이는** 편이 어긋난 곳을 훨씬 잘 잡아낸다. 그래서 이 상태의
+   Tab 은 다섯 칸이 아니라 **이 큰 사진 한 장**을 직전 차수로 바꾼다. 두 모드에서
+   Tab 의 뜻은 하나다 — "지금 보고 있는 것을 직전 차수로". */
+const ZOOM = {on: false};
+
+/* 판을 감싼 칸. 캔버스를 여기에 넣는다 — 판(.board) 안이 아니다.
+   drawBoard 가 판의 내용을 통째로 비우므로, 안에 두면 다시 그릴 때 사라진다. */
+const zoomHost = () => boardEl && boardEl.parentElement;
+
+function toggleZoom(){
+  if(!ZOOM.on && !ED.slot) return;            // 고른 자리가 없으면 크게 볼 것도 없다
+  ZOOM.on = !ZOOM.on;
+  const cv = el("ed-canvas"), host = zoomHost();
+  if(!cv || !host){ ZOOM.on = false; return; }
+  if(ZOOM.on){
+    host.appendChild(cv);
+    cv.classList.add("zoom");
+    boardEl.hidden = true;
+  }else{
+    const dock = el("dock-photo");
+    dock.insertBefore(cv, dock.firstChild);
+    cv.classList.remove("zoom");
+    boardEl.hidden = false;
+  }
+  drawPeekBadge();
+  renderEditor();
+  if(!ZOOM.on) redrawBoardSlots();            // 판으로 돌아왔으니 다섯 칸을 다시
+}
+
+function exitZoom(){
+  if(ZOOM.on) toggleZoom();
+}
+
 /* 어느 차수를 대볼까 — 겹쳐보기에서 고른 차수를 그대로 따른다.
    둘이 서로 다른 차수를 가리키면 무엇과 비교 중인지 알 수 없다. */
 function peekVisit(){
@@ -190,35 +230,42 @@ function peekVisit(){
 }
 
 function drawPeekBadge(){
-  if(!boardEl) return;
-  boardEl.classList.toggle("peeking", PEEK.on);
-  let b = boardEl.querySelector(".peekbadge");
-  if(!PEEK.on){ if(b) b.remove(); return; }
+  const host = zoomHost();
+  if(!host || !boardEl) return;
+  boardEl.classList.toggle("peeking", PEEK.on && !ZOOM.on);
+  let b = host.querySelector(".peekbadge");
+  if(!PEEK.on && !ZOOM.on){ if(b) b.remove(); return; }
   if(!b){
     b = document.createElement("div");
     b.className = "peekbadge";
-    boardEl.appendChild(b);
+    host.appendChild(b);
   }
-  const v = peekVisit();
-  b.innerHTML = `<b>${v ? esc(v) + " 차수" : "직전 차수"}</b> 기준 보는 중` +
-                ` · <kbd>Tab</kbd> 으로 해제`;
+  if(PEEK.on){
+    const v = peekVisit();
+    b.innerHTML = `<b>${v ? esc(v) + " 차수" : "직전 차수"}</b> 기준 보는 중` +
+                  ` · <kbd>Tab</kbd> 으로 해제`;
+  }else{
+    // 크게 보는 중이라는 것과, 어떻게 돌아가는지. 켜 놓고 잊으면 판이 사라진 줄 안다.
+    b.innerHTML = `크게 보기 · <kbd>Space</kbd> 로 판으로 · <kbd>Tab</kbd> 직전 차수`;
+  }
 }
 
 /* 기준이 없을 때(초진) 아무 반응도 없으면 키가 안 먹은 건지 알 수 없다 */
 function flashPeekNote(text){
-  if(!boardEl) return;
-  let b = boardEl.querySelector(".peekbadge");
+  const host = zoomHost();
+  if(!host) return;
+  let b = host.querySelector(".peekbadge");
   if(!b){
     b = document.createElement("div");
     b.className = "peekbadge";
-    boardEl.appendChild(b);
+    host.appendChild(b);
   }
   b.textContent = text;
   clearTimeout(PEEK.timer);
-  PEEK.timer = setTimeout(() => { if(!PEEK.on) b.remove(); }, 1800);
+  PEEK.timer = setTimeout(() => { if(!PEEK.on) drawPeekBadge(); }, 1800);
 }
 
-function togglePeek(){
+async function togglePeek(){
   if(!PEEK.on && !peekVisit()){
     flashPeekNote("직전 차수가 없습니다 — 대볼 기준이 없습니다");
     return;
@@ -226,7 +273,13 @@ function togglePeek(){
   PEEK.on = !PEEK.on;
   clearTimeout(PEEK.timer);
   drawPeekBadge();
-  redrawBoardSlots();
+  if(ZOOM.on){
+    // 겹쳐보기를 켜지 않았어도 기준영상이 필요하다 — 그때 받아 둔다
+    if(PEEK.on && !OV.img) await loadOverlayImg();
+    renderEditor();
+  }else{
+    redrawBoardSlots();
+  }
 }
 
 function redrawBoardSlots(){
@@ -337,7 +390,8 @@ async function syncOverlayBar(){
     `<option value="${v}"${v === want ? " selected" : ""}>${v} 차수</option>`).join("");
   if(OV.slot !== ED.slot || OV.visit !== want || !OV.img){
     OV.slot = ED.slot; OV.visit = want; OV.img = null;
-    if(OV.on) await loadOverlayImg();
+    // 대보기(Tab)도 이 그림을 쓴다 — 자리를 옮겨도 대보기가 꺼지지 않게 함께 받는다
+    if(OV.on || PEEK.on) await loadOverlayImg();
   }
 }
 
@@ -353,6 +407,13 @@ function renderEditor(){
   const cv = el("ed-canvas"); if(!cv || !ED.slot) return;
   const {w, h} = fitCanvas(cv, ED.slot);
   const ctx = cv.getContext("2d");
+  // 크게 보는 중의 Tab — **이 자리에서** 직전 차수로 깜빡인다. 기준영상은 이미
+  // 창 좌표라 지금 조정값을 얹지 않는다: 얹으면 기준이 아니게 된다.
+  if(ZOOM.on && PEEK.on && OV.img && OV.slot === ED.slot){
+    drawComposite(ctx, w, h, OV.img, {dx:0, dy:0, scale:1, angle:0}, false, false);
+    updateReadout();
+    return;
+  }
   if(OV.on && OV.img && OV.slot === ED.slot)
     drawAnaglyph(ctx, w, h, OV.img, ED.img, ED, ED.flip_v);
   else
@@ -459,6 +520,11 @@ addEventListener("keydown", e => {
   // 넘겨준다 — 슬라이더에 포커스가 남았을 때 키보드만으로 빠져나갈 길은 있어야 한다.
   if(code === "Tab" && !face && !e.shiftKey){
     e.preventDefault(); togglePeek(); return;
+  }
+  // Space — 지금 조정 중인 사진을 판 자리에 크게. 가로채지 않으면 포커스가 남은
+  // 버튼이 눌리거나 화면이 스크롤된다(브라우저 기본 동작).
+  if(code === "Space" && !face){
+    e.preventDefault(); toggleZoom(); return;
   }
   if(!face && (code.startsWith("Digit") || code.startsWith("Numpad"))){
     const s = SLOTS.find(x => x.hk === +code.slice(-1));
@@ -934,6 +1000,7 @@ function resetSession(){
   setStep("setup", "", "");
   ["pre","proc","fin"].forEach(v => setStep(v, "", "대기"));
   picked = null;
+  exitZoom();
   PEEK.on = false; clearTimeout(PEEK.timer);
   NOTES = null; NOTE_DIRTY.clear();
   renderVisitBadges();
@@ -1123,6 +1190,7 @@ function visitConfirm(p, V){
     ${ex.length ? `<div class="vc-warn">⚠ 십자뷰 없는 라벨 슬라이드 ${ex.length}장` +
       `(슬라이드 ${ex.map(x => x.slide_no).join(", ")}) — 차수에서 제외했습니다</div>` : ""}
     ${p.label_fallback ? `<div class="vc-warn">⚠ 십자뷰를 인식하지 못해 라벨만으로 차수를 세었습니다</div>` : ""}
+    ${visitWordPick(p, V)}
     <label>이번 차수 <input id="v-letter" maxlength="2" value="${V}" autocomplete="off"></label>
     ${p.ppt && p.suggest_after ? `<label>새 슬라이드는
       <input id="v-pos" type="number" min="0" max="${p.ppt_slides || 999}"
@@ -1148,12 +1216,36 @@ function bindVisitConfirm(p){
 }
 
 /* 확인 줄의 값 — 세션을 열 때 서버로 넘어간다 */
+/* 라벨에 쓸 낱말 — 재진 · F/U · 디본딩.
+
+   기본값은 **마지막 십자뷰 슬라이드가 쓴 낱말**이다. 정합 기준으로 삼는 바로 그
+   슬라이드라 따로 설명할 것이 없고, 한 덱 안에서 표기가 갈리지 않는다.
+
+   표기가 차수 글자보다 **왼쪽**에 온다 — 라벨에 적히는 순서("F/U D")와 읽는 순서를
+   맞춘 것이다.
+
+   첫 차수(A)에는 안 뜬다. 그건 낱말이 아니라 "초진"이라는 한 가지뿐이다. */
+function visitWordPick(p, V){
+  if(V === "A") return "";
+  const deck = p.visit_word || "";
+  const opts = (RULES.visit_words || ["재진", "F/U", "디본딩"]).slice();
+  // 덱이 쓰던 낱말이 목록에 없으면(대소문자가 다르다든지) 그걸 그대로 넣어 준다 —
+  // 고르지 않았는데 표기가 슬그머니 바뀌면 안 된다.
+  if(deck && !opts.some(w => w.toLowerCase() === deck.toLowerCase())) opts.unshift(deck);
+  const want = deck || opts[0];
+  return `<label>표기 <select id="v-word">` +
+    opts.map(w => `<option value="${esc(w)}"${w === want ? " selected" : ""}>${esc(w)}</option>`).join("") +
+    `</select></label>`;
+}
+
 function visitOverride(){
   const out = {};
   const L = el("v-letter"), P = el("v-pos");
   if(L && /^[A-Z]{1,2}$/.test(L.value.trim().toUpperCase()))
     out.visit = L.value.trim().toUpperCase();
   if(P && P.value !== "" && +P.value >= 0) out.insert_after = +P.value;
+  const W = el("v-word");
+  if(W && W.value) out.visit_word = W.value;
   return out;
 }
 
@@ -2513,6 +2605,8 @@ function showTab(name){
   // 헤더 선택기: 슬롯은 십자뷰, 슬라이드는 FACE에서만 쓴다
   segEl.hidden = name !== "io";
   const fseg = el("face-seg"); if(fseg) fseg.hidden = name !== "face";
+  // FACE 탭으로 가면 판 자리가 그쪽 것이 된다 — 캔버스를 먼저 제자리로 돌린다
+  if(name !== "io") exitZoom();
   if(name === "io" && ED.slot) renderEditor();
   if(name === "face") drawFace();
   // 판이 다시 보이면 노트 오버레이도 다시 얹는다 — 탭을 오가도 사라지지 않게.
