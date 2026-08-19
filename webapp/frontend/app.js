@@ -122,6 +122,7 @@ function drawBoard(){
   }
   if(ED.slot && primaryOf(ED.slot)) pick(ED.slot);
   else { const f = SLOTS.find(x => primaryOf(x.key)); if(f) pick(f.key); }
+  syncBoardShape();    // 판 비율은 그 덱의 슬라이드를 따른다
   drawNoteOverlay();   // 판을 다시 그리면 오버레이도 날아간다
   drawPeekBadge();     // 배지도 같이 날아간다 — 켜져 있으면 다시 세운다
 }
@@ -2271,6 +2272,19 @@ function noteHtml(text, key){
 
    값은 서식(notes.boxes)이 자동으로 채운다 — 경과 개월·초진 날짜까지. 여기서
    고치면 그 박스만 '통째로 고쳐 쓴 것'으로 서버에 남고 서식을 이긴다. */
+/* 판의 비율을 **그 덱의 슬라이드**에 맞춘다.
+
+   판 위에 겹쳐 그리는 것들(계측선·노트 상자)은 슬라이드 cm 좌표를 viewBox 로 쓰고
+   판 상자에 늘려 맞춘다. 그래서 판이 4:3 로 굳어 있으면, 크기가 다른 덱에서는
+   그 겹침이 통째로 어긋난 자리에 그려진다 — 결과물은 맞는데 화면이 거짓말을 한다.
+
+   값이 없으면 CSS 의 4:3 으로 물러난다. */
+function syncBoardShape(){
+  if(!boardEl) return;
+  const sl = NOTES && NOTES.slide;
+  boardEl.style.aspectRatio = (sl && sl.w && sl.h) ? `${sl.w} / ${sl.h}` : "";
+}
+
 function drawNoteOverlay(){
   if(!boardEl) return;
   let layer = boardEl.querySelector(".noteov");
@@ -2571,6 +2585,7 @@ async function loadNotes(){
   if(!SESSION) return;
   try{
     NOTES = await api(`/api/notes/${SESSION.session_id}`);
+    syncBoardShape();             // 슬라이드 크기는 여기서 처음 온다 — 판을 먼저 맞춘다
     drawNoteOverlay();
     drawInfoDock();               // 환자정보 장을 보고 있으면 칸도 채워 준다
   }catch(e){ /* 판 위 오버레이가 안 뜰 뿐, 다른 작업은 계속할 수 있다 */ }

@@ -313,3 +313,43 @@ def test_수제_덱의_기간_상자도_읽는다():
     hist = M._period_history([vs], "Rx. Period")
     assert hist["dates"] == ["24.05.01"], hist
     assert hist["last"] == "Rx. Period: 3 month (24.05.01)"
+
+
+# ── 슬라이드 크기가 양식과 다른 덱 ─────────────────────────────────────────
+# 자리표는 양식(25.4x19.05) 좌표다. 직전 차수에 없던 칸은 여기서 새로 만들어지는데,
+# 좌표를 그대로 쓰면 더 작은 덱에서 오른쪽·아래 칸이 슬라이드 밖으로 밀려난다.
+# 이 칸들은 원래 모서리에 붙어 있는 것이라, 옮길 것은 좌표가 아니라 여백이다.
+def test_슬라이드가_같으면_자리표가_그대로다():
+    import case_deck as CD
+
+    ref = M.CASE_SLIDE_CM
+    for win in (M.NOTE_BOXES or {}).values():
+        got = CD.anchored_window(win, ref, ref)
+        assert (got["x"], got["y"]) == (win["x"], win["y"])
+
+
+def test_작은_덱에서는_모서리_여백을_지킨다():
+    import case_deck as CD
+
+    ref = M.CASE_SLIDE_CM
+    now = (ref[0] - 0.534, ref[1] - 0.534)
+    for name, win in (M.NOTE_BOXES or {}).items():
+        got = CD.anchored_window(win, ref, now)
+        assert got["x"] + got["w"] <= now[0] + 1e-6, name    # 오른쪽으로 안 넘친다
+        assert got["y"] + got["h"] <= now[1] + 1e-6, name    # 아래로도
+        assert (got["w"], got["h"]) == (win["w"], win["h"]), name   # 크기는 그대로
+        # 붙어 있던 모서리에서의 여백이 유지된다
+        if win["x"] + win["w"] / 2 > ref[0] / 2:
+            assert abs((now[0] - (got["x"] + got["w"]))
+                       - (ref[0] - (win["x"] + win["w"]))) < 2e-3, name
+        else:
+            assert got["x"] == win["x"], name
+
+
+def test_크기를_모르면_손대지_않는다():
+    """양식이 없는 설치본 등 — 알 수 없으면 종전 좌표 그대로 둔다."""
+    import case_deck as CD
+
+    win = {"x": 17.05, "y": 12.87, "w": 8.2, "h": 6.0}
+    assert CD.anchored_window(win, None, (24.0, 18.0)) == win
+    assert CD.anchored_window(win, (25.4, 19.05), None) == win

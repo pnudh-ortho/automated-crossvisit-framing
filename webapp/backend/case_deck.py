@@ -480,8 +480,35 @@ def add_note_box(slide, name: str, win: dict, size_pt: float = 12.0,
     return True
 
 
+def anchored_window(win: dict, ref_cm: tuple[float, float] | None,
+                    slide_cm: tuple[float, float] | None) -> dict:
+    """자리표를 실제 슬라이드 크기에 맞춰 옮긴다 — **가까운 모서리에서의 여백**을 지킨다.
+
+    자리표는 양식(`ref_cm`) 좌표다. 덱이 그보다 작으면 오른쪽·아래에 붙는 칸이
+    슬라이드 밖으로 밀려난다. 이 칸들은 원래 좌표가 아니라 **모서리에 붙어 있는
+    것**이라, 옮겨야 할 것은 좌표가 아니라 여백이다.
+
+    크기는 건드리지 않는다 — 글자 크기는 그대로인데 칸만 줄이면 글이 넘친다.
+    슬라이드 크기가 같으면 한 EMU도 바뀌지 않는다.
+    """
+    if not ref_cm or not slide_cm:
+        return win
+    rw, rh = ref_cm
+    nw, nh = slide_cm
+    if not (rw and rh and nw and nh):
+        return win
+    x, y, w, h = win["x"], win["y"], win["w"], win["h"]
+    if x + w / 2 > rw / 2:                 # 오른쪽 절반에 있다 → 오른쪽 모서리 기준
+        x = nw - (rw - (x + w)) - w
+    if y + h / 2 > rh / 2:                 # 아래쪽 절반에 있다 → 아래 모서리 기준
+        y = nh - (rh - (y + h)) - h
+    return {**win, "x": round(max(0.0, x), 3), "y": round(max(0.0, y), 3)}
+
+
 def add_note_boxes_from_layout(slide, layout: dict[str, dict],
-                               skip: set[str] = frozenset()) -> list[str]:
+                               skip: set[str] = frozenset(),
+                               ref_cm: tuple[float, float] | None = None,
+                               slide_cm: tuple[float, float] | None = None) -> list[str]:
     """자리표(`note_box_windows` 가 양식에서 읽어 둔 것)대로 빠진 노트 칸을 만든다.
 
     재진 슬라이드는 십자뷰 양식에서 임포트되는데 거기엔 노트 칸이 아예 없다 —
@@ -495,6 +522,7 @@ def add_note_boxes_from_layout(slide, layout: dict[str, dict],
         win = layout.get(name)
         if win is None or name in have or name in skip:
             continue
+        win = anchored_window(win, ref_cm, slide_cm)
         f = win.get("font") or {}
         if add_note_box(slide, name, win,
                         size_pt=f.get("size_pt") or 12.0,

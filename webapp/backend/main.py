@@ -84,24 +84,45 @@ def _windows_json(windows: dict[str, WindowCm]) -> dict:
     return {k: {"x": v.x, "y": v.y, "w": v.w, "h": v.h} for k, v in windows.items()}
 
 
-def _layout_from_ppt(prs) -> dict[str, WindowCm]:
-    """
-    기존 PPT가 실제로 쓰던 슬롯 레이아웃. 없는 슬롯은 템플릿 좌표로 메운다.
+def _prev_visit_slide_no(scan: dict) -> int | None:
+    """이어붙일 자리 바로 앞 장 — **차수 글자가 가장 큰 장**의 슬라이드 번호.
 
-    가장 마지막 차수 슬라이드를 기준으로 삼는다 — 레이아웃이 도중에 바뀐 PPT라면
-    최신 것이 이어붙일 슬라이드와 가장 가깝다.
+    정합 기준영상·표기 지문·계측선·슬롯 레이아웃이 전부 이 한 장에서 온다. 규칙을
+    각자 다시 쓰면 어긋난다 — 실제로 표기와 레이아웃이 저마다 "장 순서상 마지막"을
+    골라서, 확인 줄에서 삽입 자리를 직접 고르거나 사람이 장을 옮긴 덱에서는 정합은
+    D 를 보는데 레이아웃은 C 를 따라가는 일이 있었다.
     """
-    found: dict[str, WindowCm] = {}
+    if not scan.get("visits"):
+        return None
+    return max(scan["visits"],
+               key=lambda v: (N.letter_to_num(v["visit"]), v["slide_no"]))["slide_no"]
+
+
+def _layout_from_ppt(prs, slide_no: int | None = None) -> dict[str, WindowCm]:
+    """기존 PPT가 실제로 쓰던 슬롯 레이아웃. 없는 슬롯은 템플릿 좌표로 메운다.
+
+    **직전 차수 슬라이드 한 장만** 본다(`slide_no`). 예전에는 전체를 훑어 마지막에
+    걸린 것을 남겼는데, 그러면 ① 장 순서가 차수와 어긋난 덱에서 엉뚱한 차수를
+    따라가고 ② 라벨도 없는 장(얼굴·비교용)이 사진 다섯 장을 담고 있다는 이유만으로
+    기준이 됐다. 번호를 안 주면 종전처럼 훑는다 — 차수를 하나도 못 읽은 덱이다.
+    """
     ctr = (emu_to_cm(prs.slide_width) / 2, emu_to_cm(prs.slide_height) / 2)
-    for slide in prs.slides:
+
+    def one(slide) -> dict[str, WindowCm]:
         got = W.read_slot_windows(slide, cfg.ppt.slot_names)
-        # 사진이 실제로 들어간 슬라이드만 기준으로 삼는다(빈 앵커뿐인 템플릿 슬라이드 제외)
+        # 사진이 실제로 들어간 슬라이드만 기준으로 삼는다(빈 앵커뿐인 템플릿 장 제외)
         if got and any(sh.name.startswith(W.PHOTO_NAME_PREFIX) for sh in slide.shapes):
-            found = got
-        else:
-            est = _estimate_slot_windows(slide, ctr)   # 수제 십자뷰 — 사진 bbox 상속
-            if est:
-                found = est
+            return got
+        return _estimate_slot_windows(slide, ctr)      # 수제 십자뷰 — 사진 bbox 상속
+
+    found: dict[str, WindowCm] = {}
+    if slide_no is not None and 0 < slide_no <= len(prs.slides):
+        found = one(prs.slides[slide_no - 1])
+    else:
+        for slide in prs.slides:
+            got = one(slide)
+            if got:
+                found = got
     return {**SLOT_WINDOWS, **found}
 
 
@@ -111,9 +132,12 @@ def _estimate_slot_windows(slide, slide_ctr: tuple[float, float]) -> dict[str, W
     무게중심에 가장 가까운 사진이 정면, 나머지는 정면 기준 상/하/좌/우 —
     ppt_reader 의 기준영상 추정과 같은 규칙이라 두 결과가 어긋나지 않는다.
     """
+    # 문턱은 **장부와 같은 값**이어야 한다(Rd.CROSS_MIN_W_CM). 여기만 따로 8.0 을
+    # 들고 있어서, 7.9cm 로 놓인 덱이 차수로는 세어지는데 레이아웃은 안 물려받는
+    # 어중간한 상태가 됐다 — 사진이 덱보다 크게 들어갔다.
     pics = [sh for sh in slide.shapes
             if getattr(sh, "shape_type", None) == 13
-            and emu_to_cm(sh.width) >= 8.0]
+            and emu_to_cm(sh.width) >= Rd.CROSS_MIN_W_CM]
     if len(pics) < 5:
         return {}
     ctr = [(emu_to_cm(p.left) + emu_to_cm(p.width) / 2,
@@ -819,7 +843,8 @@ def _notes_json(s: "Session") -> dict:
         "overrides": dict(s.note_overrides),
         "templates": _note_templates(s),    # 지금 쓰이는 서식
         "templates_default": dict(cfg.notes.boxes),
-        "slide": {"w": CASE_SLIDE_CM[0], "h": CASE_SLIDE_CM[1]},
+        # 양식이 아니라 **이 덱**의 크기다 — 화면이 실제 슬라이드를 그려야 한다
+        "slide": {"w": round(s.slide_cm[0], 3), "h": round(s.slide_cm[1], 3)},
         # 직전 차수 슬라이드의 선 — 설정이 '복사 안 함' 이면 따라오지 않으므로 안 낸다
         "prev_lines": ([] if _copy_shapes() == "none"
                        else list(getattr(s, "prev_lines", []) or [])),
@@ -1321,6 +1346,10 @@ class Session:
         # 새 차수만 템플릿대로 넣으면 그 슬라이드만 어긋난다.
         # 에디터 화면·정합·최종 삽입이 모두 이 창을 함께 쓴다.
         self.slot_windows: dict[str, WindowCm] = dict(SLOT_WINDOWS)
+        # 이 덱의 슬라이드 크기(cm). 검수 화면이 판의 비율과 겹쳐보기 좌표계를
+        # 여기에 맞춘다 — 양식 크기로 굳혀 두면 크기가 다른 덱에서 계측선과 노트
+        # 상자가 실제와 어긋난 자리에 그려진다. 새 덱은 양식 크기 그대로다.
+        self.slide_cm: tuple[float, float] = CASE_SLIDE_CM
         # 케이스 덱의 얼굴 자리 배정. 자리이름 -> photo_id.
         # 분류기가 정면/45도/측면을 구분하지 못하므로 사람이 직접 고른다.
         # 라벨에 쓸 낱말. 사람이 확인 줄에서 고른 것이고, 안 고르면 그 덱이 쓰던
@@ -2330,7 +2359,12 @@ def session_open(req: OpenReq):
         except PermissionError:
             raise HTTPException(409, "PPT가 다른 프로그램(PowerPoint)에서 열려 "
                                      "있습니다 — 닫은 뒤 다시 시도해 주세요")
-        s.slot_windows = _layout_from_ppt(prs)
+        # 차수 장부를 **먼저** 센다 — 레이아웃·기준영상·표기·계측선이 모두 같은
+        # 한 장(직전 차수)에서 와야 하고, 그 장을 여기서 한 번 정한다.
+        s.slide_cm = (emu_to_cm(prs.slide_width), emu_to_cm(prs.slide_height))
+        scan = Rd.scan_ppt_visits(prs, cfg)
+        src_no = _prev_visit_slide_no(scan)
+        s.slot_windows = _layout_from_ppt(prs, src_no)
         # 기준영상도 그 PPT의 창으로 복원해야 정합이 같은 좌표계에서 이뤄진다.
         seen = Rd.read_all_visits(prs, cfg, PPC, s.slot_windows)
         s.references = Rd.references_for_registration(seen)
@@ -2341,9 +2375,8 @@ def session_open(req: OpenReq):
                 "event": "references_empty", "patient": d.name,
                 "ppt": ppt_path.name, "slides": len(prs.slides._sldIdLst),
                 "cross_slides": len(seen)})
-        # 차수 장부는 가벼운 스캔(십자뷰 단일 기준 + 폴백)과 같은 규칙으로 센다 —
-        # 목록 화면과 세션이 다른 차수를 말하면 확인 줄이 거짓말이 된다.
-        scan = Rd.scan_ppt_visits(prs, cfg)
+        # 장부는 위에서 이미 셌다(레이아웃이 그 결과를 쓴다). 목록 화면과 세션이
+        # 다른 차수를 말하면 확인 줄이 거짓말이 되므로 같은 스캔을 함께 쓴다.
         ppt_letters = [v["visit"] for v in scan["visits"]]
         if ppt_letters:
             visits = sorted({*visits, *ppt_letters}, key=N.letter_to_num)
@@ -2369,12 +2402,9 @@ def session_open(req: OpenReq):
         # 기준일은 대개 "어느 차수부터" 다 — 파싱한 차수 날짜를 후보로 남긴다
         s.visit_dates = [{"visit": v["visit"], "date": v["date"]}
                          for v in scan["visits"] if v.get("date")]
-        # 새 장이 이어붙을 자리 = 차수 글자가 가장 큰 장. 거기 그려진 선을 읽어
-        # 검수 판에 겹쳐 보여준다 — 확정하면 그 자리로 따라오기 때문이다.
-        if scan["visits"]:
-            src_no = max(scan["visits"],
-                         key=lambda v: (N.letter_to_num(v["visit"]),
-                                        v["slide_no"]))["slide_no"]
+        # 그 장에 그려진 계측선을 읽어 검수 판에 겹쳐 보여준다 — 확정하면 그 자리로
+        # 따라오기 때문이다. 레이아웃과 **같은 장**이다.
+        if src_no is not None:
             s.prev_lines = _slide_lines(prs, [src_no]).get(src_no, [])
     elif s.visit == "A":
         # 오늘이 초진이다 — 경과 개월은 0.
@@ -3421,9 +3451,14 @@ def commit(sid: str, allow_missing: bool = False):
                 # 자리표(NOTE_BOXES) 그대로 만들어 화면과 결과물을 맞춘다.
                 # 날짜 칸은 이 슬라이드의 INFO_BOX 가 맡는다(자리가 겹친다).
                 if NOTE_BOXES:
+                    # 자리표는 양식 좌표다. 덱의 슬라이드가 그보다 작으면 오른쪽·아래
+                    # 칸이 밖으로 밀려나므로 모서리 기준으로 앉힌다. 여기서 새로
+                    # 만들어지는 것은 **직전 차수에 없던 칸**뿐이다 — 있던 칸은 바로
+                    # 아래에서 원본을 통째로 복사해 덮어쓴다(자리·폰트 그대로).
                     CD.add_note_boxes_from_layout(
                         slide, NOTE_BOXES,
-                        skip={CD.NOTE_DATE} if T.find_shape(slide, cfg.ppt.info_box_name) is not None else set())
+                        skip={CD.NOTE_DATE} if T.find_shape(slide, cfg.ppt.info_box_name) is not None else set(),
+                        ref_cm=CASE_SLIDE_CM, slide_cm=s.slide_cm)
                 info_text = _render_label(date_str, s.visit,
                                           getattr(s, "label_fp", None),
                                           getattr(s, "visit_word", None))
