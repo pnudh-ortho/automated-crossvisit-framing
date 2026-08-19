@@ -978,6 +978,9 @@ async def _lifespan(_app: FastAPI):
     """청소 스레드는 서버 수명과 함께 산다. TestClient를 컨텍스트 없이 쓰면 뜨지 않는다."""
     _log_framer()
     _apply_note_sizes()                        # 설정된 노트 글자 크기 반영
+    # 아이콘 이름이 바뀌었으면 바로가기를 수리한다. powershell 을 띄우는 일이라
+    # 기동을 붙잡지 않게 옆으로 보낸다 — 서버가 뜨는 것과 아무 상관이 없다.
+    threading.Thread(target=_repair_shortcut_icon, daemon=True).start()
     stop = threading.Event()
     threading.Thread(target=_sweeper_loop, args=(stop,), daemon=True).start()
     yield
@@ -1088,6 +1091,35 @@ def _patient_ppts(d: Path, ortho_id: str = "") -> list[Path]:
 
 
 LEGACY_SETTINGS = Path.home() / "ortho-webapp" / "settings.json"
+
+
+def _setting(key: str, default=None):
+    """settings.json 의 값 하나. 파일이 없거나 깨졌으면 기본값."""
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get(key, default)
+    except Exception:                                   # noqa: BLE001
+        return default
+
+
+def _save_setting(key: str, value) -> None:
+    """값 하나만 얹는다 — **있던 설정을 지우지 않는다.**
+
+    예전에 저장 위치를 통째 덮어써서 이름 양식·개인화가 전부 날아간 적이 있다.
+    읽고, 고칠 항목만 바꾸고, 다시 쓴다.
+    """
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            d = {}
+    except Exception:                                   # noqa: BLE001
+        d = {}
+    d[key] = value
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _months_unit() -> str:
@@ -3746,6 +3778,88 @@ def update_apply(req: UpdateApplyReq = Body(default=UpdateApplyReq())):
         return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:300]}
 
 
+# 바탕화면 바로가기가 가리킬 아이콘. **이름에 번호가 붙어 있는 것이 핵심**이다.
+#
+# 윈도우는 바로가기 아이콘을 (경로, 인덱스)로 캐시한다. 같은 이름으로 그림만 갈아
+# 끼우면 파일이 바뀌어도 캐시에 있는 옛 그림을 계속 보여준다 — 실제로 그랬다.
+# 경로가 달라져야 캐시가 비켜난다.
+#
+# 옛 이름(crocs.ico)도 같은 그림으로 남겨 둔다. 아직 수리되지 않은 바로가기가
+# 가리키는 자리라, 지우면 아이콘이 깨진다. 한 버전 뒤에 지운다.
+SHORTCUT_ICON = "crocs-2.ico"
+
+
+def _win_repo_path() -> tuple[str, str] | None:
+    """(powershell 실행 파일, 윈도우식 프로그램 경로). 윈도우가 아니면 None.
+
+    WSL 개발 환경의 powershell.exe 도 받는다 — 동작을 실제로 확인할 수 있어야 한다.
+    """
+    exe = "powershell" if os.name == "nt" else shutil.which("powershell.exe")
+    if not exe:
+        return None
+    repo = str(BACKEND_DIR.parent.parent)
+    if os.name != "nt":                        # WSL — 경로만 윈도우 식으로
+        r = subprocess.run(["wslpath", "-w", repo], capture_output=True,
+                           encoding="utf-8")
+        if r.returncode == 0:
+            repo = r.stdout.strip()
+    return exe, repo
+
+
+def _repair_shortcut_icon() -> None:
+    """아이콘 파일 이름이 바뀌었으면 바탕화면 바로가기의 **아이콘 경로만** 고친다.
+
+    지우고 다시 만들지 않는다. 사용자가 바로가기를 옮겨 놨거나 이름을 바꿨을 수
+    있고, 그건 그 사람 것이다. 우리가 고치는 것은 **우리 파일을 가리키던 줄** 하나뿐이다.
+
+    바로가기가 없으면 아무것도 안 한다 — 지운 사람에게 다시 만들어 주는 것은 참견이다.
+    다른 폴더를 가리키면(다시 설치한 경우) 손대지 않는다. 그건 판단이 필요한 일이라
+    설정의 '바탕화면 바로가기' 버튼으로 남긴다.
+
+    한 번 돌면 settings.json 에 이름을 적어 두고 다시 돌지 않는다. 이름이 같으면
+    powershell 을 띄우지도 않으므로 평소 기동 비용은 0 이다.
+    """
+    try:
+        if _setting("shortcut_icon") == SHORTCUT_ICON:
+            return
+        got = _win_repo_path()
+        if got is None:                        # 윈도우가 아니다 — 할 일이 없다
+            _save_setting("shortcut_icon", SHORTCUT_ICON)
+            return
+        exe, repo = got
+        icon = f"{repo}\\assets\\{SHORTCUT_ICON},0"
+        ps = (
+            "$sh=New-Object -ComObject WScript.Shell;"
+            "$p=@();"
+            "try{$d=$sh.SpecialFolders.Item('Desktop'); if($d){$p+=(Join-Path $d 'CRoCs.lnk')}}catch{};"
+            "$p+=(Join-Path $env:USERPROFILE 'Desktop\\CRoCs.lnk');"
+            "$p+=(Join-Path $env:USERPROFILE 'OneDrive\\Desktop\\CRoCs.lnk');"
+            "$n=0;"
+            "foreach($f in ($p | Select-Object -Unique)){"
+            "  if(Test-Path $f){"
+            "    $s=$sh.CreateShortcut($f);"
+            f"    if($s.TargetPath -like '{repo}\\*'){{"
+            f"      if($s.IconLocation -ne '{icon}'){{ $s.IconLocation='{icon}'; $s.Save(); }}"
+            "      $n++;"
+            "    }"
+            "  }"
+            "};"
+            "Write-Output $n"
+        )
+        r = subprocess.run([exe, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                            "-Command", ps],
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        fixed = (r.stdout or "").strip().splitlines()
+        print(f"[바로가기] 아이콘 경로 갱신 — {fixed[-1] if fixed else '?'}개")
+        # 실패했어도 적어 둔다. 매번 powershell 을 띄우는 것이 깨진 아이콘보다 나쁘다 —
+        # 고치는 길은 설정의 '바탕화면 바로가기' 버튼으로 남아 있다.
+        _save_setting("shortcut_icon", SHORTCUT_ICON)
+    except Exception as e:                                        # noqa: BLE001
+        # 아이콘 하나 때문에 프로그램이 안 뜨면 안 된다
+        print(f"[바로가기] 아이콘 갱신 건너뜀: {type(e).__name__}: {e}")
+
+
 @app.post("/api/shortcut")
 def make_shortcut():
     """바탕화면에 CRoCs 바로가기 — 설치 이후에도 설정에서 만들 수 있게.
@@ -3754,15 +3868,10 @@ def make_shortcut():
     이 버튼이 유일한 경로다. Windows 전용 (WSL 개발 환경의 powershell.exe 도
     허용 — 동작 검증용).
     """
-    exe = "powershell" if os.name == "nt" else shutil.which("powershell.exe")
-    if not exe:
+    got = _win_repo_path()
+    if got is None:
         return {"ok": False, "detail": "Windows에서만 만들 수 있습니다"}
-    repo = str(BACKEND_DIR.parent.parent)
-    if os.name != "nt":                        # WSL — 경로만 Windows 식으로
-        r = subprocess.run(["wslpath", "-w", repo], capture_output=True,
-                           encoding="utf-8")
-        if r.returncode == 0:
-            repo = r.stdout.strip()
+    exe, repo = got
     ps = (
         "$sh=New-Object -ComObject WScript.Shell;"
         "$d=$sh.SpecialFolders.Item('Desktop');"
@@ -3770,7 +3879,7 @@ def make_shortcut():
         "$s=$sh.CreateShortcut((Join-Path $d 'CRoCs.lnk'));"
         f"$s.TargetPath='{repo}\\run.bat';"
         f"$s.WorkingDirectory='{repo}';"
-        f"$s.IconLocation='{repo}\\assets\\crocs.ico,0';"
+        f"$s.IconLocation='{repo}\\assets\\{SHORTCUT_ICON},0';"
         "$s.Save(); Write-Output $d"
     )
     try:
