@@ -1002,6 +1002,7 @@ body{
 .board.peeking .cell{outline:2px solid #ffd166; outline-offset:-2px;}
 /* 힌트는 범례 바로 뒤 — 오른쪽 끝으로 미는 일은 .ovkey 의 margin-left:auto 가 한다 */
 .ovhint{flex:none; color:var(--ink3); font-size:12px; white-space:nowrap;}
+.ovhint i{font-style:normal; margin:0 5px; color:var(--edge);}
 .ovhint kbd{
   font:600 11px var(--f-mono); padding:1px 5px; border-radius:4px;
   border:1px solid var(--edge); background:var(--panel2); margin-right:4px;
@@ -1045,18 +1046,39 @@ body{
 
 /* 좌측 보드(어두운 --well)와 우측 조작부의 경계를 만든다. --panel2는 두 테마
    모두에서 카드(--panel)보다 한 단 들어가 보이는 값이라 그대로 쓴다. */
+/* 오른쪽 도구단. `overflow:auto` 는 **마지막 안전망**이지 평소에 쓰라고 둔 것이
+   아니다 — 여기서 스크롤이 생기면 조정 슬라이더가 화면 밖으로 밀려나, 사진을
+   보면서 손이 닿아야 할 것이 가려진다. 아래 노트북 규칙에서 여백을 조여 애초에
+   넘치지 않게 한다. */
 .dock{
   overflow:auto; min-height:0;
+  display:flex; flex-direction:column;
   background:var(--panel2); border:1px solid var(--edge-soft);
   border-radius:10px; padding:12px 13px;
 }
+/* 사진 편집기 묶음이 dock 의 남는 높이를 받는다. 그 안에서 캔버스만 늘고 줄고,
+   슬라이더·안내줄은 제 높이를 지킨다. */
+#dock-photo{display:flex; flex-direction:column; flex:1 1 auto; min-height:0;}
+#dock-photo > .ovbar,
+#dock-photo > .knobs,
+#dock-photo > .readout,
+#dock-photo > .btn,
+#dock-photo > .tip{flex:none;}
 .dock > h3{margin:0 0 9px; display:flex; align-items:center; justify-content:space-between;
   gap:8px; font:600 12px/1 var(--f-mono); letter-spacing:.13em;
   text-transform:uppercase; color:var(--ink3);}
 .saved{font:12.5px/1 var(--f-mono); color:var(--done); text-transform:none; letter-spacing:0;}
-/* 편집 캔버스 — 슬롯 창과 같은 4:3, 검은 바탕 위에서 사진을 판단한다 */
+/* 편집 캔버스 — 슬롯 창과 같은 4:3, 검은 바탕 위에서 사진을 판단한다.
+
+   **높이를 먼저 받고 폭이 따라온다.** 폭을 100% 로 잡으면 높이가 폭에서 정해져
+   화면이 낮을 때 dock 이 넘치고, 그러면 조정 슬라이더가 스크롤 밖으로 밀려난다 —
+   사진을 보면서 손이 닿아야 할 것이 가려진다. 판(.board)이 쓰는 방식과 같다. */
+.edfit{
+  flex:1 1 auto; min-height:120px; display:flex; margin-bottom:11px;
+}
 #ed-canvas{
-  width:100%; aspect-ratio:4/3; display:block; margin-bottom:11px;
+  height:100%; width:auto; max-width:100%; margin:0 auto;
+  aspect-ratio:4/3; display:block;
   background:var(--well); border-radius:6px; cursor:move; touch-action:none;
 }
 #ed-reset, #fed-reset{width:100%; margin-top:10px; height:30px; font-size:13px;
@@ -1227,6 +1249,16 @@ body{
   .vconfirm .vc-err, .vconfirm .vc-aux{ font-size:12px; }
   .dropzone{ height:104px; }
   .dz-main{ font-size:13px; }
+
+  /* 검수·조정 도구단 — 여백을 조여 그만큼을 편집 캔버스에 넘긴다.
+     캔버스는 남는 높이를 받아 크기가 정해지므로, 여기서 아낀 만큼 사진이 커진다. */
+  .dock{ padding:10px 11px; }
+  .dock > h3{ margin:0 0 7px; }
+  .edfit{ margin-bottom:8px; }
+  .knobs{ gap:8px 9px; }
+  #ed-reset, #fed-reset{ height:27px; margin-top:7px; }
+  .tip{ margin-top:7px; font-size:12px; }
+  .ovbar{ margin:5px 0 2px; }
 }
 
 /* 짧은 화면에서 로고는 폭보다 **세로**를 먹는다 — 모자란 쪽이 세로다 */

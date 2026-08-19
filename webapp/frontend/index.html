@@ -111,7 +111,11 @@
               <h3 id="dock-title">슬롯을 고르세요<span class="saved" id="ed-saved"></span></h3>
               <!-- 사진을 고르면 이쪽, 노트 박스를 고르면 아래 dock-note 로 바뀐다 -->
               <div id="dock-photo">
-                <canvas id="ed-canvas" width="840" height="630"></canvas>
+                <!-- 캔버스를 감싸는 칸. dock 에서 남는 높이를 **이 칸이** 받고,
+                     캔버스는 그 높이에 맞춰 접힌다 (판 .board 와 같은 방식). -->
+                <div class="edfit" id="ed-fit">
+                  <canvas id="ed-canvas" width="840" height="630"></canvas>
+                </div>
                 <!-- 겹쳐보기 — 재진에서만 뜬다(기준영상이 있어야 한다) -->
                 <div class="ovbar" id="ov-bar" hidden>
                   <label class="ovsw">
@@ -121,7 +125,7 @@
                   <select id="ov-visit" class="ovsel"
                           title="어느 차수와 겹쳐 볼지 — 다섯 칸에 함께 적용됩니다"></select>
                   <span class="ovkey"><i class="r"></i>기준<i class="c"></i>현재</span>
-                  <span class="ovhint"><kbd>Tab</kbd> 직전 차수 대보기</span>
+                  <span class="ovhint"><kbd>Tab</kbd> 직전 차수 대보기<i>·</i><kbd>Space</kbd> 크게 보기</span>
                 </div>
                 <div class="knobs">
                   <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="v-angle">0.0°</span>
@@ -133,7 +137,7 @@
                      다시 보려면 이 hidden 속성만 지우면 된다. -->
                 <p class="readout" id="readout" hidden>PPT 기록값<br>—</p>
                 <button class="btn" id="ed-reset">cover-fit 초기화</button>
-                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율<br><b>1~5</b> 슬롯 · <b>Shift</b> 크게 · 자동 저장</p>
+                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율<br><b>1~5</b> 슬롯 · <b>Shift</b> 크게 움직이기 · <b>Space</b> 크게 보기 · 자동 저장</p>
               </div>
               <!-- 판 위의 노트 박스를 누르면 그 박스를 채우는 칸만 여기 뜬다 -->
               <div id="dock-note" hidden>

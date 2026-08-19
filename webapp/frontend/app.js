@@ -205,8 +205,7 @@ function toggleZoom(){
     cv.classList.add("zoom");
     boardEl.hidden = true;
   }else{
-    const dock = el("dock-photo");
-    dock.insertBefore(cv, dock.firstChild);
+    el("ed-fit").appendChild(cv);      // 제자리 = 캔버스를 감싸는 칸 안
     cv.classList.remove("zoom");
     boardEl.hidden = false;
   }
