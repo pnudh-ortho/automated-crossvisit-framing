@@ -146,7 +146,10 @@ async def _lifespan(_app: FastAPI):
     _log_framer()
     # 아이콘 이름이 바뀌었으면 바로가기를 수리한다. powershell 을 띄우는 일이라
     # 기동을 붙잡지 않게 옆으로 보낸다 — 서버가 뜨는 것과 아무 상관이 없다.
-    threading.Thread(target=_repair_shortcut_icon, daemon=True).start()
+    # **테스트에서는 띄우지 않는다**: 설정 파일에 쓰는 스레드라, 테스트가 경로를
+    # 바꿔치기했다 되돌리는 사이에 돌면 진짜 설정을 건드린다. 느리기도 하다.
+    if "pytest" not in sys.modules:
+        threading.Thread(target=_repair_shortcut_icon, daemon=True).start()
     stop = threading.Event()
     threading.Thread(target=_sweeper_loop, args=(stop,), daemon=True).start()
     yield
@@ -179,9 +182,16 @@ PROGRAM_DIR = BACKEND_DIR.parents[1]
 SETTINGS_FILE = PROGRAM_DIR / "settings.json"
 
 
-def _settings() -> dict:
+def _settings(path=None) -> dict:
+    """설정 전체. 고쳐 쓸 것이라면 **경로를 붙잡아 넘겨라**.
+
+    `SETTINGS_FILE` 은 모듈 전역이라 읽을 때와 쓸 때 각각 다시 참조된다. 그
+    사이에 값이 바뀌면 *A 에서 읽어 B 에 쓰는* 일이 생긴다 — 본편에서 실제로,
+    테스트가 이 전역을 임시 경로로 바꿔치기하는 동안 기동 스레드가 저장을 돌아
+    빈 dict 를 진짜 설정 파일에 덮어썼다(저장 위치·이름 양식이 통째로 날아갔다).
+    """
     try:
-        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        d = json.loads((path or SETTINGS_FILE).read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except Exception:                                   # noqa: BLE001
         return {}
@@ -194,12 +204,13 @@ def _setting(key: str, default=None):
 
 def _save_setting(key: str, value) -> None:
     """값 하나만 얹는다 — **있던 설정을 지우지 않는다.**"""
-    d = _settings()
+    path = SETTINGS_FILE                       # 읽은 그 파일에만 쓴다
+    d = _settings(path)
     d[key] = value
     try:
-        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                                 encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
     except OSError:
         pass
 
@@ -319,12 +330,13 @@ def _saved_roots() -> list[str]:
 
 def _write_roots(paths: list[str], current: str) -> None:
     """목록과 현재 위치를 저장한다. 다른 설정은 건드리지 않는다."""
-    d = _settings()
+    path = SETTINGS_FILE                       # 읽은 그 파일에만 쓴다
+    d = _settings(path)
     d["roots"] = [p for p in paths if p]
     d["root"] = current
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                             encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
 
 
 def _switch_root(p: Path) -> None:
@@ -1971,7 +1983,8 @@ def prefs_get():
 @app.post("/api/prefs")
 def prefs_set(req: PrefsReq):
     """개인화 설정. **`settings.json`(설치본 공용)** 에 둔다. 보낸 항목만 바꾼다."""
-    d = _settings()
+    path = SETTINGS_FILE                       # 읽은 그 파일에만 쓴다
+    d = _settings(path)
     if req.save_raw is not None:
         d["save_raw"] = bool(req.save_raw)
     if req.letterbox_color is not None:
@@ -2061,9 +2074,9 @@ def prefs_set(req: PrefsReq):
             if k in req.after_save:
                 cur[k] = bool(req.after_save[k])
         d["after_save"] = cur
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                             encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
     return _prefs_json()
 
 
