@@ -36,4 +36,5 @@ _update_backup_*/
 # 추적되는 .onnx 는 없다 — 가중치는 git 에 넣지 않는다.
 *.onnx
 .server.json
+.server.fastest.json
 .installed_tools

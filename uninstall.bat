@@ -108,8 +108,8 @@ set "DROP=%~3"
 set "TOOLS=%~4"
 
 REM -- desktop shortcut (both the plain and the OneDrive desktop)
-del /f /q "%USERPROFILE%\Desktop\CRoCs.lnk" 2>nul
-del /f /q "%USERPROFILE%\OneDrive\Desktop\CRoCs.lnk" 2>nul
+del /f /q "%USERPROFILE%\Desktop\CRoCs Fastest Lap.lnk" 2>nul
+del /f /q "%USERPROFILE%\OneDrive\Desktop\CRoCs Fastest Lap.lnk" 2>nul
 
 for %%T in (%TOOLS%) do (
   echo Removing %%T ...

@@ -118,8 +118,8 @@ _BAT = """@echo off
 REM Removes the program folder after the app has exited.
 setlocal
 timeout /t 2 /nobreak >nul
-del /f /q "%USERPROFILE%\\Desktop\\CRoCs.lnk" 2>nul
-del /f /q "%USERPROFILE%\\OneDrive\\Desktop\\CRoCs.lnk" 2>nul
+del /f /q "%USERPROFILE%\\Desktop\\CRoCs Fastest Lap.lnk" 2>nul
+del /f /q "%USERPROFILE%\\OneDrive\\Desktop\\CRoCs Fastest Lap.lnk" 2>nul
 {tools}{data}rmdir /s /q "{prog}"
 echo.
 echo Uninstall complete.
@@ -130,7 +130,7 @@ pause
 _SH = """#!/bin/bash
 # Removes the program folder after the app has exited.
 sleep 2
-rm -f "$HOME/Desktop/CRoCs.command"
+rm -f "$HOME/Desktop/CRoCs Fastest Lap.command"
 {tools}{data}rm -rf "{prog}"
 echo
 echo "Uninstall complete."

@@ -34,4 +34,7 @@ def _isolate_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "SESS_ROOT", sess, raising=False)
     monkeypatch.setattr(main, "LOG_FILE", tmp_path / "_audit_log.jsonl", raising=False)
     monkeypatch.setattr(main, "SETTINGS_FILE", tmp_path / "settings.json", raising=False)
+    # 확정이 '저장 후 폴더 열기'를 실행하면 테스트마다 탐색기가 뜨고, 임시
+    # 폴더는 곧 지워져 Windows 가 오류 창까지 띄운다 — 테스트에서는 막는다.
+    monkeypatch.setattr(main, "_open_folder", lambda path: None, raising=False)
     yield root

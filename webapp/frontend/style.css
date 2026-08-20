@@ -1282,3 +1282,140 @@ body{
        (min-width:901px) and (max-height:860px){
   .setup{ grid-template-columns:minmax(180px,210px) minmax(0,1fr); }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Fastest Lap — 업로드 바 · 두 드롭존 · 짝맞춤 2열 · 반전 버튼 · 저장 검토
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 업로드 상단 바: 가로로 길고 높이는 낮게 ─────────────────────────────── */
+.upbar{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  padding:10px 14px; margin-bottom:12px;
+}
+.upbar .rootbar{margin:0; flex:none;}
+.upfld{display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600;}
+.upfld input{
+  height:var(--ctl-h, 30px); padding:0 11px; font:inherit; min-width:180px;
+  border:1px solid var(--edge); border-radius:8px; background:var(--panel2); color:var(--ink);
+}
+.upchk{display:inline-flex; align-items:center; gap:6px; font-size:13px;
+  color:var(--ink2); cursor:pointer; white-space:nowrap;}
+#up-prefix{
+  height:var(--ctl-h, 30px); padding:0 11px; font:inherit; min-width:160px;
+  border:1px solid var(--edge); border-radius:8px; background:var(--panel2); color:var(--ink);
+}
+#up-prefix:disabled{opacity:.55;}
+#up-msg{font-size:12.5px; color:var(--warn);}
+
+/* ── 좌우 대형 드롭존 ────────────────────────────────────────────────────── */
+.upzones{
+  flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:12px;
+  margin-bottom:12px;
+}
+@media (max-width:900px){ .upzones{grid-template-columns:1fr;} }
+.upzone{display:flex; flex-direction:column; padding:12px 14px; min-height:0;}
+.upzone > h3{
+  margin:0 0 9px; font:700 13px/1 var(--f-ui); letter-spacing:.02em;
+  display:flex; align-items:baseline; gap:8px;
+}
+.upzone > h3 .aux{font:12.5px/1 var(--f-mono); color:var(--ink3); font-weight:400;}
+.upzone .dropzone{flex:1; min-height:180px;}
+.upzone .thumbs{flex-wrap:wrap; height:auto; align-content:flex-start;}
+.upzone .th{height:84px;}
+.upzone .th.add{
+  width:84px; display:flex; align-items:center; justify-content:center;
+  border:1px dashed var(--edge); border-radius:6px; background:none;
+  color:var(--ink3); font-size:22px; cursor:pointer;
+}
+.upzone[data-pool="ref"] .dropzone{border-style:dashed;}
+#setup-tip{min-height:1.4em;}
+.dz-sub + .dz-sub{margin-top:7px;}
+
+/* ── 짝맞춤: 상(기준 가로줄) — 점선 — 하(현재 가로줄) ────────────────────
+   화면(class="content")이 가로로 길므로 기준·현재를 위아래 두 줄로 깔고,
+   카테고리가 열이 되어 위아래로 짝이 맞는다. 초진은 아래 줄 하나뿐이다. */
+.pairhint{margin:0 0 10px; font-size:13px; color:var(--ink2);}
+.pairs{
+  flex:1; min-height:0; overflow:auto; display:grid;
+  grid-template-columns:repeat(6, minmax(150px, 1fr));
+  grid-template-rows:minmax(130px, 1fr) 30px minmax(130px, 1fr);
+  gap:0 10px; margin-bottom:10px;
+}
+.pairs.solo{grid-template-rows:1fr;}
+.pairs .bin{min-height:0;}
+.pairs .bin.face{grid-column:auto;}          /* 본편의 2열 특례를 끈다 */
+.pairs .bin-body.grid3{grid-template-columns:1fr 1fr;}
+.pairlink{
+  align-self:center; justify-self:center; text-align:center;
+  font:600 12px/1 var(--f-mono); color:var(--ink3);
+  padding:2px 8px; position:relative; white-space:nowrap;
+  background:var(--panel);
+}
+.pairlink::before{
+  content:""; position:absolute; left:50%; top:-14px; bottom:-14px;
+  border-left:2px dashed var(--edge); z-index:-1;
+}
+.pairlink.ok{color:var(--accent);}
+.pairlink.ok::before{border-left-color:var(--accent);}
+.pairlink.miss{color:var(--warn);}
+.pairlink.excl{color:var(--ink3);}
+.poolmark{
+  font:600 11px/1 var(--f-mono); color:var(--accent);
+  border:1px solid var(--accent); border-radius:4px; padding:1px 5px; margin-left:4px;
+}
+
+/* 상하반전 버튼 — 글자로 명시하되 **사진 위에 겹쳐** 얹는다. 카드 높이에
+   더하면 상자마다 세로 스크롤이 생긴다. 사진을 감싼 칸(.pcimg)에 묶어
+   카드가 아무리 작아져도 정확히 사진 하단에 붙는다. 누르면 서버가 픽셀을
+   뒤집어 다시 내려주므로 카드·검수·저장이 전부 같은 방향을 본다. */
+.pcimg{position:relative; min-height:0;}
+.flipbar{
+  position:absolute; left:0; right:0; bottom:0; padding:3px 0; cursor:pointer;
+  border:0; background:rgba(8,10,12,.55); color:#dfe7f0;
+  font:600 11.5px/1.5 var(--f-ui); letter-spacing:.02em;
+}
+.flipbar:hover{background:rgba(8,10,12,.75); color:#fff;}
+.flipbar.on{background:var(--accent); color:var(--on-accent);}
+.ph-card{position:relative;}
+
+/* ── 검수: FACE 탭 — 캔버스가 판 자리를 쓰므로 별도 규칙이 필요 없다.
+   (#ed-canvas.zoom 이 판 영역에 맞춰 그린다 — Space 크게 보기와 동일) */
+
+/* ── 저장 검토: 충돌 처리 선택 ───────────────────────────────────────────── */
+.finlist .aux.warn{color:var(--warn); font-weight:600;}
+.finseg{margin-left:8px; flex:none;}
+.finseg button{padding:2px 8px; font-size:12px;}
+
+/* ── 설정: 반전 그리드 · 별칭 그리드 ─────────────────────────────────────── */
+.flipgrid{border-collapse:collapse; margin:6px auto 2px;}
+.flipgrid th, .flipgrid td{
+  padding:4px 14px; text-align:center; font-size:13px;
+  border-bottom:1px solid var(--edge-soft);
+}
+.flipgrid td:first-child{text-align:left; font-family:var(--f-mono); font-size:12.5px;}
+.flipgrid input[type="checkbox"]{width:15px; height:15px;}
+.aliasgrid{display:grid; grid-template-columns:1fr 1fr; gap:6px 12px;}
+.aliasgrid label{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  font:12.5px/1 var(--f-mono); color:var(--ink2);
+}
+.aliasgrid input{
+  width:130px; padding:4px 8px; font:13px/1 var(--f-mono);
+  border:1px solid var(--edge); border-radius:6px; background:var(--panel2); color:var(--ink);
+}
+
+/* ── 정합 진행 표시 — 라벨별로 지금 무엇이 돌고 있는지 ─────────────────── */
+.regprog{
+  display:flex; gap:8px 16px; flex-wrap:wrap; justify-content:center;
+  margin-top:8px; font:12.5px/1.6 var(--f-mono); color:var(--ink2);
+}
+.regitem b{font-weight:700; color:var(--ink);}
+.regitem[data-kind="busy"]{color:var(--accent);}
+.regitem[data-kind="ok"]{color:var(--done);}
+.regitem[data-kind="warn"]{color:var(--warn);}
+
+/* 폴더 이름 없이 진행하려 하면 입력칸을 짚어 준다 */
+.upfld input.attn{border-color:var(--warn); box-shadow:0 0 0 2px var(--warn-soft);}
+/* 가로 트레이(OTHERS)의 카드는 높이 기준이다 — 사진 칸이 남는 높이를 받는다 */
+.bin-body.row .pcimg{height:calc(100% - 15px);}
+.bin-body.row .pcimg img{height:100%;}

@@ -24,7 +24,7 @@ OUT = Path(os.environ.get("TMPDIR", "/tmp")) / "shot_order_test"
 
 
 def _photo(pid, name, taken=None, seq=None):
-    p = M.Photo(pid, OUT / f"{pid}.jpg", 4000, 3000)
+    p = M.Photo(pid, OUT / f"{pid}.jpg", 4000, 3000, "cur")
     p.orig_name = name
     p.taken_at = taken
     p.exif_seq = seq

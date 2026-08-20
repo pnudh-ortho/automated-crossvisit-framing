@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CRoCs</title>
+<title>CRoCs Fastest Lap</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <!-- 저장된 테마를 렌더 전에 적용 — 새로고침 때 흰 화면이 번쩍이지 않게 -->
 <script>try{document.documentElement.dataset.theme=localStorage.getItem("crocs-theme")||"light";}catch(e){}</script>
@@ -13,25 +13,19 @@
 
 <!-- ══ 헤더 ══ -->
 <header class="head">
-  <span class="mark">CRoCs<span class="full"> - <b>C</b>rop &amp; <b>Ro</b>tation &amp; <b>C</b>la<b>s</b>sification</span></span>
-  <span class="sp"></span>
-  <!-- 기능 설명 영상 — 버튼처럼 보이지만 새 탭으로 나가는 링크다 -->
-  <a class="btn howto" id="btn-howto" target="_blank" rel="noopener"
-     href="https://drive.google.com/file/d/1yj7vNDRpuMNhYOqb7ddAmORKv4igaoe8/view?usp=sharing"
-     title="기능 설명 영상을 새 탭에서 엽니다">▶ 기능 설명 영상</a>
+  <span class="mark">CRoCs<span class="full"> - <b>C</b>rop &amp; <b>Ro</b>tation &amp; <b>C</b>la<b>s</b>sification <b>⚡Fastest Lap⚡</b></span></span>
   <span class="sp"></span>
   <span class="pchip" id="pchip" hidden></span>
   <button class="btn" id="btn-upd-check" title="새 버전이 있는지 지금 확인합니다">업데이트 확인</button>
   <button class="btn" id="btn-fb">피드백/요청사항/아이디어</button>
   <button class="btn" id="btn-log">업데이트 로그</button>
-  <button class="btn" id="btn-faq">F&amp;Q</button>
   <button class="btn" id="btn-set">⚙ 설정</button>
 </header>
 
 <!-- ══ 첫 실행 — 저장 위치 확인 ══ -->
 <dialog class="modal" id="dlg-first">
-  <h3 id="first-title">환자 자료를 저장할 위치</h3>
-  <p class="hint" id="first-sub" style="margin:10px 0 4px">여기에 환자 폴더와 이력 로그가 쌓입니다.</p>
+  <h3 id="first-title">사진을 저장할 위치</h3>
+  <p class="hint" id="first-sub" style="margin:10px 0 4px">여기에 저장 폴더와 이력 로그가 쌓입니다.</p>
   <div class="row" style="gap:8px">
     <input id="first-path" class="grow" readonly>
     <button class="btn" id="first-change">변경</button>
@@ -60,72 +54,96 @@
 
   <section class="content">
 
+    <!-- ── 1. 업로드 ─────────────────────────────────────────────────────── -->
     <div class="view on" data-view="setup">
-      <div class="toolbar">
+      <!-- 상단 가로 바: 저장 폴더 이름 + (선택) 사진 접두어 -->
+      <div class="upbar card">
         <div class="rootbar">
           <span class="eyebrow">저장 위치</span>
           <select class="ident rootsel" id="root-sel" title="저장 위치 고르기"></select>
           <button class="btn" id="btn-root" title="저장 위치 더하기">＋ 추가</button>
         </div>
-        <input class="find" id="find" autocomplete="off"
-               placeholder="폴더 이름 검색">
-        <select class="sort" id="sort" title="정렬">
-          <option value="new">최신순</option>
-          <option value="old">오래된순</option>
-          <option value="az">이름 오름차순</option>
-          <option value="za">이름 내림차순</option>
-        </select>
-        <button class="btn" id="btn-refresh" title="새로고침">↻</button>
-        <button class="btn primary" id="btn-new-pt">＋ 새 환자</button>
+        <label class="upfld">저장 폴더 이름
+          <input id="up-folder" autocomplete="off">
+        </label>
+        <label class="upchk" title="끄면 접두어는 폴더 이름과 같습니다">
+          <input type="checkbox" id="up-pfx-on"> 사진 접두어 직접 입력
+        </label>
+        <input id="up-prefix" autocomplete="off" placeholder="폴더 이름과 동일" disabled>
+        <span class="aux" id="up-msg"></span>
       </div>
-      <div class="setup">
-        <!-- 목록과 그 아래 예고 버튼. 버튼은 카드 밖에 둔다 — 목록을 다시 그릴 때
-             카드 안은 통째로 갈아끼워지므로 안에 두면 매번 사라진다. -->
-        <div class="pcol">
-          <div class="card plist" id="plist"></div>
-          <button class="btn wide soon" type="button" disabled
-                  title="준비 중입니다"><span class="soon-t">⚡Fastest Lap Mode⚡</span><span class="soon-d">8월말 예정</span></button>
+
+      <!-- 좌: 정합용 기준 사진 · 우: 현재 사진. 왼쪽이 비어 있으면 초진이다. -->
+      <div class="upzones">
+        <div class="card upzone" data-pool="ref">
+          <h3>정합용 기준 사진 <span class="aux">(재진용)</span>
+            <span class="aux" id="n-ref"></span></h3>
+          <div class="dropzone" id="dz-ref">
+            <div class="dz-empty" id="dz-ref-empty">
+              <p class="dz-main">정합용 기준 사진을 여기에 놓으세요</p>
+              <p class="dz-sub">비워두면 초진으로 진행합니다</p>
+              <p class="dz-sub">DRAG<i>·</i>CTRL+V<i>·</i><button id="pick-ref">BROWSE</button></p>
+            </div>
+            <div class="thumbs" id="thumbs-ref"></div>
+            <input type="file" id="file-ref" multiple accept="image/*" hidden>
+          </div>
         </div>
-        <div class="card detail" id="detail"></div>
+        <div class="card upzone" data-pool="cur">
+          <h3>현재 사진 <span class="aux">오늘 촬영한 사진</span>
+            <span class="aux" id="n-cur"></span></h3>
+          <div class="dropzone" id="dz-cur">
+            <div class="dz-empty" id="dz-cur-empty">
+              <p class="dz-main">현재 사진을 여기에 놓으세요</p>
+              <p class="dz-sub">DRAG<i>·</i>CTRL+V<i>·</i><button id="pick-cur">BROWSE</button></p>
+            </div>
+            <div class="thumbs" id="thumbs-cur"></div>
+            <input type="file" id="file-cur" multiple accept="image/*" hidden>
+          </div>
+        </div>
       </div>
+      <button class="btn primary wide" id="btn-go" disabled>자동 분류로 ▶</button>
+      <p class="tip" id="setup-tip"></p>
     </div>
 
+    <!-- ── 2. 자동 분류 · 짝맞춤 ─────────────────────────────────────────── -->
     <div class="view" data-view="pre">
       <div class="card grow">
         <div class="sec grow">
-          <h3 class="hd"><span class="hd-l">자동 분류 결과 <span class="vbadge" id="pre-visit" hidden></span></span><span class="aux"><span id="pre-msg"></span><span id="pre-n"></span></span></h3>
-          <div class="bins" id="bins"></div>
-          <div class="bin wide" id="bin-others" data-slot=""></div>
+          <h3 class="hd"><span class="hd-l">자동 분류 <span class="vbadge" id="pre-visit" hidden></span></span><span class="aux"><span id="pre-msg"></span><span id="pre-n"></span></span></h3>
+          <p class="pairhint" id="pair-hint" hidden>좌측 <b>기준</b> · 우측 <b>현재</b> —
+            드래그로 분류를 고치고, ↕ 버튼으로 상하 반전을 바꿉니다. 짝이 맞은 줄이 정합됩니다.</p>
+          <div class="pairs" id="pairs"></div>
+          <div class="bin wide" id="bin-others" data-slot="" data-pool="cur"></div>
+          <div class="bin wide" id="bin-others-ref" data-slot="" data-pool="ref" hidden></div>
           <button class="btn primary wide" id="btn-toproc" disabled>검수·조정으로 ▶</button>
+          <div class="regprog" id="reg-progress" hidden></div>
         </div>
       </div>
     </div>
 
+    <!-- ── 3. 검수·조정 ─────────────────────────────────────────────────── -->
     <div class="view" data-view="proc">
       <div class="card grow">
         <div class="sec grow">
-          <h3 class="hd"><span class="hd-l"><span class="tabs" id="proc-tabs" role="tablist"><button type="button" role="tab" data-tab="io" aria-selected="true">IntraOral</button><button type="button" role="tab" data-tab="face" aria-selected="false">TEMPLATE</button></span><span class="vbadge" id="proc-visit" hidden></span></span><div class="seg" id="seg"></div><div class="seg" id="face-seg" hidden></div></h3>
+          <h3 class="hd"><span class="hd-l"><span class="tabs" id="proc-tabs" role="tablist"></span><span class="vbadge" id="proc-visit" hidden></span></span><div class="seg" id="seg"></div></h3>
           <div class="pane work on" data-pane="io">
             <div class="board-wrap"><div class="board" id="board"></div></div>
             <div class="dock">
               <h3 id="dock-title">슬롯을 고르세요<span class="saved" id="ed-saved"></span></h3>
-              <!-- 사진을 고르면 이쪽, 노트 박스를 고르면 아래 dock-note 로 바뀐다 -->
               <div id="dock-photo">
-                <!-- 캔버스를 감싸는 칸. dock 에서 남는 높이를 **이 칸이** 받고,
-                     캔버스는 그 높이에 맞춰 접힌다 (판 .board 와 같은 방식). -->
+                <!-- 캔버스를 감싸는 칸. dock 에서 남는 높이를 이 칸이 받고,
+                     캔버스는 그 높이에 맞춰 접힌다. -->
                 <div class="edfit" id="ed-fit">
                   <canvas id="ed-canvas" width="840" height="630"></canvas>
                 </div>
-                <!-- 겹쳐보기 — 재진에서만 뜬다(기준영상이 있어야 한다) -->
+                <!-- 겹쳐보기 — 재진에서 기준 사진이 있는 슬롯만 뜬다 -->
                 <div class="ovbar" id="ov-bar" hidden>
                   <label class="ovsw">
                     <input type="checkbox" id="ov-on">
                     <span>기준 겹쳐보기</span>
                   </label>
-                  <select id="ov-visit" class="ovsel"
-                          title="어느 차수와 겹쳐 볼지 — 다섯 칸에 함께 적용됩니다"></select>
                   <span class="ovkey"><i class="r"></i>기준<i class="c"></i>현재</span>
-                  <span class="ovhint"><kbd>Tab</kbd> 직전 차수 대보기<i>·</i><kbd>Space</kbd> 크게 보기</span>
+                  <span class="ovhint"><kbd>Tab</kbd> 기준 대보기<i>·</i><kbd>Space</kbd> 크게 보기</span>
                 </div>
                 <div class="knobs">
                   <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="v-angle">0.0°</span>
@@ -133,59 +151,18 @@
                   <span>가로</span><input type="range" id="ed-tx" min="-200" max="200" value="0"><span class="v" id="v-tx">0</span>
                   <span>세로</span><input type="range" id="ed-ty" min="-200" max="200" value="0"><span class="v" id="v-ty">0</span>
                 </div>
-                <!-- PPT 기록값(rot/크기/오프셋) 디버그 표시. 값은 계속 갱신되므로
-                     다시 보려면 이 hidden 속성만 지우면 된다. -->
-                <p class="readout" id="readout" hidden>PPT 기록값<br>—</p>
                 <button class="btn" id="ed-reset">cover-fit 초기화</button>
                 <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율<br><b>1~5</b> 슬롯 · <b>Shift</b> 크게 움직이기 · <b>Space</b> 크게 보기 · 자동 저장</p>
-              </div>
-              <!-- 판 위의 노트 박스를 누르면 그 박스를 채우는 칸만 여기 뜬다 -->
-              <div id="dock-note" hidden>
-                <p class="dsub" id="nt-sub"></p>
-                <div class="nfields" id="nt-fields"></div>
-                <button class="btn" id="nt-reset">이 박스를 자동 입력으로 되돌리기</button>
-                <p class="tip">칸을 채우면 왼쪽 박스에 바로 반영됩니다<br>
-                  박스에 <b>직접 타이핑</b>해서 통째로 고쳐 쓸 수도 있습니다</p>
-                <button class="btn" id="nt-back">사진 편집으로 ◀</button>
               </div>
               <button class="btn primary wide" id="btn-tofin">저장 검토로 ▶</button>
               <p class="tip" id="tofin-note"></p>
             </div>
           </div>
-
-          <div class="pane work" data-pane="face">
-            <div class="board-wrap"><div class="fboard" id="face-board"></div></div>
-            <div class="dock">
-              <h3 id="face-dock-title">자리를 고르세요<span class="saved" id="face-saved"></span></h3>
-              <!-- 환자정보 장(사진 자리가 없는 장)에서는 이쪽으로 바뀐다 -->
-              <div id="face-dock-note" hidden>
-                <p class="dsub" id="fi-sub"></p>
-                <div class="nfields" id="fi-fields"></div>
-                <p class="tip">이름·병원 환자번호·교정과 환자번호는 이미 아는 값으로 채웁니다<br>
-                  비워 두면 그 줄은 양식의 안내 문구 그대로 남습니다</p>
-              </div>
-              <div id="face-dock-photo">
-              <canvas id="face-canvas" width="508" height="700"></canvas>
-              <div class="knobs">
-                <span>회전</span><input type="range" id="fed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="fv-angle">0.0°</span>
-                <span>배율</span><input type="range" id="fed-scale" min="50" max="200" value="100"><span class="v" id="fv-scale">100%</span>
-                <span>가로</span><input type="range" id="fed-tx" min="-200" max="200" value="0"><span class="v" id="fv-tx">0</span>
-                <span>세로</span><input type="range" id="fed-ty" min="-200" max="200" value="0"><span class="v" id="fv-ty">0</span>
-              </div>
-              <button class="btn" id="fed-reset">cover-fit 초기화</button>
-              <h3 class="sep">얼굴 사진<span class="aux" id="face-pool-n"></span>
-                <button type="button" class="minibtn" id="face-auto" title="촬영순 순서대로 자리를 다시 채웁니다">자동 배치</button></h3>
-              <div class="pool" id="face-pool"></div>
-              <div class="mirrornote" id="face-mirror"></div>
-              <p class="tip">자리를 누르면 오른쪽에서 조정합니다 · 드래그 이동 · 휠 배율<br><b>Q/E</b> 회전 · <b>A/D</b> 배율 · 사진을 누르면 켜진 자리에 들어갑니다</p>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
 
+    <!-- ── 4. 저장 ──────────────────────────────────────────────────────── -->
     <div class="view" data-view="fin">
       <div class="card grow"><div class="sec grow">
         <h3 class="hd"><span class="hd-l">저장 전 검토 <span class="vbadge" id="fin-visit" hidden></span></span></h3>
@@ -194,41 +171,22 @@
         </div>
         <p class="err" id="fin-err"></p>
         <button class="btn primary wide" id="btn-commit" disabled>확정 저장</button>
-        <p class="tip">확정하면 환자 폴더에 사진과 PPT가 한 번에 기록됩니다.<br>
-          중간에 실패하면 전부 되돌아갑니다(원자적 저장).</p>
+        <p class="tip">확정하면 저장 폴더에 사진이 한 번에 기록됩니다.<br>
+          중간에 실패하면 전부 되돌아갑니다(원자적 저장). 이미 있는 파일은 덮지 않고 번호를 붙입니다.</p>
       </div></div>
     </div>
 
   </section>
 </div>
 
-<!-- 새 환자 — 목록 위에 떠서, 취소하면 보던 화면이 그대로 남는다 -->
-<dialog class="modal" id="dlg-new">
-  <h3>새 환자</h3>
-  <p class="sub" id="new-rules"></p>
-  <div class="fields">
-    <label class="fld"><span>이름</span>
-      <input id="f-name" placeholder="김하늘" autocomplete="off"></label>
-    <label class="fld"><span>교정과 환자번호</span>
-      <input id="f-ortho" inputmode="numeric" autocomplete="off"></label>
-  </div>
-  <p class="preview" id="f-preview">만들어질 폴더 <b>—</b></p>
-  <p class="err" id="new-err"></p>
-  <menu>
-    <button class="btn" id="new-cancel">취소</button>
-    <button class="btn primary" id="new-ok">차수 A로 시작 ▶</button>
-  </menu>
-</dialog>
-
-<!-- 업데이트 로그 · F&Q — 내용은 /static/changelog.json · faq.json 에서 읽는다.
-     항목을 늘리려면 그 파일에 {"title","date","body"} 를 추가하면 된다. -->
+<!-- 업데이트 로그 — 내용은 /static/changelog.json 에서 읽는다. -->
 <dialog class="modal wide" id="dlg-doc">
   <h3 id="doc-title">—</h3>
   <div class="doclist" id="doc-list"></div>
   <menu><button class="btn" id="doc-close">닫기</button></menu>
 </dialog>
 
-<!-- 설정 — 저장 위치와 개인화를 한 곳에 -->
+<!-- 설정 — 전부 사용자 취향이다. PPT·라벨·패턴은 없다. -->
 <dialog class="modal wide" id="dlg-set">
   <h3>설정</h3>
   <div class="sec">
@@ -241,55 +199,80 @@
     </div>
     <div id="set-picker" hidden></div>
   </div>
+
   <div class="sec">
-    <details class="fold">
-    <summary>폴더·PPT 이름 양식 <small class="sub">— 사용법은 F&amp;Q 참고해주세요</small></summary>
-    <div class="seg" id="pat-kind" style="margin:2px 0 8px">
-      <button data-k="folder" aria-pressed="true">폴더</button>
-      <button data-k="ppt" aria-pressed="false">PPT 파일</button>
-    </div>
-    <p class="sub" id="pat-desc">등록된 형식 — 전부 인식에 쓰이고, ★ 첫 번째로 새 폴더를 만듭니다</p>
-    <div class="patsaved" id="pat-saved"></div>
-    <div class="patrow" id="pat-row"></div>
-    <div class="patpal" id="pat-pal"></div>
-    <p class="sub">예시: <b id="pat-ex">—</b></p>
-    <p class="sub" id="pat-msg"></p>
-    <div class="patlist" id="pat-list"></div>
-    <div class="row" style="gap:6px">
-      <button class="btn" id="pat-save">목록에 추가</button>
-      <button class="btn" id="pat-reset">기본만 남기기</button>
-    </div>
+    <details class="fold" open>
+    <summary>상하 반전 기본값</summary>
+    <p class="sub">입력되는 사진에 상하반전이 필요한 경우 체크해주세요
+      (e.g. 거울을 이용하여 상/하악 촬영)</p>
+    <table class="flipgrid" id="flip-grid"></table>
     </details>
   </div>
+
   <div class="sec">
     <details class="fold">
-    <summary>개인화 <small class="sub">— 테마 · 표기 · 저장 방식</small></summary>
+    <summary>파일 이름 <small class="sub">— 별칭 · 번호 규칙</small></summary>
     <div class="setrow">
-      <span>테마</span>
-      <div class="seg" id="set-theme">
-        <button data-t="light">라이트</button><button data-t="dark">다크</button>
+      <span>번호 붙이기</span>
+      <div class="seg" id="set-nummode">
+        <button data-m="multi_only">2장 이상일 때만</button><button data-m="always">항상</button>
       </div>
     </div>
     <div class="setrow">
-      <span>개월 표기</span>
-      <div class="seg" id="set-unit">
-        <button data-u="int">정수(반올림)</button><button data-u="half">0.5 단위</button>
+      <span>시작 번호</span>
+      <div class="seg" id="set-numstart">
+        <button data-s="1">1부터</button><button data-s="0">0부터</button>
       </div>
+    </div>
+    <div class="setrow">
+      <span class="settl">번호 구분자<small class="sub">별칭과 번호 사이 (기본 _)</small></span>
+      <input id="set-numsep" maxlength="3" style="width:60px">
     </div>
     <div class="setrow stack">
-      <span class="settl wrap">라벨 표기<small class="sub">새 PPT를 만들 때만 적용 —
-        기존 PPT에 이어 쓸 때는 그 PPT의 라벨 형식을 그대로 따릅니다</small></span>
-      <div class="seg" id="set-label">
-        <button data-f="tight">26.08.12 (초진 A)</button><button data-f="spaced">26. 08. 12. (초진 A)</button>
+      <span class="settl">카테고리 별칭<small class="sub">파일명에 들어가는 이름 — 병원 관행대로 바꿀 수 있습니다</small></span>
+      <div class="aliasgrid" id="alias-grid"></div>
+    </div>
+    <p class="sub">예시: <b id="name-preview">—</b></p>
+    </details>
+  </div>
+
+  <div class="sec">
+    <details class="fold">
+    <summary>출력 <small class="sub">— 해상도 · 형식 · 원본</small></summary>
+    <div class="setrow">
+      <span class="settl">해상도<small class="sub">px/cm — 기본 200 (8.4cm 창 = 1680px)</small></span>
+      <input type="number" id="set-ppcm" min="50" max="400" style="width:80px">
+    </div>
+    <div class="setrow">
+      <span>파일 형식</span>
+      <div class="seg" id="set-format">
+        <button data-f="jpg">JPG</button><button data-f="png">PNG</button>
       </div>
     </div>
-    <div class="setrow stack">
-      <span class="settl wrap">직전 차수 슬라이드 복사<small class="sub">직전 슬라이드의
-        선·화살표·텍스트 박스를 새 차수 슬라이드로 가져올지 정합니다. 사진과
-        날짜/차수/TxRxApp 상자는 이 설정과 무관하게 항상 복사됩니다</small></span>
-      <div class="seg" id="set-shapes">
-        <button data-c="none">복사 안 함</button><button data-c="lines">선만 복사</button><button data-c="all">전부 복사</button>
+    <div class="setrow">
+      <span class="settl">구내 저장 비율<small class="sub">다음 작업(세션)부터 적용 — 검수 창도 함께 바뀝니다</small></span>
+      <div class="seg" id="set-ioratio">
+        <button data-r="4:3">4:3</button><button data-r="3:2">3:2</button><button data-r="1:1">1:1</button>
       </div>
+    </div>
+    <div class="setrow">
+      <span class="settl">얼굴 저장 비율<small class="sub">세로 기준</small></span>
+      <div class="seg" id="set-faceratio">
+        <button data-r="3:4">3:4</button><button data-r="2:3">2:3</button><button data-r="1:1">1:1</button>
+      </div>
+    </div>
+    <div class="setrow">
+      <span class="settl">JPG 품질<small class="sub">60~100</small></span>
+      <input type="number" id="set-quality" min="60" max="100" style="width:80px">
+    </div>
+    <div class="setrow">
+      <span class="settl">상하반전 적용해 저장<small class="sub">끄면 검수 화면에서만 뒤집어 보고,
+        저장은 촬영된 방향(거울상) 그대로 합니다</small></span>
+      <input type="checkbox" id="set-flipsave">
+    </div>
+    <div class="setrow">
+      <span class="settl">여분 샷도 저장<small class="sub">같은 카테고리 2장째부터 — 검수 없이 자동 구도로 저장됩니다</small></span>
+      <input type="checkbox" id="set-extras">
     </div>
     <div class="setrow">
       <span class="settl">원본 저장<small class="sub">켜면 원본이 raw 폴더에 함께 남습니다</small></span>
@@ -302,13 +285,25 @@
         <button data-c="FFFFFF">흰색</button><button data-c="808080">회색</button><button data-c="000000">검은색</button>
       </div>
     </div>
+    </details>
+  </div>
+
+  <div class="sec">
+    <details class="fold">
+    <summary>저장 후 동작 · 테마</summary>
     <div class="setrow">
-      <span class="settl">새 노트 상자 글자 크기<small class="sub">복사해 온 상자는 원본 크기 유지 (pt)</small></span>
-      <span class="row" style="gap:4px">
-        <input type="number" class="nsz" id="nsz-soap" min="6" max="40" title="좌상단 s/p">
-        <input type="number" class="nsz" id="nsz-ll" min="6" max="40" title="좌하단">
-        <input type="number" class="nsz" id="nsz-next" min="6" max="40" title="우하단">
-      </span>
+      <span class="settl">저장 폴더 열기<small class="sub">확정하면 탐색기로 그 폴더를 엽니다</small></span>
+      <input type="checkbox" id="set-openfolder">
+    </div>
+    <div class="setrow">
+      <span class="settl">바로 다음 작업<small class="sub">저장이 끝나면 업로드 화면으로 자동 복귀</small></span>
+      <input type="checkbox" id="set-autonext">
+    </div>
+    <div class="setrow">
+      <span>테마</span>
+      <div class="seg" id="set-theme">
+        <button data-t="light">라이트</button><button data-t="dark">다크</button>
+      </div>
     </div>
     </details>
   </div>
@@ -329,7 +324,7 @@
     <div class="hint" id="uninst-inv"></div>
     <label class="row" style="margin-top:6px">
       <input type="checkbox" id="uninst-data">
-      <span>환자 자료도 함께 지웁니다 (되돌릴 수 없습니다)</span>
+      <span>저장된 사진 자료도 함께 지웁니다 (되돌릴 수 없습니다)</span>
     </label>
     <div id="uninst-tools-row" style="margin-top:6px" hidden></div>
     <div class="row" id="uninst-confirm" hidden style="margin-top:6px">
@@ -341,14 +336,6 @@
       <button class="btn" id="btn-uninstall-cancel">취소</button>
     </div>
   </div>
-</dialog>
-
-<!-- 재진 이력 — 차수가 늘어나도 상세 패널이 길어지지 않게 창으로 뺀다 -->
-<dialog class="modal" id="dlg-hist">
-  <h3>재진 이력</h3>
-  <p class="sub" id="hist-sub"></p>
-  <div class="histlist" id="hist-list"></div>
-  <menu><button class="btn" id="hist-close">닫기</button></menu>
 </dialog>
 
 <script src="/static/app.js"></script>

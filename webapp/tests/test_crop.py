@@ -141,24 +141,22 @@ if __name__ == "__main__":
 
 
 # ── 확정까지 통째로 ──────────────────────────────────────────────────────────
-def test_commit_inserts_photos_exactly_in_their_slots():
-    """구워 넣으면 도형이 슬롯과 정확히 같고 회전이 0이어야 한다 — 침범 0."""
+def test_commit_bakes_images_at_window_size():
+    """확정 결과는 창과 정확히 같은 비율·해상도의 이미지들뿐이어야 한다.
+
+    fastest_lap 에는 PPT 가 없다 — 산출물은 저장 폴더의 구운 사진이 전부다.
+    구운 파일의 크기가 창 × 출력 해상도와 다르면 검수 화면과 결과물이 어긋난다.
+    """
     import io
     import shutil
+    from PIL import Image
     from starlette.testclient import TestClient
     import main as M
-    import naming as N
-    import template as T
-    from coords import emu_to_cm
 
-    if not M.cfg.geometry.export_px_per_cm:
-        return
     client = TestClient(M.app)
-    ids = N.Identifiers("굽기검사", "111222888", "54326")
-    folder = N.folder_name(ids, M.cfg.naming.folder_pattern)
+    folder = "굽기검사"
     d = M.ROOT / folder
     shutil.rmtree(d, ignore_errors=True)
-    d.mkdir(parents=True)
     try:
         sid = client.post("/api/session", json={"folder": folder}).json()["session_id"]
         blob = cv2.imencode(".jpg", _checker(2400, 1800))[1].tobytes()
@@ -167,29 +165,30 @@ def test_commit_inserts_photos_exactly_in_their_slots():
         client.post(f"/api/photos/{sid}", files=files)
         client.post(f"/api/classify/{sid}")
 
-        # 합성 이미지라 분류기가 슬롯에 안 넣는다 — 여기서 보려는 것은 분류가
-        # 아니라 배치이므로 직접 꽂고, 확대·회전을 줘서 '삐져나올 조건'을 만든다.
+        # 합성 이미지라 분류기가 슬롯에 안 넣을 수 있다 — 여기서 보려는 것은
+        # 분류가 아니라 굽기이므로 직접 꽂고, 확대·회전을 줘서 조건을 만든다.
         s = M.SESSIONS[sid]
-        for slot, photo in zip(M.cfg.ppt.slot_names, s.photos):
+        for slot, photo in zip(M.SLOT_NAMES, s.photos):
             M._put(s, photo, slot, at=0)
             photo.editor = EditorState(dx_px=25, dy_px=-15, scale=1.79, angle_deg=7.0)
         assert len(s.slots) == 5, dict(s.slots)
-        assert client.post(f"/api/commit/{sid}?allow_missing=true").status_code == 200
+        r = client.post(f"/api/commit/{sid}", json={"overwrite": []})
+        assert r.status_code == 200, r.text
+        saved = r.json()["files"]
+        assert len(saved) == 5, saved
 
-        prs = T.load_presentation(d / N.ppt_filename(ids, M.cfg.naming.ppt_pattern))
-        import case_deck as CD
-        cross = prs.slides[CD.cross_slide_index(prs)] if M.CASE_ANCHORS else prs.slides[0]
-        pics = {sh.name: sh for sh in cross.shapes
-                if sh.name.startswith(M.W.PHOTO_NAME_PREFIX)}
-        assert pics, "사진이 하나도 안 들어갔다"
-        for name, sh in pics.items():
-            slot = name[len(M.W.PHOTO_NAME_PREFIX):]
-            win = s.slot_windows[slot]
-            assert abs(emu_to_cm(sh.left) - win.x) < 1e-2, (name, emu_to_cm(sh.left))
-            assert abs(emu_to_cm(sh.top) - win.y) < 1e-2, (name, emu_to_cm(sh.top))
-            assert abs(emu_to_cm(sh.width) - win.w) < 1e-2, (name, emu_to_cm(sh.width))
-            assert abs(emu_to_cm(sh.height) - win.h) < 1e-2, (name, emu_to_cm(sh.height))
-            assert not sh.rotation, (name, sh.rotation)
-        print(f"PASS 확정 결과: 사진 {len(pics)}장 모두 슬롯과 정확히 일치, 회전 0")
+        outp = M._output_prefs()
+        for name in saved:
+            p = d / name
+            assert p.exists(), name
+            assert p.suffix != ".pptx"
+            with Image.open(p) as im:
+                w, h = im.size
+            win = M.SLOT_WINDOWS[M.cfg.slot_by_class[
+                next(c for c, a in M._naming_prefs()["aliases"].items() if a in name)]]
+            assert abs(w - win.w * outp["px_per_cm"]) <= 1, (name, w)
+            assert abs(h - win.h * outp["px_per_cm"]) <= 1, (name, h)
+        assert not list(d.glob("*.pptx")), "PPT 가 생겼다 — fastest_lap 위반"
+        print(f"PASS 확정 결과: 사진 {len(saved)}장 전부 창 크기로 구워짐, PPT 없음")
     finally:
         shutil.rmtree(d, ignore_errors=True)

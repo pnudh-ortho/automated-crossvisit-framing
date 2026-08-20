@@ -67,9 +67,8 @@ def _upload(c, sid, n=len(CLASSES)):
 @pytest.fixture
 def sess(_isolate_paths):
     with TestClient(main.app) as c:
-        sid = c.post("/api/session/first",
-                     json={"name": NAME, "hospital_id": HOSP,
-                           "ortho_id": ORTHO}).json()["session_id"]
+        sid = c.post("/api/session",
+                     json={"folder": NAME}).json()["session_id"]
         assert _upload(c, sid).status_code == 200
         assert c.post(f"/api/classify/{sid}").status_code == 200
         s = main.get_session(sid)
@@ -112,7 +111,7 @@ def test_좌우를_고치면_그_두_자리만_다시_돈다(sess):
 
     done = c.post(f"/api/register/{sid}", json={}).json()["done"]
     assert set(done) == {"SLOT_LEFT", "SLOT_RIGHT"}, done
-    assert s.framed["SLOT_LEFT"] == right and s.framed["SLOT_RIGHT"] == left
+    assert s.framed["SLOT_LEFT"][0] == right and s.framed["SLOT_RIGHT"][0] == left
 
 
 def test_나중에_배정된_사진도_계산된다(sess):
@@ -133,9 +132,8 @@ def test_나중에_배정된_사진도_계산된다(sess):
 def test_한_방_경로는_그대로_둘_다_한다(_isolate_paths):
     """`/api/upload` 는 API 테스트·외부 자동화용이라 고칠 사람이 없다."""
     with TestClient(main.app) as c:
-        sid = c.post("/api/session/first",
-                     json={"name": NAME, "hospital_id": HOSP,
-                           "ortho_id": "24681"}).json()["session_id"]
+        sid = c.post("/api/session",
+                     json={"folder": NAME + "2"}).json()["session_id"]
         r = c.post(f"/api/upload/{sid}",
                    files=[("files", (f"{i}.jpg", io.BytesIO(_jpg(i)), "image/jpeg"))
                           for i in range(len(CLASSES))])
@@ -144,16 +142,16 @@ def test_한_방_경로는_그대로_둘_다_한다(_isolate_paths):
         assert set(s.framed) == set(SLOTS) == set(s.slots)
 
 
-def test_겹쳐볼_수_있는_차수_목록(sess, monkeypatch):
+def test_겹쳐볼_수_있는_기준_목록(sess, monkeypatch):
     """초진에는 기준이 없다 — 화면은 이 목록이 비면 토글을 감춘다."""
     c, sid, s = sess
     assert c.get(f"/api/references/{sid}").json() == {}, "초진에 기준영상이 있다"
 
     ref = np.full((630, 840, 3), 60, np.uint8)
-    s.references["SLOT_FRONT"] = {"A": ref, "B": ref}
-    assert c.get(f"/api/references/{sid}").json() == {"SLOT_FRONT": ["A", "B"]}
+    s.references["SLOT_FRONT"] = ref
+    assert c.get(f"/api/references/{sid}").json() == {"SLOT_FRONT": True}
 
-    r = c.get(f"/api/reference/{sid}/SLOT_FRONT", params={"visit": "A"})
+    r = c.get(f"/api/reference/{sid}/SLOT_FRONT")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
     img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
     assert img.shape[:2] == (630, 840)

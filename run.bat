@@ -21,9 +21,9 @@ REM -- block into memory before running it, so the "exit /b" below is already
 REM -- buffered and is not re-read from the rewritten file when the copy ends.
 if not defined CROCS_HOME (
   set "CROCS_HOME=%~dp0."
-  copy /y "%~f0" "%TEMP%\crocs_run.bat" >nul 2>&1
-  if exist "%TEMP%\crocs_run.bat" (
-    call "%TEMP%\crocs_run.bat"
+  copy /y "%~f0" "%TEMP%\crocs_fastest_run.bat" >nul 2>&1
+  if exist "%TEMP%\crocs_fastest_run.bat" (
+    call "%TEMP%\crocs_fastest_run.bat"
     exit /b
   )
 )

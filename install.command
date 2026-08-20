@@ -8,7 +8,8 @@
 # ============================================================
 set -u
 REPO="https://github.com/pnudh-ortho/automated-crossvisit-framing.git"
-NAME="automated-crossvisit-framing"
+BRANCH="fastest_lap"
+NAME="crocs-fastest-lap"
 
 echo "==============================================="
 echo "  교정과 사진 자동화 - 설치 (macOS)"
@@ -79,7 +80,7 @@ elif [ -e "$DEST" ]; then
   exit 1
 else
   echo "[3/4] 내려받는 중..."
-  git clone --depth 1 "$REPO" "$DEST" \
+  git clone --depth 1 -b "$BRANCH" "$REPO" "$DEST" \
     || { echo "[오류] 내려받기 실패 — 인터넷 연결을 확인하세요."; exit 1; }
 fi
 
@@ -98,12 +99,12 @@ fi
   || { echo "[오류] 의존성 설치 실패 — 인터넷 연결을 확인하세요."; exit 1; }
 
 # ── 바탕화면 바로가기 (선택) ────────────────────────────────────
-read -r -p "바탕화면에 CRoCs 바로가기를 만들까요? (Y/n): " MK
+read -r -p "바탕화면에 CRoCs Fastest Lap 바로가기를 만들까요? (Y/n): " MK
 case "${MK:-Y}" in
   n|N) : ;;
   *) if [ -d "$HOME/Desktop" ]; then
-       ln -sf "$DEST/run.command" "$HOME/Desktop/CRoCs.command"
-       echo "      바탕화면에 CRoCs.command 를 만들었습니다."
+       ln -sf "$DEST/run.command" "$HOME/Desktop/CRoCs Fastest Lap.command"
+       echo "      바탕화면에 CRoCs Fastest Lap.command 를 만들었습니다."
      fi ;;
 esac
 
@@ -116,7 +117,7 @@ echo
 echo "  다음 순서:"
 echo "    1. 안내받은 드라이브에서 모델 파일(약 400MB)을 받아"
 echo "       $DEST/models 폴더에 넣으세요"
-echo "    2. run.command (또는 바탕화면의 CRoCs) 를 더블클릭하세요"
+echo "    2. run.command (또는 바탕화면의 CRoCs Fastest Lap) 를 더블클릭하세요"
 echo
 read -r -p "models 폴더를 지금 열까요? (Y/n): " OP
 case "${OP:-Y}" in

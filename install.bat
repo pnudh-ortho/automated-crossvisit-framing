@@ -17,7 +17,8 @@ REM ---------------------------------------------------------------
 REM /r means this run was auto-restarted once to pick up a fresh PATH.
 set "ACF_RESTARTED=%~1"
 set "REPO=https://github.com/pnudh-ortho/automated-crossvisit-framing.git"
-set "NAME=automated-crossvisit-framing"
+set "BRANCH=fastest_lap"
+set "NAME=crocs-fastest-lap"
 
 echo ===============================================
 echo   Ortho photo automation - installer
@@ -119,7 +120,7 @@ if exist "%DEST%" (
 )
 
 echo       Downloading...
-git clone --depth 1 "%REPO%" "%DEST%"
+git clone --depth 1 -b %BRANCH% "%REPO%" "%DEST%"
 if errorlevel 1 (
   echo.
   echo [error] Download failed.  Check your internet connection.
@@ -162,9 +163,9 @@ if errorlevel 1 (
 popd
 
 REM -- desktop shortcut (optional) ----------------------------------
-set /p MKSC="Create a desktop shortcut (CRoCs)? (Y/n): "
+set /p MKSC="Create a desktop shortcut (CRoCs Fastest Lap)? (Y/n): "
 if /i "%MKSC%"=="n" goto noshortcut
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $sh=New-Object -ComObject WScript.Shell; $d=$sh.SpecialFolders.Item('Desktop'); if(-not $d){ $d=Join-Path $env:USERPROFILE 'Desktop' }; $s=$sh.CreateShortcut((Join-Path $d 'CRoCs.lnk')); $s.TargetPath='%DEST%\run.bat'; $s.WorkingDirectory='%DEST%'; $s.IconLocation='%DEST%\assets\crocs-2.ico,0'; $s.Save(); Write-Host ('       Shortcut created: ' + $d) } catch { Write-Host ('       Shortcut failed: ' + $_.Exception.Message); Write-Host '       You can also create it later from the app: Settings' }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $sh=New-Object -ComObject WScript.Shell; $d=$sh.SpecialFolders.Item('Desktop'); if(-not $d){ $d=Join-Path $env:USERPROFILE 'Desktop' }; $s=$sh.CreateShortcut((Join-Path $d 'CRoCs Fastest Lap.lnk')); $s.TargetPath='%DEST%\run.bat'; $s.WorkingDirectory='%DEST%'; $s.IconLocation='%DEST%\assets\crocs-2.ico,0'; $s.Save(); Write-Host ('       Shortcut created: ' + $d) } catch { Write-Host ('       Shortcut failed: ' + $_.Exception.Message); Write-Host '       You can also create it later from the app: Settings' }"
 :noshortcut
 
 echo.
@@ -179,7 +180,7 @@ echo     1. Put the model and template files (about 400 MB) into
 echo          %DEST%\models
 echo        The app tells you which files are missing.
 echo     2. Run  %DEST%\run.bat
-echo        (or the CRoCs desktop shortcut, if you created it)
+echo        (or the CRoCs Fastest Lap desktop shortcut, if you created it)
 echo.
 set /p OPENIT="Open the models folder now? (Y/n): "
 if /i not "%OPENIT%"=="n" start "" "%DEST%\models"

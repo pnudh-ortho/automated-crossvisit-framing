@@ -12,7 +12,7 @@ cd "$(dirname "$0")" || exit 1
 # 임시 폴더의 사본은 업데이트가 건드리지 않으므로 위치가 끝까지 유효하다.
 if [ -z "$CROCS_HOME" ]; then
   export CROCS_HOME="$PWD"
-  _copy="${TMPDIR:-/tmp}/crocs_run.command"
+  _copy="${TMPDIR:-/tmp}/crocs_fastest_run.command"
   if cp "$0" "$_copy" 2>/dev/null; then
     exec bash "$_copy" "$@"      # exec — 원본으로 돌아오지 않는다
   fi
