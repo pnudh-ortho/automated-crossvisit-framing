@@ -126,9 +126,8 @@ def _layout_from_ppt(prs, slide_no: int | None = None) -> dict[str, WindowCm]:
     return {**SLOT_WINDOWS, **found}
 
 
-def _estimate_slot_pics(slide, slide_ctr: tuple[float, float],
-                        shapes=None) -> dict[str, object]:
-    """수제 십자뷰(가로 8cm 이상 사진 5장)에서 슬롯 → 그 자리의 사진 도형.
+def _estimate_slot_windows(slide, slide_ctr: tuple[float, float]) -> dict[str, WindowCm]:
+    """수제 십자뷰(가로 8cm 이상 사진 5장)에서 슬롯 창 = 각 사진의 bbox.
 
     무게중심에 가장 가까운 사진이 정면, 나머지는 정면 기준 상/하/좌/우 —
     ppt_reader 의 기준영상 추정과 같은 규칙이라 두 결과가 어긋나지 않는다.
@@ -136,11 +135,7 @@ def _estimate_slot_pics(slide, slide_ctr: tuple[float, float],
     # 문턱은 **장부와 같은 값**이어야 한다(Rd.CROSS_MIN_W_CM). 여기만 따로 8.0 을
     # 들고 있어서, 7.9cm 로 놓인 덱이 차수로는 세어지는데 레이아웃은 안 물려받는
     # 어중간한 상태가 됐다 — 사진이 덱보다 크게 들어갔다.
-    # `shapes` 를 받으면 그 목록을 쓴다 — 호출부가 같은 도형 프록시를 계속 들고
-    # 있어야 아래의 동일성 비교(id)가 성립한다. lxml 프록시는 참조가 끊기면
-    # 회수되고 다시 훑을 때 **다른 id** 로 살아난다.
-    src = shapes if shapes is not None else list(slide.shapes)
-    pics = [sh for sh in src
+    pics = [sh for sh in slide.shapes
             if getattr(sh, "shape_type", None) == 13
             and emu_to_cm(sh.width) >= Rd.CROSS_MIN_W_CM]
     if len(pics) < 5:
@@ -161,52 +156,9 @@ def _estimate_slot_pics(slide, slide_ctr: tuple[float, float],
         d2 = dx * dx + dy * dy
         if slot not in picked or d2 < picked[slot][1]:
             picked[slot] = (k, d2)
-    return {slot: pics[k] for slot, (k, _d) in picked.items()}
-
-
-def _estimate_slot_windows(slide, slide_ctr: tuple[float, float]) -> dict[str, WindowCm]:
-    """수제 십자뷰에서 슬롯 창 = 그 자리에 놓인 사진의 bbox."""
-    return {slot: WindowCm(x=emu_to_cm(sh.left), y=emu_to_cm(sh.top),
-                           w=emu_to_cm(sh.width), h=emu_to_cm(sh.height))
-            for slot, sh in _estimate_slot_pics(slide, slide_ctr).items()}
-
-
-def _slide_slot_z_order(slide, slide_ctr: tuple[float, float]) -> list[str]:
-    """직전 차수 슬라이드에서 슬롯 사진이 **그려지는 순서** (아래 → 위).
-
-    수제 덱의 십자뷰는 사진끼리 조금씩 겹친다 — 실측 덱 대부분이 상악과 정면이
-    1.6mm 가량 포개져 있었다. 그 겹침에서 어느 사진이 위로 오는지는 사람이 정한
-    것이고, 새 차수만 다른 순서로 쌓으면 **같은 덱 안에서 겹침 방향이 갈린다**
-    (앱은 slot_names 순으로 넣어 상악이 맨 위였는데, 사람이 만든 장은 정면이 맨
-    위였다). 그래서 레이아웃·기준영상과 마찬가지로 이 순서도 물려받는다.
-
-    앱이 쓴 장은 도형 이름(PHOTO_SLOT_*)이 진실이고, 수제 장은 자리로 가른다.
-    다섯 자리를 다 못 가리면 빈 목록 — 호출측이 종전 순서를 그대로 쓴다.
-    """
-    # 한 번만 훑고 그 목록을 끝까지 들고 간다 (프록시 동일성 유지)
-    shapes = list(slide.shapes)
-    named: dict[int, str] = {}
-    for sh in shapes:
-        nm = str(getattr(sh, "name", ""))
-        if nm.startswith(W.PHOTO_NAME_PREFIX):
-            slot = nm[len(W.PHOTO_NAME_PREFIX):]
-            if slot in cfg.ppt.slot_names:
-                named[id(sh._element)] = slot
-    if len(named) >= len(cfg.ppt.slot_names):
-        by_el = named
-    else:
-        got = _estimate_slot_pics(slide, slide_ctr, shapes)
-        if len(got) < len(cfg.ppt.slot_names):
-            return []
-        by_el = {id(sh._element): slot for slot, sh in got.items()}
-    # shapes 순회 = spTree 순서 = 그리는 순서(앞이 아래)
-    order: list[str] = []
-    for sh in shapes:
-        slot = by_el.get(id(sh._element))
-        if slot and slot not in order:
-            order.append(slot)
-    return order
-
+    return {slot: WindowCm(x=emu_to_cm(pics[k].left), y=emu_to_cm(pics[k].top),
+                           w=emu_to_cm(pics[k].width), h=emu_to_cm(pics[k].height))
+            for slot, (k, _d) in picked.items()}
 
 def _case_deck_ready() -> bool:
     """케이스 양식을 쓸 수 있는가. 설정이 꺼져 있거나 파일이 없으면 종전 방식."""
@@ -1042,6 +994,10 @@ def _write_visit_label(slide, text: str, style: dict | None = None,
             return
 
 
+# 십자뷰에서 맨 위로 올릴 자리. 수제 덱은 사진끼리 조금씩 겹치는데, 그 겹침에서
+# 정면이 가려지면 십자뷰의 중심이 상하는 것이라 정면을 위에 둔다.
+Z_TOP_SLOT = "SLOT_FRONT"
+
 PPC = cfg.geometry.render_px_per_cm
 
 
@@ -1430,9 +1386,6 @@ class Session:
         self.visit_dates: list[dict] = []
         # 직전 차수 슬라이드에 그려져 있던 선 — 검수 판에 그대로 겹쳐 보여준다
         self.prev_lines: list[dict] = []
-        # 직전 차수 슬라이드의 사진 z-순서(아래→위). 겹치는 수제 덱에서 새 장이
-        # 반대로 쌓이지 않게 한다. 비어 있으면 종전대로 slot_names 순.
-        self.slot_z: list[str] = []
         # 사람이 고른 기준일. 안 고르면 이력의 최신값이 쓰인다.
         self.period_start: dict[str, str] = {}
         # "이전 차수 값 그대로" — 개월을 다시 안 세고 직전 줄을 그대로 쓴다.
@@ -2456,10 +2409,6 @@ def session_open(req: OpenReq):
         # 따라오기 때문이다. 레이아웃과 **같은 장**이다.
         if src_no is not None:
             s.prev_lines = _slide_lines(prs, [src_no]).get(src_no, [])
-            # 겹침에서 어느 사진이 위로 오는지도 그 장에서 물려받는다
-            s.slot_z = _slide_slot_z_order(
-                prs.slides[src_no - 1],
-                (s.slide_cm[0] / 2, s.slide_cm[1] / 2))
     elif s.visit == "A":
         # 오늘이 초진이다 — 경과 개월은 0.
         s.first_date = datetime.now().strftime(cfg.ppt.info_date_format)
@@ -3546,14 +3495,13 @@ def commit(sid: str, allow_missing: bool = False):
             # 2) 구내 슬롯 삽입 — 상자의 대표(0번)만 슬라이드에 들어간다
             #    파일명은 전부 _build_plan() 이 정한 것을 쓴다(미리보기와 동일 보장).
             # 넣는 순서가 곧 z-순서다 — insert_photo 가 매번 send_to_back 하므로
-            # **먼저 넣은 것이 맨 위**로 간다. 직전 차수에서 위에 있던 자리부터
-            # 넣어 그 덱의 겹침 방향을 그대로 잇는다. 물려받은 것이 없으면
-            # 종전대로 slot_names 순이다(겹치지 않는 덱은 어느 쪽이든 같다).
-            slot_entries = pl_plan["slots"]
-            if s.slot_z:
-                z = {slot: i for i, slot in enumerate(s.slot_z)}   # 아래 → 위
-                slot_entries = sorted(slot_entries,
-                                      key=lambda e: -z.get(e["slot"], -1))
+            # **먼저 넣은 것이 맨 위**로 간다. 정면을 맨 먼저 넣어 위로 올린다:
+            # 수제 십자뷰는 사진끼리 조금씩 포개지는데(실측 덱 대부분이 상악과
+            # 정면이 1.6mm), 그 겹침에서 가려지면 안 되는 것은 정면이다.
+            # 나머지는 종전대로 slot_names 순이고, 겹치지 않는 덱은 어느 쪽이든
+            # 결과가 같다.
+            slot_entries = sorted(pl_plan["slots"],
+                                  key=lambda e: e["slot"] != Z_TOP_SLOT)
             for entry in slot_entries:
                 if entry["empty"]:
                     continue
