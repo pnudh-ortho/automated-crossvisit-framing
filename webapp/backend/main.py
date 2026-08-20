@@ -1008,7 +1008,10 @@ async def _lifespan(_app: FastAPI):
     _apply_note_sizes()                        # 설정된 노트 글자 크기 반영
     # 아이콘 이름이 바뀌었으면 바로가기를 수리한다. powershell 을 띄우는 일이라
     # 기동을 붙잡지 않게 옆으로 보낸다 — 서버가 뜨는 것과 아무 상관이 없다.
-    threading.Thread(target=_repair_shortcut_icon, daemon=True).start()
+    # **테스트에서는 띄우지 않는다**: 설정 파일에 쓰는 스레드라, 테스트가 경로를
+    # 바꿔치기했다 되돌리는 사이에 돌면 진짜 설정을 건드린다. 느리기도 하다.
+    if "pytest" not in sys.modules:
+        threading.Thread(target=_repair_shortcut_icon, daemon=True).start()
     stop = threading.Event()
     threading.Thread(target=_sweeper_loop, args=(stop,), daemon=True).start()
     yield
@@ -1135,17 +1138,23 @@ def _save_setting(key: str, value) -> None:
     예전에 저장 위치를 통째 덮어써서 이름 양식·개인화가 전부 날아간 적이 있다.
     읽고, 고칠 항목만 바꾸고, 다시 쓴다.
     """
+    # **경로를 한 번만 붙잡는다.** SETTINGS_FILE 은 모듈 전역이라 읽을 때와 쓸 때
+    # 각각 다시 참조되는데, 그 사이에 값이 바뀌면 *A 에서 읽어 B 에 쓰는* 일이
+    # 생긴다. 실제로 테스트가 이 전역을 임시 경로로 바꿔치기하는 동안 기동
+    # 스레드가 저장을 돌아, 빈 dict 를 진짜 설정 파일에 덮어써 저장 위치와 이름
+    # 양식이 통째로 날아갔다.
+    path = SETTINGS_FILE
     try:
-        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        d = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(d, dict):
             d = {}
     except Exception:                                   # noqa: BLE001
         d = {}
     d[key] = value
     try:
-        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                                 encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
     except OSError:
         pass
 
@@ -1194,17 +1203,18 @@ def _saved_roots() -> list[str]:
 
 def _write_roots(paths: list[str], current: str) -> None:
     """목록과 현재 위치를 저장한다. 다른 설정은 건드리지 않는다."""
+    path = SETTINGS_FILE                  # 읽은 그 파일에만 쓴다(_save_setting 주석)
     try:
-        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        d = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(d, dict):
             d = {}
     except Exception:                                   # noqa: BLE001
         d = {}
     d["roots"] = [p for p in paths if p]
     d["root"] = current
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                             encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
 
 
 def _switch_root(p: Path) -> None:
@@ -4095,8 +4105,9 @@ def _remembered_ppt(folder: str) -> str:
 
 def _remember_ppt(folder: str, rel: str) -> None:
     """확정한 뒤 그 파일을 기억해 둔다 — 다음에도 같은 덱으로 이어진다."""
+    path = SETTINGS_FILE                  # 읽은 그 파일에만 쓴다(_save_setting 주석)
     try:
-        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        d = json.loads(path.read_text(encoding="utf-8"))
     except Exception:                                   # noqa: BLE001
         d = {}
     folder, rel = N.nfc(folder), N.nfc(rel)
@@ -4108,9 +4119,9 @@ def _remember_ppt(folder: str, rel: str) -> None:
     choice[folder] = rel
     d["ppt_choice"] = choice
     try:
-        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                                 encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
     except OSError:
         pass
 
@@ -4248,8 +4259,9 @@ def prefs_set(req: PrefsReq):
     """
     if req.months_unit is not None and req.months_unit not in ("int", "half"):
         raise HTTPException(400, "int 또는 half")
+    path = SETTINGS_FILE                  # 읽은 그 파일에만 쓴다(_save_setting 주석)
     try:
-        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        d = json.loads(path.read_text(encoding="utf-8"))
     except Exception:                                   # noqa: BLE001
         d = {}
     if req.months_unit is not None:
@@ -4343,8 +4355,8 @@ def prefs_set(req: PrefsReq):
         if req.copy_shapes not in ("none", "lines", "all"):
             raise HTTPException(400, "none · lines · all 중 하나")
         d["copy_shapes"] = req.copy_shapes
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
     _apply_note_sizes()                        # 노트 글자 크기도 즉시 반영
     return _prefs_json()
 
