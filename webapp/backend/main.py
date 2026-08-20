@@ -1011,7 +1011,7 @@ async def _stage_photos(s: "Session", files: list[UploadFile],
 
 
 def _prewarm_ref(s: "Session", photo: Photo) -> None:
-    """기준 사진 한 장을 **미리** 데운다 — 분류·프레이밍·세그멘테이션 캐시.
+    """기준 사진 한 장을 **미리** 데운다 — 분류·세그멘테이션 캐시.
 
     사용자가 나머지 사진을 올리고 분류를 검수하는 동안 뒤에서 돌아, 정합 버튼을
     눌렀을 때 기준 쪽 무거운 계산(291MB 분할 모델)이 이미 끝나 있게 한다.
@@ -1036,8 +1036,9 @@ def _prewarm_ref(s: "Session", photo: Photo) -> None:
             return
         with s.lock:
             _apply_default_flip(s, photo)
-        _auto_frame(s, photo, s.slot_windows[slot], bgr=arr)
-        img = Cr.render_window(arr, s.slot_windows[slot], photo.editor, photo.flip,
+        # _ref_bake 와 **똑같이** 굽는다 — 픽셀이 한 톨이라도 다르면 이미지
+        # 해시가 달라져 캐시가 안 맞고, 데운 보람이 없어진다.
+        img = Cr.render_window(arr, s.slot_windows[slot], EditorState(), photo.flip,
                                PPC, PPC, Cr.hex_to_bgr(_letterbox_color()))
         Reg.centers(img, use_gate=True)  # 해시 키 캐시 — 정합 때 그대로 적중
     except Exception as e:                                        # noqa: BLE001
@@ -1285,10 +1286,21 @@ def _drop_eff_cache(s: "Session", photo: Photo) -> None:
 
 # ── 정합 기준영상 — 기준 사진을 창에 구워 낸다 ────────────────────────────────
 def _ref_bake(s: "Session", slot: str) -> np.ndarray | None:
-    """슬롯의 기준 사진 대표를 프레이밍 모델로 창(PPC 해상도)에 구워 낸다.
+    """슬롯의 기준 사진 대표를 **있는 그대로** 창(PPC 해상도)에 앉힌다.
 
     이 결과가 본편의 'PPT 복원 기준영상'과 같은 형태다: 창 좌표계, 교합면이면
     이미 반전된 그림. 정합 대상이자 겹쳐보기 이미지로 함께 쓰인다.
+
+    **다시 자르지 않는다.** 기준 사진은 지난 차수의 완성본이고, 정합이 맞춰야
+    하는 목표는 바로 그 프레임 자체다. 예전에는 프레이밍 모델을 한 번 더 걸었는데,
+    그 모델은 raw 사진에서 자를 자리를 예측하도록 배운 것이라 이미 잘린 사진을
+    주면 원본 경계 밖까지 잡았다 — 실측에서 교합면이 창의 7%를 검은 여백으로
+    채웠고(630px 중 48행), 그만큼 기준 프레임이 저장본과 어긋나 이번 차수가 지난
+    차수와 다른 구도로 저장됐다.
+
+    cover-fit(배율 1·중앙·무회전)이라 사진이 창을 항상 덮는다. 창과 종횡비가
+    같은 우리 저장본은 여백 없이 정확히 들어맞고, 종횡비가 다른 사진을 넣으면
+    긴 쪽이 잘린다.
     """
     pid = s.ref_slots.get(slot)
     if pid is None:
@@ -1304,8 +1316,7 @@ def _ref_bake(s: "Session", slot: str) -> np.ndarray | None:
     if arr is None:
         return None
     win = s.slot_windows[slot]
-    _auto_frame(s, photo, win, bgr=arr)      # photo.editor 에 초기 구도가 잡힌다
-    img = Cr.render_window(arr, win, photo.editor, photo.flip, PPC, PPC,
+    img = Cr.render_window(arr, win, EditorState(), photo.flip, PPC, PPC,
                            Cr.hex_to_bgr(_letterbox_color()))
     with s.lock:
         s.references[slot] = img
