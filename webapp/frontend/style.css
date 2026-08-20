@@ -1432,3 +1432,27 @@ body{
   box-shadow:0 10px 34px rgba(0,0,0,.45);
 }
 @media (max-width:1060px){ .fold[open] .flipguide{display:none;} }
+
+/* ── 사이드바 하단 — 로고 + 만든 사람 ─────────────────────────────────────
+   진행 단계가 위를 쓰고 남는 높이를 이 묶음이 받는다(로고 혼자 쓰던 자리다).
+   창이 낮으면 이 칸만 스크롤된다 — 잘려 나가는 것보다 낫다. */
+.rail{overflow:hidden auto;}
+.rail-foot{margin-top:auto; display:flex; flex-direction:column; gap:9px;}
+.rail-foot .rail-logo{margin-top:0;}
+.credits{
+  border:1px solid var(--edge-soft); border-radius:8px;
+  padding:9px 10px; background:var(--panel2);
+}
+.cr-org{
+  margin:0 0 7px; padding-bottom:6px; border-bottom:1px solid var(--edge-soft);
+  /* 한 줄로 둔다. 모노 폰트는 라틴 27글자가 좁은 사이드바(212px)에서 넘쳐
+     접혔다 — UI 폰트는 같은 크기에 40% 남짓 좁다. */
+  font:700 10.5px/1.4 var(--f-ui); letter-spacing:.015em; color:var(--ink2);
+  white-space:nowrap; text-align:center;
+}
+/* 라벨 | 이름+소속. 이름이 먼저 읽히고 소속은 그 아래 작게 남는다. */
+.cr-list{display:grid; grid-template-columns:auto minmax(0, 1fr); gap:6px 8px; margin:0;}
+.cr-list dt{font:600 11px/1.45 var(--f-ui); color:var(--ink3); white-space:nowrap;}
+.cr-list dd{margin:0; display:flex; flex-direction:column; min-width:0;}
+.cr-list dd b{font:600 12px/1.35 var(--f-ui); color:var(--ink);}
+.cr-list dd span{font:10.5px/1.35 var(--f-ui); color:var(--ink3); word-break:keep-all;}
