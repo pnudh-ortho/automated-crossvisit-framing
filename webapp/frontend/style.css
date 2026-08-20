@@ -1419,3 +1419,16 @@ body{
 /* 가로 트레이(OTHERS)의 카드는 높이 기준이다 — 사진 칸이 남는 높이를 받는다 */
 .bin-body.row .pcimg{height:calc(100% - 15px);}
 .bin-body.row .pcimg img{height:100%;}
+
+/* ── 상하 반전 기본값 예시 그림 — 접이를 열면 설정 창 오른쪽에 뜬다.
+   dialog(top layer) 안의 fixed 요소는 뷰포트 기준으로 놓이고 backdrop 위에
+   그려지므로, 창 밖 오른쪽에 나란히 세울 수 있다. 자리가 없으면 감춘다. */
+.flipguide{display:none;}
+.fold[open] .flipguide{
+  display:block; position:fixed; top:50%; transform:translateY(-50%);
+  left:calc(50% + min(47vw, 235px) + 16px);
+  width:min(560px, calc(50vw - 260px)); max-height:88vh; object-fit:contain;
+  border:1px solid var(--edge); border-radius:10px; background:#fff;
+  box-shadow:0 10px 34px rgba(0,0,0,.45);
+}
+@media (max-width:1060px){ .fold[open] .flipguide{display:none;} }

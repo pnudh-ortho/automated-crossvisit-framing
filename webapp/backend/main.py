@@ -2106,6 +2106,8 @@ def weights_status():
 
 
 app.mount("/static", _NoCacheStatic(directory=str(FRONTEND_DIR)), name="static")
+# 로고·아이콘·안내 그림. 화면 파일과 같은 캐시 규칙(no-cache)을 쓴다.
+app.mount("/assets", _NoCacheStatic(directory=str(PROGRAM_DIR / "assets")), name="assets")
 
 
 def _port_free(port: int) -> bool:
