@@ -1085,6 +1085,23 @@ def classify_session(sid: str):
     return {"photos": [_photo_json(s, p) for p in s.photos], "review": _review_json(s)}
 
 
+# 교합면 두 클래스. 이 둘만 위아래 방향에 좌우된다 — 나머지 넷은 뒤집어도
+# 라벨이 그대로였다(실측 18/18장).
+OCCLUSAL = ("IO_UPPER", "IO_LOWER")
+
+
+def _occlusal_mirrored(pool: str) -> bool:
+    """이 풀의 교합면이 **거울 원본**인가 — 설정의 상하반전 값이 그 선언이다.
+
+    켜져 있으면 "이 사진은 뒤집어야 한다" = 거울로 찍은 원본 = 분류기가 배운
+    방향이다. 꺼져 있으면 이미 뒤집어 저장한 사진이라 분류기에게는 낯선 방향이다.
+    상·하악은 늘 함께 찍으므로 두 값은 짝처럼 움직인다 — 하나라도 켜져 있으면
+    거울 원본으로 본다.
+    """
+    grid = _flip_defaults().get(pool, {})
+    return any(bool(grid.get(c)) for c in OCCLUSAL)
+
+
 def _classify(s: "Session", targets: list[Photo]) -> None:
     """라벨을 붙이고 상자에 넣는다. **여기까지가 가볍다.**"""
     thr = cfg.thresholds
@@ -1094,6 +1111,18 @@ def _classify(s: "Session", targets: list[Photo]) -> None:
             continue                     # prewarm 이 이미 분류했다 — 픽셀은 안 변한다
         with _Im.open(photo.path) as _im:
             pred = classifier.predict(_im.copy(), filename=photo.orig_name)
+        photo.label, photo.confidence, photo.probs = pred.label, pred.confidence, pred.probs
+
+    # 교합면만 방향을 탄다. 분류기는 **거울 원본**으로 배웠는데, 이미 뒤집어
+    # 저장한 사진(설정에서 상하반전을 끈 풀)은 그 반대 방향이라 상·하악이
+    # 뒤바뀐다 — 실측에서 6장 중 4장이 뒤집혔고 둘은 0.98 로 자신 있게 틀렸다.
+    # 그런 풀에서만 **뒤집어서 다시 읽는다**. 화면·저장 방향은 설정 그대로다.
+    for photo in targets:
+        if photo.label not in OCCLUSAL or _occlusal_mirrored(photo.pool):
+            continue
+        with _Im.open(photo.path) as _im:
+            pred = classifier.predict(_im.copy().transpose(_Im.FLIP_TOP_BOTTOM),
+                                      filename=photo.orig_name)
         photo.label, photo.confidence, photo.probs = pred.label, pred.confidence, pred.probs
 
     flips = _flip_defaults()
