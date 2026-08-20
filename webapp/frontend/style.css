@@ -983,7 +983,11 @@ body{
 /* 크게 보기 — 편집 캔버스가 판이 있던 자리를 그대로 물려받는다. 요소를 옮기는
    것이라 그림도, 드래그·휠 핸들러도 따라온다: 편집기가 두 벌이 되지 않는다. */
 #ed-canvas.zoom{
-  height:100%; width:auto; max-width:100%; margin:0 auto;
+  /* 크게 보기는 판 자리를 **채운다** — 여기서는 고유 크기보다 커져도 된다.
+     그 칸은 캔버스와 사실상 같은 비율이라 높이로 맞추면 폭이 저절로 들어맞는다.
+     혹시 폭이 먼저 걸리는 창에서도 object-fit 이 그림 비율은 지켜 준다. */
+  height:100%; width:auto; max-width:100%; max-height:none;
+  object-fit:contain; margin:0 auto;
   border-radius:9px;
 }
 /* 직전 차수 대보기 — 지금 화면이 **기준**이라는 표시. 켜 놓고 잊으면 조정하다
@@ -1077,8 +1081,14 @@ body{
   flex:1 1 auto; min-height:120px; display:flex; margin-bottom:11px;
 }
 #ed-canvas{
-  height:100%; width:auto; max-width:100%; margin:0 auto;
-  aspect-ratio:4/3; display:block;
+  /* 칸 **안에 들어가게** 한다 — 폭과 높이 **둘 다**에 걸어야 한다.
+     높이만 100% 로 밀어붙이고 폭을 max-width 로 자르면, 폭이 걸리는 순간 비율이
+     깨져 사진이 눌린다. 남는 높이가 큰 화면일수록 더 심하다.
+
+     비율은 못박지 않는다. 캔버스의 고유 크기가 곧 그 슬롯 창의 크기(창 cm ×
+     px_per_cm)라, 8.38×6.28 처럼 4:3 이 아닌 덱도 저절로 맞는다. */
+  max-width:100%; max-height:100%; width:auto; height:auto; margin:auto;
+  display:block;
   background:var(--well); border-radius:6px; cursor:move; touch-action:none;
 }
 #ed-reset, #fed-reset{width:100%; margin-top:10px; height:30px; font-size:13px;
