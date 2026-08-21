@@ -3612,11 +3612,11 @@ def _compose_deck(s, pl_plan: dict, tx, date_str: str, ppt_name: str) -> None:
                                   getattr(s, "label_fp", None),
                                   getattr(s, "visit_word", None))
     else:
-        stage_ppt = s.tmp / ppt_name
-        # 덱이 환자 폴더의 하위 폴더에 있으면 이름에도 그 폴더가 붙어 온다
-        stage_ppt.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(s.ppt_path, stage_ppt)
-        prs = T.load_presentation(stage_ppt)
+        # 덱을 **그대로 읽는다.** 예전에는 세션 임시폴더로 통째 복사한 뒤 읽었는데,
+        # python-pptx 는 열면서 내용을 전부 메모리로 가져오고 파일을 놓는다 —
+        # 사본이 할 일이 없었다. 131MB 덱에서는 그 복사가 고스란히 기다림이었고
+        # 미리보기를 누를 때마다 되풀이됐다. 쓰기는 언제나 다른 경로로 나간다.
+        prs = T.load_presentation(s.ppt_path)
         # 확인 줄에서 고쳤으면 "그 번호의 장 뒤", 아니면 날짜순 규칙.
         # n 번 장 뒤 = 0-기반 삽입 위치 n (그래서 새 장은 n+1 번이 된다).
         pos = getattr(s, "insert_after", None)

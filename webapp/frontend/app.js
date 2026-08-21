@@ -3506,7 +3506,9 @@ el("btn-toproc").onclick = async () => {
   b.disabled = true;
   try{
     for(let i = 0; i < todo.length; i++){
-      b.textContent = `정합 중… (${i + 1}/${todo.length})`;
+      // 어느 자리를 하고 있는지 이름으로 보여준다. 한 자리에 1초 넘게 걸리는
+      // 단계라 숫자만 도는 것보다 "지금 상악" 이 훨씬 덜 답답하다.
+      b.textContent = `정합 중… ${slotNm(todo[i])} (${i + 1}/${todo.length})`;
       const r = await api(`/api/register/${SESSION.session_id}`,
         {method: "POST", headers: {"Content-Type": "application/json"},
          body: JSON.stringify({slots: [todo[i]]})});
