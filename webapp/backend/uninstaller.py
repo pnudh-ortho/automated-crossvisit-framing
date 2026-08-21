@@ -2,7 +2,7 @@
 프로그램 삭제 — **환자 자료를 실수로 지우지 않는 것**이 이 모듈의 유일한 목적이다.
 
     inv = inventory(root)           # 무엇이 얼마나 있나
-    prepare(root, drop_data=False)  # 삭제 스크립트를 만들고 앱을 끝낸다
+    prepare(root)                   # 삭제 스크립트를 만들고 앱을 끝낸다
 
 ### 왜 앱이 자기 폴더를 직접 못 지우나
 
@@ -13,8 +13,8 @@ Windows 는 실행 중인 파일을 잠근다. `.venv\\Scripts\\python.exe` 가 
 
 ### 환자 자료는 기본으로 남긴다
 
-의료 기록이다. `drop_data=True` 를 **명시**해야만 지운다. 지우기로 했더라도 환자 수와
-용량을 먼저 보여주고, 화면에서 한 번 더 확인을 받는다.
+의료 기록이라 **이 프로그램은 지우지 않는다.** 어디에 있는지만 알려 주고,
+지우는 일은 사람이 탐색기에서 한다 — 휴지통을 거치므로 되돌릴 수 있다.
 
 프로그램 폴더와 자료 폴더가 애초에 떨어져 있어서(`~/ortho-webapp/`) 프로그램만 지우는
 것이 자연스러운 기본값이 된다.
@@ -139,7 +139,7 @@ read -r -p "Press Enter to close."
 """
 
 
-def prepare(program_dir: Path, data_dir: Path, *, drop_data: bool = False,
+def prepare(program_dir: Path, data_dir: Path, *,
             drop_tools: list[str] | None = None) -> dict:
     """삭제 스크립트를 **프로그램 폴더 바깥**에 만든다.
 
@@ -152,10 +152,12 @@ def prepare(program_dir: Path, data_dir: Path, *, drop_data: bool = False,
     win = os.name == "nt"
     name = "uninstall_finish.bat" if win else "uninstall_finish.command"
     tmpl = _BAT if win else _SH
-    if drop_data:
-        line = (f'rmdir /s /q "{data_dir}"\n' if win else f'rm -rf "{data_dir}"\n')
-    else:
-        line = ""
+    # **환자 자료는 이 스크립트가 지우지 않는다.** 의료 기록이고, `rmdir /s /q`
+    # 도 `rm -rf` 도 휴지통을 거치지 않아 되돌릴 길이 없다. 확인 문구를 아무리
+    # 겹쳐도 잘못 누른 한 번과 맞바꿀 값이 아니다 — 어디에 있는지만 알려 주고,
+    # 지우는 일은 사람이 탐색기에서 한다.
+    line = (f'echo Patient data is kept: "{data_dir}"\n' if win
+            else f'echo "Patient data is kept: {data_dir}"\n')
     tools = [t for t in (drop_tools or []) if t in TOOL_NAMES]
     tline = "".join(
         f'winget uninstall -e --id {t} --silent --accept-source-agreements\n'
@@ -177,6 +179,6 @@ def prepare(program_dir: Path, data_dir: Path, *, drop_data: bool = False,
             freed += _size(p)
             shutil.rmtree(p, ignore_errors=True)
     return {"ok": True, "script": str(script), "freed_bytes": freed,
-            "drop_data": drop_data, "tools": tools,
+            "drop_data": False, "tools": tools,
             "detail": ("앱을 끝낸 뒤 이 파일을 실행하면 삭제가 끝납니다: "
                        f"{script}")}

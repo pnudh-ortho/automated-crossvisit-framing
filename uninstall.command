@@ -16,20 +16,15 @@ echo "  Program folder : $PROG"
 echo "  Patient data   : $DATA"
 echo
 echo "  The program folder will be removed."
-echo "  Patient data is KEPT unless you ask otherwise."
+echo "  Patient data is NEVER touched by this uninstaller."
+echo "  Delete it yourself in Finder if you no longer need it."
 echo
 read -r -p "Remove the program? (y/N): " GO
 [ "$GO" = "y" ] || [ "$GO" = "Y" ] || { echo; echo "Cancelled."; exit 0; }
 
-DROP=""
-echo
-read -r -p "Also delete PATIENT DATA?  This cannot be undone. (y/N): " D2
-if [ "$D2" = "y" ] || [ "$D2" = "Y" ]; then
-  echo
-  echo "  Type  DELETE  to confirm removal of patient records."
-  read -r -p "  > " W
-  if [ "$W" = "DELETE" ]; then DROP="$DATA"; else echo "  Not confirmed - patient data will be kept."; fi
-fi
+# 환자 자료는 여기서 지우지 않는다. 의료 기록은 `rm -rf` 로 지우면 되돌릴 길이
+# 없고(휴지통을 거치지 않는다), 확인 문구를 잘못 친 한 번과 맞바꿀 값이 아니다.
+# 경로만 알려 주고 지우는 일은 사람이 Finder 에서 하게 둔다.
 
 # run from /tmp so we are not deleting our own directory
 S=$(mktemp /tmp/acf_uninstall.XXXXXX.sh)
@@ -38,7 +33,6 @@ cat > "$S" <<EOF
 sleep 2
 echo "Removing $PROG ..."
 rm -rf "$PROG"
-[ -n "$DROP" ] && { echo "Removing $DROP ..."; rm -rf "$DROP"; }
 echo
 echo "Uninstall complete."
 rm -f "$S"

@@ -4646,11 +4646,9 @@ def uninstall_prepare(body: dict = Body(default={})):
     """
     if _busy():
         return {"ok": False, "detail": "확정하지 않은 작업이 있습니다"}
-    drop = bool(body.get("drop_data"))
+    # 환자 자료는 받지 않는다 — body 에 drop_data 가 와도 무시한다.
     tools = [str(t) for t in (body.get("drop_tools") or [])]
-    if drop and body.get("confirm") != "삭제":
-        return {"ok": False, "detail": "환자 자료를 지우려면 확인 문구가 필요합니다"}
-    r = Un.prepare(BACKEND_DIR.parents[1], ROOT, drop_data=drop, drop_tools=tools)
+    r = Un.prepare(BACKEND_DIR.parents[1], ROOT, drop_tools=tools)
     # 종료코드 0 — 재시작 루프를 끝낸다 (42 는 재시작)
     threading.Timer(1.0, lambda: os._exit(0)).start()
     return r
