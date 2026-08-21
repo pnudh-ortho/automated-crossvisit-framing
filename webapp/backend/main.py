@@ -1038,8 +1038,9 @@ def _prewarm_ref(s: "Session", photo: Photo) -> None:
             _apply_default_flip(s, photo)
         # _ref_bake 와 **똑같이** 굽는다 — 픽셀이 한 톨이라도 다르면 이미지
         # 해시가 달라져 캐시가 안 맞고, 데운 보람이 없어진다.
-        img = Cr.render_window(arr, s.slot_windows[slot], EditorState(), photo.flip,
-                               PPC, PPC, Cr.hex_to_bgr(_letterbox_color()))
+        win = s.slot_windows[slot]
+        img = Cr.render_window(arr, win, _contain_state(photo.w, photo.h, win),
+                               photo.flip, PPC, PPC, Cr.hex_to_bgr(_letterbox_color()))
         Reg.centers(img, use_gate=True)  # 해시 키 캐시 — 정합 때 그대로 적중
     except Exception as e:                                        # noqa: BLE001
         _audit({"event": "prewarm_error", "pid": photo.id,
@@ -1285,6 +1286,16 @@ def _drop_eff_cache(s: "Session", photo: Photo) -> None:
 
 
 # ── 정합 기준영상 — 기준 사진을 창에 구워 낸다 ────────────────────────────────
+def _contain_state(pw: int, ph: int, win: WindowCm) -> EditorState:
+    """사진 **전체**가 창에 들어가는 배율 (contain). 남는 자리는 여백이 된다.
+
+    `render_window` 는 cover(창을 덮는 배율)를 기준으로 삼으므로, 그 위에 얹을
+    비율을 돌려준다. 창과 종횡비가 같으면 1.0 이라 아무것도 바뀌지 않는다.
+    """
+    bw, bh = cover_base_ext_cm(pw, ph, win)
+    return EditorState(scale=min(win.w / bw, win.h / bh))
+
+
 def _ref_bake(s: "Session", slot: str) -> np.ndarray | None:
     """슬롯의 기준 사진 대표를 **있는 그대로** 창(PPC 해상도)에 앉힌다.
 
@@ -1298,9 +1309,11 @@ def _ref_bake(s: "Session", slot: str) -> np.ndarray | None:
     채웠고(630px 중 48행), 그만큼 기준 프레임이 저장본과 어긋나 이번 차수가 지난
     차수와 다른 구도로 저장됐다.
 
-    cover-fit(배율 1·중앙·무회전)이라 사진이 창을 항상 덮는다. 창과 종횡비가
-    같은 우리 저장본은 여백 없이 정확히 들어맞고, 종횡비가 다른 사진을 넣으면
-    긴 쪽이 잘린다.
+    **사진 전체를 넣는다**(contain). 창과 종횡비가 같은 우리 저장본은 여백 없이
+    정확히 들어맞는다. 저장 비율을 바꾼 뒤라 종횡비가 다르면 짧은 쪽에 여백이
+    남는데, 그편이 잘라내는 것보다 낫다: 구내 사진에서 잘려 나가는 것은 대개
+    후방 치아이고, 기준이 잘리면 그에 맞춰 이번 차수 저장본까지 좁아져 기록이
+    차수를 거듭할수록 줄어든다. 대응점도 줄어 정합이 약해진다.
     """
     pid = s.ref_slots.get(slot)
     if pid is None:
@@ -1316,8 +1329,8 @@ def _ref_bake(s: "Session", slot: str) -> np.ndarray | None:
     if arr is None:
         return None
     win = s.slot_windows[slot]
-    img = Cr.render_window(arr, win, EditorState(), photo.flip, PPC, PPC,
-                           Cr.hex_to_bgr(_letterbox_color()))
+    img = Cr.render_window(arr, win, _contain_state(photo.w, photo.h, win),
+                           photo.flip, PPC, PPC, Cr.hex_to_bgr(_letterbox_color()))
     with s.lock:
         s.references[slot] = img
         s.ref_src[slot] = (pid, photo.flip)
