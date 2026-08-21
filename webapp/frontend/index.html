@@ -125,19 +125,27 @@
                   <select id="ov-visit" class="ovsel"
                           title="어느 차수와 겹쳐 볼지 — 다섯 칸에 함께 적용됩니다"></select>
                   <span class="ovkey"><i class="r"></i>기준<i class="c"></i>현재</span>
-                  <span class="ovhint"><kbd>Tab</kbd> 직전 차수 대보기<i>·</i><kbd>Space</kbd> 크게 보기</span>
+                </div>
+                <!-- 보는 방법. 겹쳐보기 바와 달리 **초진에도 뜬다** — Space·Shift 는
+                     기준 차수가 없어도 쓰는 키다. Tab 줄만 기준이 있을 때 켠다
+                     (app.js syncOverlayBar). -->
+                <div class="keyhint">
+                  <span class="row" id="hint-peek" hidden><kbd>Tab</kbd><span>직전 차수 대보기</span></span>
+                  <span class="row"><kbd>Space</kbd><span>크게 보기</span></span>
+                  <span class="row"><kbd>Shift</kbd><span>격자 보기</span></span>
                 </div>
                 <div class="knobs">
-                  <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="v-angle">0.0°</span>
-                  <span>배율</span><input type="range" id="ed-scale" min="50" max="200" value="100"><span class="v" id="v-scale">100%</span>
-                  <span>가로</span><input type="range" id="ed-tx" min="-200" max="200" value="0"><span class="v" id="v-tx">0</span>
-                  <span>세로</span><input type="range" id="ed-ty" min="-200" max="200" value="0"><span class="v" id="v-ty">0</span>
+                  <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v"><input type="number" id="v-angle" min="-10" max="10" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="v-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="v-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
+                  <span>배율</span><input type="range" id="ed-scale" min="50" max="200" value="100"><span class="v"><input type="number" id="v-scale" min="50" max="200" step="1" value="100"><i>%</i><span class="stepper"><button type="button" class="stepb" id="v-scale-dn" tabindex="-1" aria-label="배율 줄이기">◀</button><button type="button" class="stepb" id="v-scale-up" tabindex="-1" aria-label="배율 늘리기">▶</button></span></span>
+                  <span>가로</span><input type="range" id="ed-tx" min="-200" max="200" value="0"><span class="v"><input type="number" id="v-tx" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="v-tx-dn" tabindex="-1" aria-label="가로 줄이기">◀</button><button type="button" class="stepb" id="v-tx-up" tabindex="-1" aria-label="가로 늘리기">▶</button></span></span>
+                  <span>세로</span><input type="range" id="ed-ty" min="-200" max="200" value="0"><span class="v"><input type="number" id="v-ty" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="v-ty-dn" tabindex="-1" aria-label="세로 줄이기">◀</button><button type="button" class="stepb" id="v-ty-up" tabindex="-1" aria-label="세로 늘리기">▶</button></span></span>
                 </div>
                 <!-- PPT 기록값(rot/크기/오프셋) 디버그 표시. 값은 계속 갱신되므로
                      다시 보려면 이 hidden 속성만 지우면 된다. -->
                 <p class="readout" id="readout" hidden>PPT 기록값<br>—</p>
-                <button class="btn" id="ed-reset">cover-fit 초기화</button>
-                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율<br><b>1~5</b> 슬롯 · <b>Shift</b> 크게 움직이기 · <b>Space</b> 크게 보기 · 자동 저장</p>
+                <button class="btn" id="ed-reset" title="자동으로 잡아 준 첫 구도로 되돌립니다 — 재진은 차수 간 정합, 초진은 프레이밍 예측">initial-fit으로 초기화</button>
+                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율 · 방향키 이동<br>
+                  단축키 한 번 = 조절 바 한 칸(회전 0.1° · 배율 1% · 이동 1px)<br><b>1~5</b> 슬롯 · 자동 저장</p>
               </div>
               <!-- 판 위의 노트 박스를 누르면 그 박스를 채우는 칸만 여기 뜬다 -->
               <div id="dock-note" hidden>
@@ -167,17 +175,17 @@
               <div id="face-dock-photo">
               <canvas id="face-canvas" width="508" height="700"></canvas>
               <div class="knobs">
-                <span>회전</span><input type="range" id="fed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="fv-angle">0.0°</span>
-                <span>배율</span><input type="range" id="fed-scale" min="50" max="200" value="100"><span class="v" id="fv-scale">100%</span>
-                <span>가로</span><input type="range" id="fed-tx" min="-200" max="200" value="0"><span class="v" id="fv-tx">0</span>
-                <span>세로</span><input type="range" id="fed-ty" min="-200" max="200" value="0"><span class="v" id="fv-ty">0</span>
+                <span>회전</span><input type="range" id="fed-angle" min="-10" max="10" step=".1" value="0"><span class="v"><input type="number" id="fv-angle" min="-10" max="10" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="fv-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="fv-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
+                <span>배율</span><input type="range" id="fed-scale" min="50" max="200" value="100"><span class="v"><input type="number" id="fv-scale" min="50" max="200" step="1" value="100"><i>%</i><span class="stepper"><button type="button" class="stepb" id="fv-scale-dn" tabindex="-1" aria-label="배율 줄이기">◀</button><button type="button" class="stepb" id="fv-scale-up" tabindex="-1" aria-label="배율 늘리기">▶</button></span></span>
+                <span>가로</span><input type="range" id="fed-tx" min="-200" max="200" value="0"><span class="v"><input type="number" id="fv-tx" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="fv-tx-dn" tabindex="-1" aria-label="가로 줄이기">◀</button><button type="button" class="stepb" id="fv-tx-up" tabindex="-1" aria-label="가로 늘리기">▶</button></span></span>
+                <span>세로</span><input type="range" id="fed-ty" min="-200" max="200" value="0"><span class="v"><input type="number" id="fv-ty" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="fv-ty-dn" tabindex="-1" aria-label="세로 줄이기">◀</button><button type="button" class="stepb" id="fv-ty-up" tabindex="-1" aria-label="세로 늘리기">▶</button></span></span>
               </div>
-              <button class="btn" id="fed-reset">cover-fit 초기화</button>
+              <button class="btn" id="fed-reset" title="프레이밍 모델이 잡아 준 첫 구도로 되돌립니다">initial-fit으로 초기화</button>
               <h3 class="sep">얼굴 사진<span class="aux" id="face-pool-n"></span>
                 <button type="button" class="minibtn" id="face-auto" title="촬영순 순서대로 자리를 다시 채웁니다">자동 배치</button></h3>
               <div class="pool" id="face-pool"></div>
               <div class="mirrornote" id="face-mirror"></div>
-              <p class="tip">자리를 누르면 오른쪽에서 조정합니다 · 드래그 이동 · 휠 배율<br><b>Q/E</b> 회전 · <b>A/D</b> 배율 · 사진을 누르면 켜진 자리에 들어갑니다</p>
+              <p class="tip">자리를 누르면 오른쪽에서 조정합니다 · 드래그 이동 · 휠 배율<br><b>Q/E</b> 회전 · <b>A/D</b> 배율 · <b>Shift</b> 격자 보기<br>사진을 누르면 켜진 자리에 들어갑니다</p>
               </div>
             </div>
           </div>
@@ -193,9 +201,15 @@
           <div class="ph">검수·조정에서 <b>저장 검토로</b> 를 눌러 주세요</div>
         </div>
         <p class="err" id="fin-err"></p>
+        <!-- 윗줄은 확인·되돌아가기, 아랫줄이 실제로 쓰는 동작이다 -->
+        <div class="finact">
+          <button class="btn" id="btn-openppt" disabled>PPT에서 확인하기</button>
+          <button class="btn" id="btn-back-proc" disabled>◀ 검수·조정으로</button>
+        </div>
         <button class="btn primary wide" id="btn-commit" disabled>확정 저장</button>
-        <p class="tip">확정하면 환자 폴더에 사진과 PPT가 한 번에 기록됩니다.<br>
-          중간에 실패하면 전부 되돌아갑니다(원자적 저장).</p>
+        <p class="tip"><b>PPT에서 확인하기</b>는 저장될 그대로를 임시 파일로 열어 봅니다 —
+          환자 폴더에는 아무것도 쓰지 않습니다.<br>
+          확정하면 사진과 PPT가 한 번에 기록되고, 중간에 실패하면 전부 되돌아갑니다(원자적 저장).</p>
       </div></div>
     </div>
 

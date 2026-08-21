@@ -539,22 +539,26 @@ def _bake_window(photo, win: WindowCm, st: EditorState, flip_v: bool, dst: Path)
     return dst, (out.shape[1], out.shape[0])
 
 
-def _face_editor(s: "Session", cell: str) -> EditorState:
+def _face_editor(s: "Session", cell: str, book: dict | None = None) -> EditorState:
     """자리의 편집기 값. 파생 자리는 원본 자리 값을 창 크기에 맞춰 옮겨 온다.
+
+    `book` 을 주면 그 표에서 읽는다 — 지금 값(face_editors)과 초기 구도
+    (face_editors0)가 파생 자리 환산까지 똑같은 규칙을 쓰게 하려는 것이다.
 
     파생 자리(10·11)는 슬라이드 4 좌측과 **비율이 같고 크기만 다르다**. dx·dy 는
     cm 로 환산되는 절대량이라 그대로 쓰면 큰 창에서 구도가 밀린다. 창 폭 비율만큼
     같이 키우면 잘린 영역이 정확히 같아진다. 비율이 어긋나는 양식이 오면 그 환산이
     성립하지 않으므로 cover-fit 으로 물러난다.
     """
-    if cell in s.face_editors:
-        return s.face_editors[cell]
+    book = s.face_editors if book is None else book
+    if cell in book:
+        return book[cell]
     src = MIRROR_SOURCE if cell in MIRROR_CELLS else None
-    if src and src in s.face_editors:
+    if src and src in book:
         a, b = CASE_ANCHORS.get(src), CASE_ANCHORS.get(cell)
         if a and b and abs(a.window.w / a.window.h - b.window.w / b.window.h) < 1e-3:
             k = b.window.w / a.window.w
-            st = s.face_editors[src]
+            st = book[src]
             return EditorState(st.dx_px * k, st.dy_px * k, st.scale, st.angle_deg)
     return EditorState()
 
@@ -1324,6 +1328,11 @@ class Photo:
         # **뒤집힌 화면 기준**으로 들고 있다. 슬롯이 바뀌면 _put 이 환산한다.
         self.flip_v = False
         self.editor = EditorState()  # 현재 배치(편집기 값, flip_v면 반전 화면 기준)
+        # **initial-fit** — 자동으로 잡아 준 첫 구도. 재진이면 차수 간 정합 결과,
+        # 초진이면 프레이밍 모델의 예측이고, 둘 다 못 쓰면 cover-fit 이다.
+        # 사람이 손으로 만진 뒤 '되돌리기'가 돌아갈 자리라, editor 와 달리
+        # **조작으로 바뀌지 않는다** — _frame 이 다시 계산할 때만 갱신된다.
+        self.editor0 = EditorState()
         self.ref_visit = None      # 정합에 채택된 기준 차수
         self.badge = "ok"          # ok | low | manual | missing
         self.taken_at = None       # EXIF 촬영시각, 서브초 있으면 microsecond까지
@@ -1373,6 +1382,9 @@ class Session:
         # 슬라이드 4 좌측과 10·11(분석)에 함께 쓰이는데, 창 크기가 달라 구도를
         # 따로 잡을 수 있어야 하기 때문이다. 없는 자리는 cover-fit.
         self.face_editors: dict[str, EditorState] = {}
+        # 자리별 **initial-fit** — 프레이밍 모델이 잡아 준 첫 구도. 사람이 만진
+        # 값(face_editors)과 달리 조작으로 바뀌지 않는다. 없는 자리는 cover-fit.
+        self.face_editors0: dict[str, EditorState] = {}
         # 자리별 구도 근거: 'model'(프레이밍 예측) | 'cover'(cover-fit)
         self.face_framing: dict[str, str] = {}
         # 사람이 TEMPLATE 탭에서 자리를 직접 고치거나 구도를 잡았는가.
@@ -2729,6 +2741,7 @@ def _frame(s: "Session", slots: list[str] | None = None, *,
 
         if s.mode != "revisit":
             _auto_frame(s, photo, win)
+            photo.editor0 = photo.editor   # 방금 잡은 구도가 이 자리의 initial-fit
             s.framed[slot] = pid
             done.append(slot)
             continue
@@ -2777,6 +2790,7 @@ def _frame(s: "Session", slots: list[str] | None = None, *,
                     "error": f"{type(e).__name__}: {e}"[:300]})
                 photo.ref_visit = None
                 _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
+                photo.editor0 = photo.editor   # 방금 잡은 구도가 이 자리의 initial-fit
                 s.framed[slot] = pid
                 done.append(slot)
                 continue
@@ -2796,6 +2810,7 @@ def _frame(s: "Session", slots: list[str] | None = None, *,
                     "score": round(res.score, 4)})
                 photo.ref_visit = best
                 _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
+        photo.editor0 = photo.editor   # 방금 잡은 구도가 이 자리의 initial-fit
         s.framed[slot] = pid
         done.append(slot)
     return done
@@ -2896,6 +2911,7 @@ def _sync_flip(photo) -> None:
     if want != photo.flip_v:
         photo.flip_v = want
         photo.editor = flip_editor_v(photo.editor)
+        photo.editor0 = flip_editor_v(photo.editor0)
 
 
 def _put(s, photo, key, at=None) -> None:
@@ -3003,6 +3019,7 @@ def _auto_assign_faces(s: "Session") -> int:
     s.face_slots.clear()
     # 자리에 다른 사진이 들어오므로 잡아 둔 구도도 같이 버린다
     s.face_editors.clear()
+    s.face_editors0.clear()
     s.face_framing.clear()
     for cell, pid in zip(order, pool):
         s.face_slots[cell] = pid
@@ -3044,7 +3061,7 @@ def _frame_face_cell(s: "Session", cell: str) -> str:
     win = anchor.window
     st = framing_to_editor(res, win, photo.w, photo.h)
     bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
-    s.face_editors[cell] = apply_cover_clamp(st, win, bw, bh)
+    s.face_editors[cell] = s.face_editors0[cell] = apply_cover_clamp(st, win, bw, bh)
     return "model"
 
 
@@ -3202,16 +3219,19 @@ def face_assign(req: FaceAssignReq):
                 # 사진이 떠난 자리의 구도는 남겨 둘 이유가 없다
                 del s.face_slots[k]
                 s.face_editors.pop(k, None)
+                s.face_editors0.pop(k, None)
                 s.face_framing.pop(k, None)
         s.face_slots[req.cell] = photo.id
     # 자리의 사진이 바뀌면 그 자리에 잡아 둔 구도는 다른 사진 기준이라 무의미하다.
     # 새 사진에는 다시 프레이밍을 걸어 준다(예측은 사진 단위로 캐시돼 있다).
     if s.face_slots.get(req.cell) != before:
         s.face_editors.pop(req.cell, None)
+        s.face_editors0.pop(req.cell, None)
         s.face_framing.pop(req.cell, None)
         if s.face_slots.get(req.cell):
             s.face_framing[req.cell] = _frame_face_cell(s, req.cell)
     return {"face_slots": _face_slots_json(s), "face_editors": _face_editors_json(s),
+            "face_editors0": _face_editors_json(s, s.face_editors0),
             "face_framing": dict(s.face_framing)}
 
 
@@ -3254,13 +3274,16 @@ def _face_slots_json(s: Session) -> dict:
     return out
 
 
-def _face_editors_json(s: Session) -> dict:
-    """자리 -> 편집기 값. 파생 자리는 환산된 값을 함께 내려보낸다."""
+def _face_editors_json(s: Session, book: dict | None = None) -> dict:
+    """자리 -> 편집기 값. 파생 자리는 환산된 값을 함께 내려보낸다.
+
+    `book` 에 face_editors0 을 주면 같은 모양으로 **초기 구도**를 낸다.
+    """
     out = {}
     for k in list(FACE_CELLS) + list(MIRROR_CELLS):
         if k not in _face_slots_json(s):
             continue
-        st = _face_editor(s, k)
+        st = _face_editor(s, k, book)
         out[k] = {"dx": round(st.dx_px, 2), "dy": round(st.dy_px, 2),
                   "scale": round(st.scale, 4), "angle": round(st.angle_deg, 3)}
     return out
@@ -3410,6 +3433,338 @@ def plan(sid: str):
     return _build_plan(get_session(sid))
 
 
+def _ps_open_command(win_path: str) -> str:
+    """윈도우 경로 하나를 기본 프로그램으로 여는 **PowerShell 한 줄**.
+
+    두 가지를 동시에 지켜야 한다. 실측에서 둘 다 물렸다:
+
+    ① **따옴표.** `-Command` 는 뒤따르는 인자를 공백으로 이어 붙여 한 줄로 만든다.
+       경로에 공백이 있으면 거기서 인자가 쪼개져 명령이 통째로 실패한다
+       ("'테스트.pptx' 인수를 허용하는 위치 매개 변수를 찾을 수 없습니다").
+       그래서 여기서 **완성된 한 줄**을 만들어 통째로 넘긴다.
+    ② **-LiteralPath.** 대괄호는 PowerShell 에서 와일드카드다. `[미리보기]` 가 붙은
+       이름은 따옴표를 씌워도 `-Path` 로는 못 찾는다(Test-Path 가 False 를 준다).
+
+    작은따옴표 문자열 안에서 작은따옴표는 두 번 써서 벗어난다.
+    """
+    quoted = "'" + win_path.replace("'", "''") + "'"
+    # 한글 윈도우의 PowerShell 은 CP949 로 말한다 — 오류 메시지를 읽으려면 UTF-8 로 돌린다
+    return ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+            f"Invoke-Item -LiteralPath {quoted}")
+
+
+def _os_open(path: Path) -> None:
+    """운영체제의 기본 프로그램으로 파일을 연다 (PPT → PowerPoint).
+
+    WSL 에서는 리눅스 쪽 뷰어가 아니라 **Windows 의 PowerPoint** 로 열어야 한다 —
+    브라우저를 Windows 에서 보는 사용자에게 WSLg 창은 보이지 않는다. 폴더 선택
+    창(_powershell)과 같은 판단이다.
+
+    실패를 **삼키지 않는다.** 예전에는 Popen 으로 던져 놓고 결과를 보지 않아서,
+    명령이 깨져도 화면에는 아무 일도 일어나지 않았다 — 눌렀는데 반응이 없는 것과
+    구별할 수 없다. 여는 것 자체는 넘겨주고 끝나므로 기다려도 오래 걸리지 않는다.
+    """
+    if os.name == "nt":
+        os.startfile(str(path))                      # noqa: S606  (Windows 전용)
+        return
+    ps = shutil.which("powershell.exe")
+    if ps:
+        r = subprocess.run(["wslpath", "-w", str(path)], capture_output=True,
+                           encoding="utf-8", errors="replace", timeout=10)
+        if r.returncode != 0 or not r.stdout.strip():
+            raise OSError(f"WSL 경로를 윈도우 경로로 바꾸지 못했습니다: {path}")
+        r = subprocess.run([ps, "-NoProfile", "-Command",
+                            _ps_open_command(r.stdout.strip())],
+                           capture_output=True, timeout=60)
+        if r.returncode != 0:
+            msg = (r.stderr or b"").decode("utf-8", "replace").strip()
+            raise OSError(msg.splitlines()[0] if msg else "PowerShell 이 열지 못했습니다")
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    if not shutil.which(opener):
+        raise OSError(f"파일을 열 프로그램을 찾지 못했습니다({opener})")
+    subprocess.Popen([opener, str(path)])
+
+
+def _os_reveal(path: Path) -> None:
+    """파일이 든 **폴더**를 연다.
+
+    파일을 여는 것보다 실패할 구석이 적다: `.pptx` 연결 프로그램이 없어도 되고,
+    WSL 에서는 `explorer.exe` 에 경로를 **인자로 그대로** 넘기므로 PowerShell 의
+    따옴표·와일드카드 규칙을 아예 지나간다. 그래서 파일 열기가 실패했을 때
+    여기로 물러선다 — 만들어 둔 미리보기를 못 보고 끝나면 안 된다.
+    """
+    d = path if path.is_dir() else path.parent
+    if os.name == "nt":
+        os.startfile(str(d))                         # noqa: S606  (Windows 전용)
+        return
+    exp = shutil.which("explorer.exe")
+    if exp:
+        r = subprocess.run(["wslpath", "-w", str(d)], capture_output=True,
+                           encoding="utf-8", errors="replace", timeout=10)
+        if r.returncode != 0 or not r.stdout.strip():
+            raise OSError(f"WSL 경로를 윈도우 경로로 바꾸지 못했습니다: {d}")
+        # explorer.exe 는 창을 잘 띄우고도 1 을 돌려준다 — 반환값으로 성패를 가리지 않는다
+        subprocess.run([exp, r.stdout.strip()], capture_output=True, timeout=30)
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    if not shutil.which(opener):
+        raise OSError(f"폴더를 열 프로그램을 찾지 못했습니다({opener})")
+    subprocess.Popen([opener, str(d)])
+
+
+class _DrySink:
+    """`storage.Transaction` 과 같은 얼굴을 한 미리보기용 통.
+
+    `_compose_deck` 이 쌓는 것 중 **PPT 한 장만** 임시 폴더에 남기고 사진은 버린다.
+    환자 폴더는 열어 보지도 않는다 — 미리보기가 기록을 건드리면 그건 이미
+    미리보기가 아니다.
+
+    `stage_file` 이 원본 경로를 그대로 돌려주는 것이 요령이다: 확정 저장에서는
+    "환자 폴더로 갈 사본" 을 슬라이드에 넣는데, 미리보기에서는 그 사본을 만들
+    이유가 없고 원본(이미 세션 임시폴더에 있다)이 같은 그림이기 때문이다.
+    """
+
+    def __init__(self, out_dir: Path):
+        self.out_dir = out_dir
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.ppt: Path | None = None
+
+    def stage_file(self, src: str | Path, final_name: str) -> Path:
+        return Path(src)
+
+    def stage_bytes(self, data: bytes, final_name: str) -> Path:
+        dst = self.out_dir / Path(final_name).name
+        dst.write_bytes(data)
+        return dst
+
+    def stage_pptx(self, prs, final_name: str) -> Path:
+        # 파워포인트 제목 표시줄에서 바로 구별되게 앞에 표를 단다. 환자 폴더에
+        # 들어갈 이름과 **일부러 다르게** 둔다 — 미리보기를 실수로 덱이라 여기고
+        # 손으로 복사해 넣는 일이 없어야 한다.
+        dst = self.out_dir / f"[미리보기] {Path(final_name).name}"
+        prs.save(str(dst))
+        self.ppt = dst
+        return dst
+
+
+@app.post("/api/preview/{sid}")
+def preview(sid: str):
+    """확정 저장하면 나올 **바로 그 PPT** 를 임시로 만들어 파워포인트로 연다.
+
+    환자 폴더에는 아무것도 쓰지 않는다. 눈으로 확인하고 검수·조정으로 돌아가
+    고칠 수 있게 하는 것이 전부다 — 확정은 사람이 됐다고 판단한 뒤 한 번만
+    일어나야 하고, 그래야 같은 차수 슬라이드가 두 장 생기는 길이 아예 없다.
+
+    회차마다 새 폴더에 만든다. 앞서 연 미리보기를 파워포인트가 붙들고 있어도
+    다음 미리보기가 막히지 않아야 하기 때문이다(윈도우는 열린 파일을 못 덮는다).
+
+    여는 것은 **파일 먼저, 안 되면 그 폴더**다. 한 번 눌러 슬라이드가 뜨는 것이
+    이 기능의 요점이지만, 연결 프로그램이 없거나 환경이 달라 그게 막혔을 때
+    만들어 둔 것을 못 보고 끝나서는 안 된다. 어느 쪽으로 열렸는지는 돌려준다 —
+    화면이 "폴더를 열었으니 그 파일을 여세요" 라고 말할 수 있어야 한다.
+    """
+    s = get_session(sid)
+    pl_plan = _build_plan(s)
+    date_str = (_photo_date(s) or datetime.now()).strftime(cfg.ppt.info_date_format)
+    s.preview_n = getattr(s, "preview_n", 0) + 1
+    sink = _DrySink(s.tmp / "preview" / str(s.preview_n))
+    try:
+        _compose_deck(s, pl_plan, sink, date_str, pl_plan["ppt"])
+    except Exception as e:                                   # noqa: BLE001
+        S.append_audit(LOG_FILE, {"event": "preview_failed", "error": str(e)})
+        raise HTTPException(500, f"미리보기를 만들지 못했습니다: {e}") from e
+    opened = "file"
+    try:
+        _os_open(sink.ppt)
+    except (OSError, subprocess.SubprocessError) as e:
+        try:
+            _os_reveal(sink.ppt)
+            opened = "folder"
+            S.append_audit(LOG_FILE, {"event": "preview_open_fallback", "error": str(e)})
+        except (OSError, subprocess.SubprocessError):
+            raise HTTPException(500, f"PPT 를 열지 못했습니다: {e}") from e
+    return {"ok": True, "ppt": sink.ppt.name, "path": str(sink.ppt),
+            "dir": str(sink.ppt.parent), "opened": opened}
+
+
+def _compose_deck(s, pl_plan: dict, tx, date_str: str, ppt_name: str) -> None:
+    """이번 차수 슬라이드를 만들어 넣고, 결과물을 `tx` 에 쌓는다.
+
+    **확정 저장과 미리보기가 이 함수 하나를 함께 쓴다.** 둘이 각자 조립하면
+    언젠가 반드시 갈라지고, 그건 사람이 미리보기를 믿고 확정을 누르는 순간
+    가장 나쁜 방식으로 드러난다 — `_build_plan` 을 파일명 하나로 통일해 둔 것과
+    같은 이유다.
+
+    `tx` 는 무엇을 쌓느냐만 다르다: 확정은 `storage.Transaction`(환자 폴더로
+    원자적 이동), 미리보기는 `_DrySink`(PPT 한 장만 임시로 남기고 사진은 버림).
+    이 함수 자체는 환자 폴더에 아무것도 쓰지 않는다.
+    """
+    src_slide = None              # 도형을 물려받을 직전 차수 슬라이드 (재진에서만)
+    # 1) PPT 준비
+    if s.mode == "first":
+        stage_ppt = s.tmp / ppt_name
+        prs, slide = _new_first_visit_ppt(stage_ppt)
+        # 사진은 있는데 PPT만 없는 폴더는 mode='first'로 새 PPT를 만들지만
+        # 차수는 A가 아니다 — 그때 '(초진)'이라고 쓰면 기록이 틀린다.
+        # 두 서식 모두 {visit} 를 쓴다 — "(초진 A)" 처럼 차수 글자가 붙는다
+        info_text = _render_label(date_str, s.visit,
+                                  getattr(s, "label_fp", None),
+                                  getattr(s, "visit_word", None))
+    else:
+        stage_ppt = s.tmp / ppt_name
+        # 덱이 환자 폴더의 하위 폴더에 있으면 이름에도 그 폴더가 붙어 온다
+        stage_ppt.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(s.ppt_path, stage_ppt)
+        prs = T.load_presentation(stage_ppt)
+        # 확인 줄에서 고쳤으면 "그 번호의 장 뒤", 아니면 날짜순 규칙.
+        # n 번 장 뒤 = 0-기반 삽입 위치 n (그래서 새 장은 n+1 번이 된다).
+        pos = getattr(s, "insert_after", None)
+        insert_idx = (min(max(pos, 0), len(prs.slides._sldIdLst))
+                      if pos is not None else _revisit_insert_index(prs))
+        # 도형을 물려받을 원본 = 새 장이 끼어들 **바로 앞 장**(직전 차수)
+        src_slide = (prs.slides[insert_idx - 1] if insert_idx > 0 else None)
+        slide = W.import_template_slide(prs, TEMPLATE_PRS, insert_idx)
+        # 십자뷰 양식에는 노트 칸이 없다 — 그대로 두면 이번 차수에 적은
+        # 노트가 갈 곳이 없어 조용히 사라진다. 화면 오버레이가 쓰는
+        # 자리표(NOTE_BOXES) 그대로 만들어 화면과 결과물을 맞춘다.
+        # 날짜 칸은 이 슬라이드의 INFO_BOX 가 맡는다(자리가 겹친다).
+        if NOTE_BOXES:
+            # 자리표는 양식 좌표다. 덱의 슬라이드가 그보다 작으면 오른쪽·아래
+            # 칸이 밖으로 밀려나므로 모서리 기준으로 앉힌다. 여기서 새로
+            # 만들어지는 것은 **직전 차수에 없던 칸**뿐이다 — 있던 칸은 바로
+            # 아래에서 원본을 통째로 복사해 덮어쓴다(자리·폰트 그대로).
+            CD.add_note_boxes_from_layout(
+                slide, NOTE_BOXES,
+                skip={CD.NOTE_DATE} if T.find_shape(slide, cfg.ppt.info_box_name) is not None else set(),
+                ref_cm=CASE_SLIDE_CM, slide_cm=s.slide_cm)
+        info_text = _render_label(date_str, s.visit,
+                                  getattr(s, "label_fp", None),
+                                  getattr(s, "visit_word", None))
+    # 검은 마스크(MASK_*)는 **모든 경우** 제거한다 (2026-08-12 결정).
+    # 근거: ① 사진을 창 크기로 구워 넣어 초과가 없고, ② 슬라이드 배경
+    # 자체가 검정(000000)이라 시각적으로 동일하며, ③ 수제 레이아웃 상속
+    # 시 템플릿 좌표의 마스크가 사진 가장자리를 가리는 문제도 사라진다.
+    for sh in [x for x in slide.shapes if x.name.startswith("MASK_")]:
+        sh._element.getparent().remove(sh._element)
+
+    # 수제 PPT 상속 — 원본 라벨/상태 상자를 **통째로 복사**해 규약명으로
+    # 얹는다 (템플릿 상자는 제거). 속성 개별 상속은 숨은 규칙(lstStyle
+    # 기본값·endParaRPr 등)을 계속 놓쳐서 이 방식으로 바꿨다 (2026-08-12).
+    inherit = (getattr(s, "inherit_sp", None) or {}) if s.mode == "revisit" else {}
+    if inherit.get("label"):
+        CD.replace_with_copied_box(slide, cfg.ppt.info_box_name,
+                                   inherit["label"])
+    if inherit.get("status"):
+        CD.replace_with_copied_box(slide, CD.NOTE_STATUS,
+                                   inherit["status"])
+    # 나머지 노트 상자도 원본에 대응이 있으면 통째 복사 — 폰트 유지.
+    # 없는 상자만 설정 기본 크기(add_note_boxes_from_layout)로 만들어진다.
+    for key in (CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT):
+        if inherit.get(key):
+            CD.replace_with_copied_box(slide, key, inherit[key])
+    # 사람이 그려 둔 선·화살표 등 — 설정에 따라 직전 장에서 가져온다
+    if s.mode == "revisit":
+        _inherit_shapes(src_slide, slide, _copy_shapes(),
+                        emu_to_cm(prs.slide_width), set(inherit))
+
+    # 2) 구내 슬롯 삽입 — 상자의 대표(0번)만 슬라이드에 들어간다
+    #    파일명은 전부 _build_plan() 이 정한 것을 쓴다(미리보기와 동일 보장).
+    # 넣는 순서가 곧 z-순서다 — insert_photo 가 매번 send_to_back 하므로
+    # **먼저 넣은 것이 맨 위**로 간다. 정면을 맨 먼저 넣어 위로 올린다:
+    # 수제 십자뷰는 사진끼리 조금씩 포개지는데(실측 덱 대부분이 상악과
+    # 정면이 1.6mm), 그 겹침에서 가려지면 안 되는 것은 정면이다.
+    # 나머지는 종전대로 slot_names 순이고, 겹치지 않는 덱은 어느 쪽이든
+    # 결과가 같다.
+    slot_entries = sorted(pl_plan["slots"],
+                          key=lambda e: e["slot"] != Z_TOP_SLOT)
+    for entry in slot_entries:
+        if entry["empty"]:
+            continue
+        slot = entry["slot"]
+        members = s.bins[slot]
+        photo = _photo(s, members[0])
+        win = s.slot_windows[slot]
+        # 수제 레이아웃 상속 — place_photo_in_slot 은 **앵커 위치**에
+        # 놓으므로, 새 슬라이드의 앵커·배경판을 세션 창(상속된 레이아웃)
+        # 으로 먼저 옮겨야 사진이 사람 레이아웃 자리에 들어간다.
+        for nm in (slot, W.backdrop_shape_name(slot)):
+            shp = T.find_shape(slide, nm)
+            if shp is not None:
+                shp.left = int(round(win.x * EMU_PER_CM))
+                shp.top = int(round(win.y * EMU_PER_CM))
+                shp.width = int(round(win.w * EMU_PER_CM))
+                shp.height = int(round(win.h * EMU_PER_CM))
+        bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
+        pl = editor_to_placement(photo.editor, win, bw, bh, PPC)
+        # 창에 보이는 만큼만 구워서 넣는다 — 그래야 이웃 슬롯을 침범하지
+        # 않는다. 환자 폴더에도 **이것**이 간다: 폴더와 PPT 가 다른 그림이면
+        # 나중에 어느 쪽이 진짜인지 다투게 된다.
+        baked, bwh = _bake_window(photo, win, photo.editor, photo.flip_v,
+                                  s.tmp / f"bake_{slot}.jpg")
+        if baked:
+            # 창에 맞춰 구웠으므로 창 그대로 넣는다 — cover-fit 에 맡기면
+            # 구운 파일의 정수 픽셀 비율로 크기를 다시 셈해 직전 차수
+            # 사진과 0.01cm 어긋나 보인다.
+            W.place_photo_in_slot(slide, slot, baked, bwh,
+                                  placement=_exact_placement(win),
+                                  letterbox_color=_letterbox_color())
+            tx.stage_file(baked, entry["file"])
+        else:
+            staged_img = tx.stage_file(photo.path, entry["file"])
+            W.place_photo_in_slot(slide, slot, staged_img, (photo.w, photo.h),
+                                  placement=pl,
+                                  letterbox_color=_letterbox_color(),
+                                  flip_v=photo.flip_v)
+        if entry.get("raw"):
+            tx.stage_file(photo.path, entry["raw"])
+        # 같은 자리의 추가 촬영본: 파일로만 저장 (슬라이드는 대표 1장)
+        for extra_pid, ex in zip(members[1:], entry["extras"]):
+            tx.stage_file(_photo(s, extra_pid).path, ex["file"])
+    # 날짜 칸을 검수 화면에서 고쳐 썼으면 그쪽이 이긴다
+    _write_visit_label(slide, s.note_overrides.get(CD.NOTE_DATE) or info_text,
+                   None if inherit else getattr(s, "label_style", None),
+                   pin=not inherit)
+    # 차수 노트 — 채운 칸이 있는 박스만 건드린다(양식의 안내문을 함부로 지우지 않는다)
+    # 자동 계산 기본값·오버레이 수정본이 함께 나간다 — 화면 미리보기와
+    # 결과물이 같아야 한다
+    for box, text in _note_text(s).items():
+        # 빈 줄만 남은 박스는 '안 채운 것'이다. 서식의 빈 줄을 그대로
+        # 살리면서(양식의 글 시작 높이) 손 안 댄 박스의 안내문은 지키려면
+        # 공백을 걷어내고 판단해야 한다.
+        if text.strip():
+            CD.set_note_text(slide, box, text, small_pt=_small_pt(box))
+    # 통째 복사 상속이면 속성 조정이 필요 없다 — 빈 줄 크기만 바로잡는다
+    if inherit:
+        for key in (CD.NOTE_STATUS, cfg.ppt.info_box_name,
+                    CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT):
+            CD.fix_empty_para_sizes(slide, key)
+    else:
+        st_style = getattr(s, "status_style", None)
+        if st_style:
+            CD.style_note_box(slide, CD.NOTE_STATUS, st_style)
+
+    # 3) 얼굴. 케이스 덱이면 배정된 자리에 먼저 놓고, 거기서 구운 사본을
+    #    파일로도 저장한다 — 슬라이드와 폴더가 같은 그림이어야 한다.
+    face_bakes: dict[str, Path] = {}
+    if s.mode == "first" and CASE_ANCHORS:
+        face_bakes = _place_faces(prs, s)
+        # 구내 한 장짜리 슬라이드(12~16)
+        _place_intraoral(prs, s)
+        # 검수 화면에서 끌어 옮긴 계측선을 실제 도형에 반영한다
+        _apply_line_moves(prs, s)
+        # 양식 첫 장(환자정보)을 이 환자의 값으로 채운다
+        _fill_patient_info(prs, s)
+    for pid, fe in zip(s.face, pl_plan["faces"]):
+        photo = _photo(s, pid)
+        tx.stage_file(face_bakes.get(pid) or photo.path, fe["file"])
+        if fe.get("raw"):
+            tx.stage_file(photo.path, fe["raw"])
+
+    # 4) PPT 저장 후 원자적 확정
+    tx.stage_pptx(prs, ppt_name)
+
+
 @app.post("/api/commit/{sid}")
 def commit(sid: str, allow_missing: bool = False):
     s = get_session(sid)
@@ -3418,15 +3773,18 @@ def commit(sid: str, allow_missing: bool = False):
     if missing and not allow_missing:
         return JSONResponse(status_code=409, content={"error": "missing_slots", "missing": missing})
 
-    ids = s.ids
     # PPT 에 기록되는 방문 날짜 — 확정을 누른 날이 아니라 사진을 찍은 날.
     date_str = (_photo_date(s) or datetime.now()).strftime(cfg.ppt.info_date_format)
     ppt_name = pl_plan["ppt"]
 
     # PowerPoint 가 열어 둔 PPT 는 덮어쓸 수 없다 — 무거운 작업 전에 먼저 알린다.
-    if s.mode == "revisit" and s.ppt_path and Path(s.ppt_path).exists():
+    # 보는 대상은 재진 덱이 아니라 **이번에 덮어쓸 그 파일**이다. 초진이라도 같은
+    # 이름의 덱이 이미 있고 열려 있을 수 있는데, 예전에는 그때만 검사를 건너뛰어
+    # 무거운 조립을 다 마친 뒤 이동 단계에서야 실패했다.
+    target_ppt = s.patient_dir / pl_plan["ppt"]
+    if target_ppt.exists():
         try:
-            with open(s.ppt_path, "rb+"):
+            with open(target_ppt, "rb+"):
                 pass
         except PermissionError:
             return JSONResponse(status_code=409, content={
@@ -3435,168 +3793,8 @@ def commit(sid: str, allow_missing: bool = False):
                           "닫은 뒤 다시 확정해 주세요"})
 
     try:
-        src_slide = None          # 도형을 물려받을 직전 차수 슬라이드 (재진에서만)
         with S.Transaction(s.patient_dir) as tx:
-            # 1) PPT 준비
-            if s.mode == "first":
-                stage_ppt = s.tmp / ppt_name
-                prs, slide = _new_first_visit_ppt(stage_ppt)
-                # 사진은 있는데 PPT만 없는 폴더는 mode='first'로 새 PPT를 만들지만
-                # 차수는 A가 아니다 — 그때 '(초진)'이라고 쓰면 기록이 틀린다.
-                # 두 서식 모두 {visit} 를 쓴다 — "(초진 A)" 처럼 차수 글자가 붙는다
-                info_text = _render_label(date_str, s.visit,
-                                          getattr(s, "label_fp", None),
-                                          getattr(s, "visit_word", None))
-            else:
-                stage_ppt = s.tmp / ppt_name
-                shutil.copyfile(s.ppt_path, stage_ppt)
-                prs = T.load_presentation(stage_ppt)
-                # 확인 줄에서 고쳤으면 "그 번호의 장 뒤", 아니면 날짜순 규칙.
-                # n 번 장 뒤 = 0-기반 삽입 위치 n (그래서 새 장은 n+1 번이 된다).
-                pos = getattr(s, "insert_after", None)
-                insert_idx = (min(max(pos, 0), len(prs.slides._sldIdLst))
-                              if pos is not None else _revisit_insert_index(prs))
-                # 도형을 물려받을 원본 = 새 장이 끼어들 **바로 앞 장**(직전 차수)
-                src_slide = (prs.slides[insert_idx - 1] if insert_idx > 0 else None)
-                slide = W.import_template_slide(prs, TEMPLATE_PRS, insert_idx)
-                # 십자뷰 양식에는 노트 칸이 없다 — 그대로 두면 이번 차수에 적은
-                # 노트가 갈 곳이 없어 조용히 사라진다. 화면 오버레이가 쓰는
-                # 자리표(NOTE_BOXES) 그대로 만들어 화면과 결과물을 맞춘다.
-                # 날짜 칸은 이 슬라이드의 INFO_BOX 가 맡는다(자리가 겹친다).
-                if NOTE_BOXES:
-                    # 자리표는 양식 좌표다. 덱의 슬라이드가 그보다 작으면 오른쪽·아래
-                    # 칸이 밖으로 밀려나므로 모서리 기준으로 앉힌다. 여기서 새로
-                    # 만들어지는 것은 **직전 차수에 없던 칸**뿐이다 — 있던 칸은 바로
-                    # 아래에서 원본을 통째로 복사해 덮어쓴다(자리·폰트 그대로).
-                    CD.add_note_boxes_from_layout(
-                        slide, NOTE_BOXES,
-                        skip={CD.NOTE_DATE} if T.find_shape(slide, cfg.ppt.info_box_name) is not None else set(),
-                        ref_cm=CASE_SLIDE_CM, slide_cm=s.slide_cm)
-                info_text = _render_label(date_str, s.visit,
-                                          getattr(s, "label_fp", None),
-                                          getattr(s, "visit_word", None))
-            # 검은 마스크(MASK_*)는 **모든 경우** 제거한다 (2026-08-12 결정).
-            # 근거: ① 사진을 창 크기로 구워 넣어 초과가 없고, ② 슬라이드 배경
-            # 자체가 검정(000000)이라 시각적으로 동일하며, ③ 수제 레이아웃 상속
-            # 시 템플릿 좌표의 마스크가 사진 가장자리를 가리는 문제도 사라진다.
-            for sh in [x for x in slide.shapes if x.name.startswith("MASK_")]:
-                sh._element.getparent().remove(sh._element)
-
-            # 수제 PPT 상속 — 원본 라벨/상태 상자를 **통째로 복사**해 규약명으로
-            # 얹는다 (템플릿 상자는 제거). 속성 개별 상속은 숨은 규칙(lstStyle
-            # 기본값·endParaRPr 등)을 계속 놓쳐서 이 방식으로 바꿨다 (2026-08-12).
-            inherit = (getattr(s, "inherit_sp", None) or {}) if s.mode == "revisit" else {}
-            if inherit.get("label"):
-                CD.replace_with_copied_box(slide, cfg.ppt.info_box_name,
-                                           inherit["label"])
-            if inherit.get("status"):
-                CD.replace_with_copied_box(slide, CD.NOTE_STATUS,
-                                           inherit["status"])
-            # 나머지 노트 상자도 원본에 대응이 있으면 통째 복사 — 폰트 유지.
-            # 없는 상자만 설정 기본 크기(add_note_boxes_from_layout)로 만들어진다.
-            for key in (CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT):
-                if inherit.get(key):
-                    CD.replace_with_copied_box(slide, key, inherit[key])
-            # 사람이 그려 둔 선·화살표 등 — 설정에 따라 직전 장에서 가져온다
-            if s.mode == "revisit":
-                _inherit_shapes(src_slide, slide, _copy_shapes(),
-                                emu_to_cm(prs.slide_width), set(inherit))
-
-            # 2) 구내 슬롯 삽입 — 상자의 대표(0번)만 슬라이드에 들어간다
-            #    파일명은 전부 _build_plan() 이 정한 것을 쓴다(미리보기와 동일 보장).
-            # 넣는 순서가 곧 z-순서다 — insert_photo 가 매번 send_to_back 하므로
-            # **먼저 넣은 것이 맨 위**로 간다. 정면을 맨 먼저 넣어 위로 올린다:
-            # 수제 십자뷰는 사진끼리 조금씩 포개지는데(실측 덱 대부분이 상악과
-            # 정면이 1.6mm), 그 겹침에서 가려지면 안 되는 것은 정면이다.
-            # 나머지는 종전대로 slot_names 순이고, 겹치지 않는 덱은 어느 쪽이든
-            # 결과가 같다.
-            slot_entries = sorted(pl_plan["slots"],
-                                  key=lambda e: e["slot"] != Z_TOP_SLOT)
-            for entry in slot_entries:
-                if entry["empty"]:
-                    continue
-                slot = entry["slot"]
-                members = s.bins[slot]
-                photo = _photo(s, members[0])
-                win = s.slot_windows[slot]
-                # 수제 레이아웃 상속 — place_photo_in_slot 은 **앵커 위치**에
-                # 놓으므로, 새 슬라이드의 앵커·배경판을 세션 창(상속된 레이아웃)
-                # 으로 먼저 옮겨야 사진이 사람 레이아웃 자리에 들어간다.
-                for nm in (slot, W.backdrop_shape_name(slot)):
-                    shp = T.find_shape(slide, nm)
-                    if shp is not None:
-                        shp.left = int(round(win.x * EMU_PER_CM))
-                        shp.top = int(round(win.y * EMU_PER_CM))
-                        shp.width = int(round(win.w * EMU_PER_CM))
-                        shp.height = int(round(win.h * EMU_PER_CM))
-                bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
-                pl = editor_to_placement(photo.editor, win, bw, bh, PPC)
-                # 창에 보이는 만큼만 구워서 넣는다 — 그래야 이웃 슬롯을 침범하지
-                # 않는다. 환자 폴더에도 **이것**이 간다: 폴더와 PPT 가 다른 그림이면
-                # 나중에 어느 쪽이 진짜인지 다투게 된다.
-                baked, bwh = _bake_window(photo, win, photo.editor, photo.flip_v,
-                                          s.tmp / f"bake_{slot}.jpg")
-                if baked:
-                    # 창에 맞춰 구웠으므로 창 그대로 넣는다 — cover-fit 에 맡기면
-                    # 구운 파일의 정수 픽셀 비율로 크기를 다시 셈해 직전 차수
-                    # 사진과 0.01cm 어긋나 보인다.
-                    W.place_photo_in_slot(slide, slot, baked, bwh,
-                                          placement=_exact_placement(win),
-                                          letterbox_color=_letterbox_color())
-                    tx.stage_file(baked, entry["file"])
-                else:
-                    staged_img = tx.stage_file(photo.path, entry["file"])
-                    W.place_photo_in_slot(slide, slot, staged_img, (photo.w, photo.h),
-                                          placement=pl,
-                                          letterbox_color=_letterbox_color(),
-                                          flip_v=photo.flip_v)
-                if entry.get("raw"):
-                    tx.stage_file(photo.path, entry["raw"])
-                # 같은 자리의 추가 촬영본: 파일로만 저장 (슬라이드는 대표 1장)
-                for extra_pid, ex in zip(members[1:], entry["extras"]):
-                    tx.stage_file(_photo(s, extra_pid).path, ex["file"])
-            # 날짜 칸을 검수 화면에서 고쳐 썼으면 그쪽이 이긴다
-            _write_visit_label(slide, s.note_overrides.get(CD.NOTE_DATE) or info_text,
-                           None if inherit else getattr(s, "label_style", None),
-                           pin=not inherit)
-            # 차수 노트 — 채운 칸이 있는 박스만 건드린다(양식의 안내문을 함부로 지우지 않는다)
-            # 자동 계산 기본값·오버레이 수정본이 함께 나간다 — 화면 미리보기와
-            # 결과물이 같아야 한다
-            for box, text in _note_text(s).items():
-                # 빈 줄만 남은 박스는 '안 채운 것'이다. 서식의 빈 줄을 그대로
-                # 살리면서(양식의 글 시작 높이) 손 안 댄 박스의 안내문은 지키려면
-                # 공백을 걷어내고 판단해야 한다.
-                if text.strip():
-                    CD.set_note_text(slide, box, text, small_pt=_small_pt(box))
-            # 통째 복사 상속이면 속성 조정이 필요 없다 — 빈 줄 크기만 바로잡는다
-            if inherit:
-                for key in (CD.NOTE_STATUS, cfg.ppt.info_box_name,
-                            CD.NOTE_SOAP, CD.NOTE_LL, CD.NOTE_NEXT):
-                    CD.fix_empty_para_sizes(slide, key)
-            else:
-                st_style = getattr(s, "status_style", None)
-                if st_style:
-                    CD.style_note_box(slide, CD.NOTE_STATUS, st_style)
-
-            # 3) 얼굴. 케이스 덱이면 배정된 자리에 먼저 놓고, 거기서 구운 사본을
-            #    파일로도 저장한다 — 슬라이드와 폴더가 같은 그림이어야 한다.
-            face_bakes: dict[str, Path] = {}
-            if s.mode == "first" and CASE_ANCHORS:
-                face_bakes = _place_faces(prs, s)
-                # 구내 한 장짜리 슬라이드(12~16)
-                _place_intraoral(prs, s)
-                # 검수 화면에서 끌어 옮긴 계측선을 실제 도형에 반영한다
-                _apply_line_moves(prs, s)
-                # 양식 첫 장(환자정보)을 이 환자의 값으로 채운다
-                _fill_patient_info(prs, s)
-            for pid, fe in zip(s.face, pl_plan["faces"]):
-                photo = _photo(s, pid)
-                tx.stage_file(face_bakes.get(pid) or photo.path, fe["file"])
-                if fe.get("raw"):
-                    tx.stage_file(photo.path, fe["raw"])
-
-            # 4) PPT 저장 후 원자적 확정
-            tx.stage_pptx(prs, ppt_name)
+            _compose_deck(s, pl_plan, tx, date_str, ppt_name)
             moved = tx.commit()
 
         S.append_audit(LOG_FILE, {
@@ -3764,7 +3962,11 @@ def _photo_json(s, p: Photo):
             # 상자의 카드처럼 작게 보이는 자리에 쓴다 — 원본을 내려받을 이유가 없다
             "card": f"/api/thumb/{s.id}/{p.id}?w=320",
             "editor": {"dx": round(p.editor.dx_px, 2), "dy": round(p.editor.dy_px, 2),
-                       "scale": round(p.editor.scale, 4), "angle": round(p.editor.angle_deg, 3)}}
+                       "scale": round(p.editor.scale, 4), "angle": round(p.editor.angle_deg, 3)},
+            # 'initial-fit 으로 초기화' 가 돌아갈 자리
+            "editor0": {"dx": round(p.editor0.dx_px, 2), "dy": round(p.editor0.dy_px, 2),
+                        "scale": round(p.editor0.scale, 4),
+                        "angle": round(p.editor0.angle_deg, 3)}}
 
 
 def _review_json(s):
@@ -3778,6 +3980,7 @@ def _review_json(s):
     return {"mode": s.mode, "visit": s.visit, "slots": slots, "face": face, "bins": bins,
             "face_slots": _face_slots_json(s),
             "face_editors": _face_editors_json(s),
+            "face_editors0": _face_editors_json(s, s.face_editors0),
             "face_framing": dict(s.face_framing),
             "missing": [sl for sl in cfg.ppt.slot_names if sl not in s.slots]}
 
