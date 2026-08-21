@@ -588,26 +588,49 @@ function paintGrid(ctx, cv, W, H, win){
   if(!GRID.on || !win || !win.w || !win.h) return;
   const step = gridStep(win) * (W / win.w);
   if(!(step > 2)) return;                    // 너무 촘촘하면 그리지 않는다
-  const lw = cv.width / (cv.clientWidth || cv.width);
+  // 화면에서의 굵기로 환산한다 — 격자 1.5px, 중심 십자 2.5px.
+  // 그림자 오프셋은 **그 선의 굵기와 같게** 둔다. 굵기와 따로 놀면 번진 것처럼
+  // 보이고, 굵어질수록 그 어긋남이 눈에 띈다.
+  // **화면에 안 붙어 있으면 그리지 않는다.** 숨은 칸은 clientWidth 가 0 이라
+  // 배율을 알 수 없고, 그대로 그리면 선이 제 굵기의 1/4 로 얇게 박힌다.
+  // 탭이 열릴 때 그 판을 다시 그리므로(showTab) 빠뜨리지 않는다.
+  if(!cv.clientWidth) return;
+  const px = cv.width / cv.clientWidth;
+  const thin = px * 1.5, thick = px * 2.5;
   const cx = W / 2, cy = H / 2;
   const xs = gridLines(cx, W, step), ys = gridLines(cy, H, step);
 
   ctx.save();
-  for(const [color, off] of [["rgba(0,0,0,.40)", lw], ["rgba(255,255,255,.32)", 0]]){
-    ctx.strokeStyle = color; ctx.lineWidth = lw;
+  for(const [color, off] of [["rgba(0,0,0,.40)", thin], ["rgba(255,255,255,.32)", 0]]){
+    ctx.strokeStyle = color; ctx.lineWidth = thin;
     ctx.beginPath();
     for(let i = 1; i < xs.length; i++){ ctx.moveTo(xs[i] + off, 0); ctx.lineTo(xs[i] + off, H); }
     for(let i = 1; i < ys.length; i++){ ctx.moveTo(0, ys[i] + off); ctx.lineTo(W, ys[i] + off); }
     ctx.stroke();
   }
   // 중심 십자 — 지금 무엇을 기준으로 보는지가 한눈에 잡혀야 한다
-  ctx.strokeStyle = "rgba(61,144,240,.85)"; ctx.lineWidth = lw * 1.5;
-  ctx.beginPath();
-  ctx.moveTo(cx, 0); ctx.lineTo(cx, H);
-  ctx.moveTo(0, cy); ctx.lineTo(W, cy);
-  ctx.stroke();
+  for(const [color, off] of [["rgba(0,0,0,.35)", thick], ["rgba(61,144,240,.9)", 0]]){
+    ctx.strokeStyle = color; ctx.lineWidth = thick;
+    ctx.beginPath();
+    ctx.moveTo(cx + off, 0); ctx.lineTo(cx + off, H);
+    ctx.moveTo(0, cy + off); ctx.lineTo(W, cy + off);
+    ctx.stroke();
+  }
   ctx.restore();
 }
+
+/* 창 크기가 바뀌면 캔버스가 화면에서 차지하는 크기도 바뀐다. 격자 굵기는 그
+   비율로 정해지므로 다시 그려야 굵기가 유지된다 — 사진은 CSS 가 늘려 주지만
+   격자는 캔버스에 박힌 그림이라 저절로 따라오지 않는다. */
+let gridResizeTimer = null;
+addEventListener("resize", () => {
+  if(!GRID.on || VIEW !== "proc") return;
+  clearTimeout(gridResizeTimer);
+  gridResizeTimer = setTimeout(() => {
+    if(ED.slot) renderEditor();
+    redrawBoardSlots();
+  }, 150);
+});
 
 function toggleGrid(){
   GRID.on = !GRID.on;
@@ -1578,8 +1601,6 @@ async function loadMaint(){
     : ((u && u.reason) || "업데이트 확인 불가");
   el("btn-rollback").hidden = !(u && u.local);
   el("uninst").hidden = true;
-  el("uninst-data").checked = false;
-  el("uninst-confirm").hidden = true;
 }
 
 el("btn-shortcut").onclick = async () => {
@@ -1617,20 +1638,15 @@ el("btn-uninstall").onclick = async () => {
   el("uninst").hidden = false;
 };
 
-el("uninst-data").onchange = e => { el("uninst-confirm").hidden = !e.target.checked; };
 el("btn-uninstall-cancel").onclick = () => { el("uninst").hidden = true; };
 
 el("btn-uninstall-go").onclick = async () => {
-  const drop = el("uninst-data").checked;
   const tools = [...document.querySelectorAll(".uninst-tool:checked")]
                   .map(x => x.value);
   const names = [...document.querySelectorAll(".uninst-tool:checked")]
                   .map(x => x.parentElement.textContent.split(" 도 제거")[0].trim());
-  const body = {drop_data: drop, drop_tools: tools,
-                confirm: el("uninst-word").value.trim()};
-  if(drop && body.confirm !== "삭제"){ alert("확인 문구를 정확히 입력하세요"); return; }
-  if(!confirm((drop ? "저장된 사진까지 모두 지웁니다. 되돌릴 수 없습니다."
-                    : "프로그램을 지웁니다. 저장된 사진은 남습니다.") +
+  const body = {drop_tools: tools};
+  if(!confirm("프로그램을 지웁니다. 저장된 사진은 남습니다." +
               (tools.length ? `\n${names.join(" · ")} 도 제거합니다 — 다른 프로그램이 ` +
                               "쓰고 있다면 그쪽이 동작하지 않게 됩니다." : "") +
               "\n\n계속할까요?")) return;
@@ -1643,6 +1659,58 @@ el("btn-uninstall-go").onclick = async () => {
 const DOCS = {
   log: {title: "업데이트 로그", src: "/static/changelog.json"},
 };
+
+/* 본문의 **아주 작은** 마크다운만 그린다 — `` `코드` `` 와 `**굵게**`.
+
+   본문은 JSON 에 든 글이라 innerHTML 로 쓰면 그 글이 그대로 화면 요소가 된다.
+   그래서 문자열을 만들지 않고 **노드로 쌓는다**.
+
+   왼쪽부터 한 글자씩 훑는다. 표기를 따로따로 훑으면 실제 데이터에서 깨진다:
+
+   ① **굵게가 코드를 감싼다** — `**` + 백틱 + `**`. 코드를 먼저 떼어내면 양옆의
+      별표가 고아가 되어 한참 뒤의 별표와 잘못 짝짓는다(문단이 통째로 굵어졌다).
+      그래서 굵게 **안쪽을 다시 이 함수로** 그린다.
+   ② **굵게 안에 별표가 있다** — `**PowerPoint 문서(*.pptx)**`. 닫는 표기를
+      `indexOf` 로 찾으므로 홑별표는 그냥 지나간다.
+
+   짝을 못 찾은 표기는 글자 그대로 둔다. 이 제품에는 `**(구분자까지 통째로)`
+   라는 **블록 이름 자체가 별 두 개**라(F&Q 의 이름 양식 설명), 함부로 먹으면
+   안내가 거짓이 된다. 줄을 넘어가서 짝짓지도 않는다. */
+function inlineMd(text, parent){
+  let i = 0, buf = "";
+  const flush = () => {
+    if(buf){ parent.appendChild(document.createTextNode(buf)); buf = ""; }
+  };
+  const closes = (open, from) => {           // 같은 줄 안에서만 닫는다
+    const end = text.indexOf(open, from);
+    const nl = text.indexOf("\n", from);
+    return (end > from && (nl === -1 || end < nl)) ? end : -1;
+  };
+  while(i < text.length){
+    if(text[i] === "`"){
+      const end = closes("`", i + 1);
+      if(end !== -1){
+        flush();
+        const c = document.createElement("code");
+        c.textContent = text.slice(i + 1, end);
+        parent.appendChild(c);
+        i = end + 1; continue;
+      }
+    }
+    if(text.startsWith("**", i)){
+      const end = closes("**", i + 2);
+      if(end !== -1){
+        flush();
+        const b = document.createElement("strong");
+        inlineMd(text.slice(i + 2, end), b);   // 안쪽의 `코드` 도 그린다
+        parent.appendChild(b);
+        i = end + 2; continue;
+      }
+    }
+    buf += text[i++];
+  }
+  flush();
+}
 
 async function openDoc(kind){
   const d = DOCS[kind];
@@ -1674,7 +1742,7 @@ async function openDoc(kind){
         pre.textContent = seg.replace(/^\n|\n$/g, "");
         bd.appendChild(pre);
       }else if(seg){
-        bd.appendChild(document.createTextNode(seg));
+        inlineMd(seg, bd);
       }
     });
     dt.append(sm, bd);

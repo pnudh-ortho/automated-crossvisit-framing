@@ -7,7 +7,10 @@ REM  often exactly when you want to remove it.
 REM
 REM  A .bat cannot delete the folder it is running from (cmd holds a
 REM  handle), so this copies itself to %TEMP% and re-runs from there.
-REM  ASCII only, CRLF endings: cmd reads .bat in the system code page.
+REM  CRLF endings.  This file is UTF-8 and switches the console to
+REM  code page 65001 before printing: the save locations are usually
+REM  Korean, and in the system code page those lines vanished entirely.
+REM  The original code page is restored before we finish.
 REM ---------------------------------------------------------------
 
 if "%~1"=="--stage2" goto stage2
@@ -15,46 +18,37 @@ if "%~1"=="--stage2" goto stage2
 cd /d "%~dp0"
 set "PROG=%CD%"
 
-REM -- find the patient data folder (settings.json wins, else sibling)
-set "DATA=%PROG%_data"
-if exist "settings.json" (
-  for /f "tokens=2 delims=:" %%a in ('findstr /i "\"root\"" settings.json') do (
-    set "RAW=%%a"
-  )
-  if defined RAW (
-    set "RAW=!RAW:"=!"
-    set "RAW=!RAW:,=!"
-    for /f "tokens=* delims= " %%b in ("!RAW!") do set "DATA=%%b"
-  )
-)
+REM -- Remember the console code page so we can put it back.
+for /f "tokens=2 delims=:" %%c in ('chcp') do set "OLDCP=%%c"
+chcp 65001 >nul
 
 echo ===============================================
 echo   Uninstall
 echo ===============================================
 echo.
-echo   Program folder : %PROG%
-echo   Patient data   : !DATA!
+echo   지울 폴더 : %PROG%
 echo.
-echo   The program folder will be removed.
-echo   Patient data is KEPT unless you ask otherwise.
+echo   기존 사진 폴더와 CRoCs 를 쓰며 저장한 위치에는 PATIENT DATA 가
+echo   있습니다. 의료기록이 영구히 지워지는 것을 막기 위해, 삭제 과정에서
+echo   이 위치들은 건드리지 않습니다. 더 필요하지 않으면 사용자가 직접
+echo   탐색기에서 지워 주세요.
+echo.
+echo   현재 설정에 저장된 저장 위치:
+set "FOUND="
+for /f "usebackq delims=" %%a in (`powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; try { $j = ConvertFrom-Json (Get-Content -Raw -Encoding UTF8 -LiteralPath 'settings.json' -ErrorAction Stop); $l = @(); if ($j.root) { $l += $j.root }; if ($j.roots) { $l += $j.roots }; $s = @{}; foreach ($q in $l) { if ($q -and -not $s[$q]) { $s[$q] = 1; Write-Output $q } } } catch { }"`) do (
+  echo       %%a
+  set "FOUND=1"
+)
+if not defined FOUND echo       ^(settings.json 을 읽지 못했습니다^)
 echo.
 
-set /p GO="Remove the program? (y/N): "
+set /p GO="프로그램을 지울까요? (y/N): "
 if /i not "%GO%"=="y" goto abort
 
-set "DROP="
-echo.
-set /p D2="Also delete PATIENT DATA?  This cannot be undone. (y/N): "
-if /i "%D2%"=="y" (
-  echo.
-  echo   Type  DELETE  to confirm removal of patient records.
-  set /p W="  > "
-  if /i "!W!"=="DELETE" (
-    set "DROP=!DATA!"
-  ) else (
-    echo   Not confirmed - patient data will be kept.
-  )
-)
+REM -- Patient data is never deleted here. Medical records cannot be
+REM    recovered from "rmdir /s /q" - it does not use the Recycle Bin -
+REM    and a mistyped confirmation is not worth that risk.
+REM    We print the path instead and let the user delete it in Explorer.
 
 REM -- Git / Python.  These are system tools: ask one at a time.
 REM    ".installed_tools" lists what OUR installer added; when it exists we
@@ -97,15 +91,16 @@ if defined PYFOUND (
 )
 
 copy /y "%~f0" "%TEMP%\acf_uninstall.bat" >nul
-start "" cmd /c ""%TEMP%\acf_uninstall.bat" --stage2 "%PROG%" "!DROP!" "!TOOLS!""
+REM -- 콘솔을 원래 코드페이지로 되돌린 뒤 넘긴다
+if defined OLDCP chcp %OLDCP% >nul
+start "" cmd /c ""%TEMP%\acf_uninstall.bat" --stage2 "%PROG%" "!TOOLS!""
 exit /b
 
 :stage2
 REM -- running from %TEMP% now; the program folder is free to delete
 timeout /t 2 /nobreak >nul
 set "PROG=%~2"
-set "DROP=%~3"
-set "TOOLS=%~4"
+set "TOOLS=%~3"
 
 REM -- desktop shortcut (both the plain and the OneDrive desktop)
 del /f /q "%USERPROFILE%\Desktop\CRoCs Fastest Lap.lnk" 2>nul
@@ -122,10 +117,6 @@ if exist "%PROG%" (
   timeout /t 3 /nobreak >nul
   rmdir /s /q "%PROG%" 2>nul
 )
-if not "%DROP%"=="" (
-  echo Removing %DROP% ...
-  rmdir /s /q "%DROP%" 2>nul
-)
 echo.
 if exist "%PROG%" (
   echo [warn] Some files could not be removed. Close any open windows
@@ -139,6 +130,7 @@ pause
 exit /b
 
 :abort
+if defined OLDCP chcp %OLDCP% >nul
 echo.
 echo Cancelled.  Nothing was removed.
 echo.

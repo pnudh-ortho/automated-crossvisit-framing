@@ -594,6 +594,14 @@ body{
 .doclist .body{padding:0 12px 10px 27px; font-size:14px; line-height:1.55;
   white-space:pre-wrap; color:var(--ink);}
 /* 본문 속 표 — 고정폭이라야 칸이 맞는다. 넓으면 이 블록만 가로로 스크롤된다. */
+/* 본문 안의 인라인 표기 — inlineMd() 가 만든 노드. 코드는 주변 글과 구별되게
+   바탕을 깔고, 굵게는 굵기만 올린다(색까지 바꾸면 문단이 얼룩진다). */
+.doclist .body code{
+  font:12.5px/1.5 var(--f-mono); padding:1px 5px; border-radius:4px;
+  background:var(--panel2); border:1px solid var(--edge-soft);
+  white-space:pre-wrap; word-break:break-all;
+}
+.doclist .body strong{font-weight:600;}
 .doclist .body pre.mono{margin:6px 0; padding:8px 10px; overflow-x:auto;
   font:12.5px/1.6 var(--f-mono); white-space:pre; color:var(--ink);
   background:var(--panel); border:1px solid var(--edge-soft); border-radius:6px;}
