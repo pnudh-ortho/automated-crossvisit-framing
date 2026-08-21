@@ -161,12 +161,14 @@ async function renderSlot(key){
   if(!cv || !p) return;
   const img = await getImg(p.thumb);
   const {w, h} = fitCanvas(cv, key);
+  const ctx = cv.getContext("2d");
   // Tab 대보기 — 이 칸을 기준 그림 **그대로** 채운다. 기준 그림은 이미 창
   // 좌표라 지금 조정값을 얹지 않는다. 얹으면 기준이 아니게 된다.
   if(PEEK.on){
     const ref = await boardRefImg(key);
     if(ref){
-      drawComposite(cv.getContext("2d"), w, h, ref, {dx:0, dy:0, scale:1, angle:0}, false);
+      drawComposite(ctx, w, h, ref, {dx:0, dy:0, scale:1, angle:0}, false);
+      paintGrid(ctx, cv, w, h, slotWindow(key));   // 기준도 같은 창 좌표다
       return;
     }
   }
@@ -174,11 +176,13 @@ async function renderSlot(key){
   if(OV.on){
     const ref = await boardRefImg(key);
     if(ref){
-      drawAnaglyph(cv.getContext("2d"), w, h, ref, img, p.editor);
+      drawAnaglyph(ctx, w, h, ref, img, p.editor);
+      paintGrid(ctx, cv, w, h, slotWindow(key));
       return;
     }
   }
-  drawComposite(cv.getContext("2d"), w, h, img, p.editor, false);
+  drawComposite(ctx, w, h, img, p.editor, false);
+  paintGrid(ctx, cv, w, h, slotWindow(key));
 }
 
 /* 슬롯의 기준영상 — 기준 사진을 창에 구워 낸 것. 슬롯당 하나다. */
@@ -351,6 +355,10 @@ async function syncOverlayBar(){
   const bar = el("ov-bar"); if(!bar) return;
   const has = ED.slot && !ED.slot.startsWith("FACE") && OV.list[ED.slot];
   bar.hidden = !has;
+  // 대보기 안내도 같이 — 기준이 없으면 Tab 이 할 일이 없다. Space·Shift 줄은
+  // 기준이 없을 때도 쓰는 키라 안내 블록 자체는 늘 떠 있다.
+  const peekHint = el("hint-peek");
+  if(peekHint) peekHint.hidden = bar.hidden;
   if(!has){ OV.img = null; return; }
   if(OV.slot !== ED.slot || !OV.img){
     OV.slot = ED.slot; OV.img = null;
@@ -370,24 +378,84 @@ function renderEditor(){
   const ctx = cv.getContext("2d");
   if(ZOOM.on && PEEK.on && OV.img && OV.slot === ED.slot){
     drawComposite(ctx, w, h, OV.img, {dx:0, dy:0, scale:1, angle:0}, false);
-    return;
-  }
-  if(OV.on && OV.img && OV.slot === ED.slot)
+  }else if(OV.on && OV.img && OV.slot === ED.slot){
     drawAnaglyph(ctx, w, h, OV.img, ED.img, ED);
-  else
+  }else{
     drawComposite(ctx, w, h, ED.img, ED, true);
+  }
+  paintGrid(ctx, cv, w, h, slotWindow(ED.slot));
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/* 값 칸에 숫자를 써 넣는다 — **지금 그 칸에 타이핑 중이면 건드리지 않는다.**
+   드래그와 휠은 움직이는 내내 syncKnobs 를 부르는데, 그때마다 덮어쓰면 커서가
+   튀고 `-` 나 `1` 만 친 중간 상태가 지워진다. */
+function setNum(id, v){
+  const n = el(id);
+  if(n && n !== document.activeElement) n.value = v;
+}
+
+/* 값 칸 하나를 편집기에 잇는다.
+
+   반영은 치는 도중(input)이 아니라 **다 치고 났을 때**(change) 한다 — `-` 만
+   친 순간에 사진이 왼쪽 끝으로 튀면 안 된다. Enter 는 포커스를 놓아 같은 길로
+   보낸다. 값이 헛것이면 실제 값을 다시 써 준다. */
+function bindNum(id, lo, hi, step, get, set, apply, resync, editable){
+  const n = el(id); if(!n) return;
+  n.onchange = () => {
+    // syncKnobs 는 타이핑 중인 칸을 건드리지 않는다 — 포커스를 먼저 놓아 주어야
+    // 잘라 낸 값·되돌린 값이 칸에 실제로 써진다.
+    n.blur();
+    if(!editable()){ resync(); return; }
+    const v = parseFloat(n.value);
+    if(!Number.isFinite(v)){ resync(); return; }
+    set(clamp(v, lo, hi));
+    apply();
+  };
+  n.onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); n.blur(); } };
+  // ◀ ▶ — 한 칸씩 민다. 눈금에 **다시 맞춰** 놓는 것이 요령이다: 0.1 을 더하기만
+  // 하면 부동소수 찌꺼기가 쌓여 3.0000000000000004° 같은 값이 칸에 뜬다.
+  const bump = dir => {
+    if(!editable()) return;
+    const v = Math.round((get() + dir * step) / step) * step;
+    set(clamp(+v.toFixed(4), lo, hi));
+    apply();
+  };
+  holdRepeat(el(id + "-dn"), () => bump(-1));
+  holdRepeat(el(id + "-up"), () => bump(+1));
+}
+
+/* 버튼을 누르고 있으면 이어서 눌린다.
+
+   한 칸이 0.1°·1px 이라 한 번씩만 먹으면 조금 옮기는 데도 손이 여러 번 간다.
+   `click` 이 아니라 `pointerdown` 에서 시작하는 이유가 그것이다 — click 은 길게
+   눌러도 한 번뿐이다. 창 어디서 손을 떼든 멈추도록 문서에도 걸어 둔다. */
+function holdRepeat(btn, fn){
+  if(!btn) return;
+  let wait = null, tick = null;
+  const stop = () => { clearTimeout(wait); clearInterval(tick); wait = tick = null; };
+  btn.addEventListener("pointerdown", e => {
+    if(btn.disabled || e.button) return;
+    e.preventDefault();          // 포커스를 주지 않는다 — Space 가 '크게 보기'와 겹친다
+    fn();
+    wait = setTimeout(() => { tick = setInterval(fn, 60); }, 400);
+  });
+  for(const ev of ["pointerup", "pointercancel", "pointerleave"])
+    btn.addEventListener(ev, stop);
+  addEventListener("pointerup", stop);
+  addEventListener("pointercancel", stop);
+}
+
 function syncKnobs(){
   el("ed-angle").value = ED.angle.toFixed(1);
   el("ed-scale").value = Math.round(clamp(ED.scale, .5, 2) * 100);
   el("ed-tx").value = Math.round(clamp(ED.dx, -200, 200));
   el("ed-ty").value = Math.round(clamp(ED.dy, -200, 200));
-  el("v-angle").textContent = ED.angle.toFixed(1) + "°";
-  el("v-scale").textContent = Math.round(ED.scale * 100) + "%";
-  el("v-tx").textContent = Math.round(ED.dx);
-  el("v-ty").textContent = Math.round(ED.dy);
+  setNum("v-angle", ED.angle.toFixed(1));
+  setNum("v-scale", Math.round(ED.scale * 100));
+  setNum("v-tx", Math.round(ED.dx));
+  setNum("v-ty", Math.round(ED.dy));
 }
 
 function edPhoto(){
@@ -428,7 +496,28 @@ function bindEditor(){
   el("ed-scale").oninput = () => { ED.scale = +el("ed-scale").value / 100; afterEdit(); };
   el("ed-tx").oninput = () => { ED.dx = +el("ed-tx").value; afterEdit(); };
   el("ed-ty").oninput = () => { ED.dy = +el("ed-ty").value; afterEdit(); };
-  el("ed-reset").onclick = () => { ED.dx = ED.dy = 0; ED.scale = 1; ED.angle = 0; afterEdit(); };
+  // 값 칸과 ◀ ▶ 는 **조절 바와 같은 눈금**을 쓴다(회전 0.1° · 배율 1% · 이동 1px).
+  // 배율만 칸의 단위가 % 라, 읽고 쓸 때 100 을 곱하고 나눈다.
+  const onSlot = () => !!(ED.slot && edPhoto());
+  bindNum("v-angle", -10, 10, .1, () => ED.angle, v => ED.angle = v,
+          afterEdit, syncKnobs, onSlot);
+  bindNum("v-scale", 50, 200, 1, () => ED.scale * 100, v => ED.scale = v / 100,
+          afterEdit, syncKnobs, onSlot);
+  bindNum("v-tx", -200, 200, 1, () => ED.dx, v => ED.dx = v,
+          afterEdit, syncKnobs, onSlot);
+  bindNum("v-ty", -200, 200, 1, () => ED.dy, v => ED.dy = v,
+          afterEdit, syncKnobs, onSlot);
+  /* **initial-fit** = 자동으로 잡아 준 첫 구도. 기준이 있으면 정합 결과, 없으면
+     프레이밍 모델의 예측이고, 둘 다 못 쓴 자리에서만 cover-fit 이다.
+     예전에는 무조건 cover-fit(가운데·무회전)으로 돌아가서, 손이 미끄러졌을 때
+     되돌리면 **정합까지 함께 버려졌다** — 그 자리를 다시 잡으려면 눈대중으로
+     맞추는 수밖에 없었다. 서버가 그 값을 editor0 로 함께 내려 준다. */
+  el("ed-reset").onclick = () => {
+    const p = edPhoto(); if(!p) return;
+    const z = p.editor0 || {dx: 0, dy: 0, scale: 1, angle: 0};
+    ED.dx = z.dx; ED.dy = z.dy; ED.scale = z.scale; ED.angle = z.angle;
+    afterEdit();
+  };
   cv.addEventListener("pointerdown", e => {
     if(!ED.slot) return;
     ED.drag = true; ED.lx = e.offsetX; ED.ly = e.offsetY; cv.setPointerCapture(e.pointerId);
@@ -450,6 +539,105 @@ function bindEditor(){
   }, {passive:false});
 }
 
+/* ══ 격자 보기 (Shift) ═══════════════════════════════════════════════════════
+   구도를 **재는** 도구다. 기울었는가, 가운데인가, 기준과 배율이 같은가 —
+   눈대중으로는 안 되는 판단들이라 자를 대야 한다.
+
+   격자는 **창에 고정**된다. 사진을 따라 돌면 기준이 함께 기울어 항상 맞아
+   보이므로, 기울었는지를 영영 알 수 없다. 사진만 그 아래에서 움직인다.
+
+   저장되는 사진에는 들어가지 않는다 — 여기는 화면을 그리는 길이고, 굽는 길은
+   따로다. 막을 것이 없다. */
+const GRID = {on: false};
+
+/* 격자 간격(cm). **짧은 변이 8칸을 넘지 않는 가장 촘촘한 값**을 고른다.
+
+   창이 자리마다 다르기 때문이다: 구내 슬롯과 얼굴 자리는 크기가 다르다.
+   한 값으로 못박으면 한쪽은 방충망이 되고 다른 쪽은 성기다. 이 규칙이면
+   8.4×6.3 창은 1cm(8×6칸)가 되어 눈에 보이는 밀도가 알맞고, 비율 설정으로
+   창이 바뀌어도 같은 규칙으로 따라간다. */
+function gridStep(win){
+  const short = Math.min(win.w, win.h);
+  for(const cm of [1, 2, 5]) if(short / cm <= 8) return cm;
+  return 5;
+}
+
+/* 중심에서 바깥으로 그은 선들의 좌표.
+
+   **가장자리가 아니라 중심에 문다.** 8.4cm 창의 절반은 4.2cm 라, 가장자리에서
+   1cm 씩 세면 4.0 과 5.0 에 선이 가고 정작 가장 중요한 중심선이 격자에서
+   빗나간다. 중심을 첫 선으로 두면 그 일이 없다(반환값 [0]번이 중심). */
+function gridLines(center, size, step){
+  const out = [];
+  for(let v = center; v > 0; v -= step) out.push(v);
+  for(let v = center + step; v < size; v += step) out.push(v);
+  return out;
+}
+
+/* 캔버스 위에 격자를 얹는다. 켜져 있지 않거나 창을 모르면 아무것도 안 한다.
+
+   굵기를 화면 기준으로 환산하는 것이 요령이다. 캔버스 고유 크기(840px)와 화면
+   표시 크기(≈320px)가 다르므로, 캔버스 1px 선은 화면에서 0.4px 가 되어 사라진다.
+   드래그 환산이 쓰는 그 배율을 그대로 쓰면 판·편집기·크게 보기 어디서든 화면에서
+   같은 굵기로 보인다.
+
+   선을 두 번 긋는 이유 — 구내 사진 한 장에 붉은 잇몸·흰 치아·검은 여백이 함께
+   있어서 한 가지 색으로는 어딘가에서 반드시 묻힌다. 검은 선을 한 픽셀 밀어
+   깔고 그 위에 흰 선을 올리면 어느 바탕에서도 남는다. */
+function paintGrid(ctx, cv, W, H, win){
+  if(!GRID.on || !win || !win.w || !win.h) return;
+  const step = gridStep(win) * (W / win.w);
+  if(!(step > 2)) return;                    // 너무 촘촘하면 그리지 않는다
+  const lw = cv.width / (cv.clientWidth || cv.width);
+  const cx = W / 2, cy = H / 2;
+  const xs = gridLines(cx, W, step), ys = gridLines(cy, H, step);
+
+  ctx.save();
+  for(const [color, off] of [["rgba(0,0,0,.40)", lw], ["rgba(255,255,255,.32)", 0]]){
+    ctx.strokeStyle = color; ctx.lineWidth = lw;
+    ctx.beginPath();
+    for(let i = 1; i < xs.length; i++){ ctx.moveTo(xs[i] + off, 0); ctx.lineTo(xs[i] + off, H); }
+    for(let i = 1; i < ys.length; i++){ ctx.moveTo(0, ys[i] + off); ctx.lineTo(W, ys[i] + off); }
+    ctx.stroke();
+  }
+  // 중심 십자 — 지금 무엇을 기준으로 보는지가 한눈에 잡혀야 한다
+  ctx.strokeStyle = "rgba(61,144,240,.85)"; ctx.lineWidth = lw * 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx, 0); ctx.lineTo(cx, H);
+  ctx.moveTo(0, cy); ctx.lineTo(W, cy);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function toggleGrid(){
+  GRID.on = !GRID.on;
+  renderEditor();
+  redrawBoardSlots();
+}
+
+/* Shift 톡 — **단독으로 눌렀다 뗐을 때만** 반응한다.
+
+   사이에 다른 키나 마우스가 끼면 그건 Shift+Tab(포커스를 빼내는 길, 일부러
+   브라우저에 넘겨준다)이거나 Shift+클릭이지 격자를 켜라는 뜻이 아니다.
+   창이 포커스를 잃으면 추적을 접는다 — 떼는 신호를 못 받고 남은 상태로 다음
+   Shift 가 엉뚱하게 반응하는 것을 막는다. */
+let shiftAlone = false;
+addEventListener("keydown", e => {
+  if(e.key === "Shift"){ if(!e.repeat) shiftAlone = true; return; }
+  shiftAlone = false;
+}, true);
+addEventListener("keyup", e => {
+  if(e.key !== "Shift") return;
+  const alone = shiftAlone; shiftAlone = false;
+  if(!alone || VIEW !== "proc") return;
+  const t = document.activeElement;   // 글 치는 중이면 격자가 튀어나오면 안 된다
+  if(t && (t.isContentEditable || t.tagName === "TEXTAREA" ||
+           (t.tagName === "INPUT" && t.type !== "range"))) return;
+  toggleGrid();
+}, true);
+addEventListener("pointerdown", () => { shiftAlone = false; }, true);
+addEventListener("blur", () => { shiftAlone = false; });
+
 /* 키보드: 1~5 슬롯, 방향키 이동, Q/E 회전, A/D 배율 (e.code라 한/영 무관) */
 addEventListener("keydown", e => {
   if(VIEW !== "proc") return;
@@ -469,7 +657,11 @@ addEventListener("keydown", e => {
     return;
   }
   if(!ED.slot || !edPhoto()) return;
-  const mv = e.shiftKey ? 15 : 4, rot = e.shiftKey ? 1 : .2, sc = e.shiftKey ? .04 : .02;
+  // 한 번 누를 때 움직이는 양 = **조절 바 한 칸**. 이동 1px(0.1mm) · 회전 0.1°
+  // · 배율 1%. 키와 슬라이더가 다른 눈금을 쓰면 "슬라이더로 1 올렸다가 키로
+  // 되돌리기"가 안 되고, 같은 화면의 두 도구가 서로 다른 자를 들게 된다.
+  // 크게 옮길 일은 드래그와 휠이 맡는다(눌러 두면 키가 자동 반복된다).
+  const mv = 1, rot = .1, sc = .01;
   let hit = true;
   switch(code){
     case "ArrowLeft":  ED.dx = clamp(ED.dx - mv, -200, 200); break;
@@ -1046,6 +1238,7 @@ function resetSession(){
   boardEl.innerHTML = ""; segEl.innerHTML = "";
   exitZoom();
   PEEK.on = false; clearTimeout(PEEK.timer);
+  GRID.on = false;      // Tab 대보기와 같은 규칙 — 새 작업은 깨끗한 화면에서
   UP.folder = ""; UP.prefix = ""; UP.pfxCustom = false;
   const f = el("up-folder"), x = el("up-prefix"), c = el("up-pfx-on");
   if(f) f.value = "";

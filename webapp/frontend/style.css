@@ -1004,12 +1004,25 @@ body{
   background:#ffffff26; margin:0 1px;
 }
 .board.peeking .cell{outline:2px solid #ffd166; outline-offset:-2px;}
-/* 힌트는 범례 바로 뒤 — 오른쪽 끝으로 미는 일은 .ovkey 의 margin-left:auto 가 한다 */
-.ovhint{flex:none; color:var(--ink3); font-size:12px; white-space:nowrap;}
-.ovhint i{font-style:normal; margin:0 5px; color:var(--edge);}
-.ovhint kbd{
+/* 보는 방법 — Tab · Space · Shift.
+
+   한 줄에 몰아 쓰면 셋 중 무엇이 무엇인지 눈이 훑어야 한다. 키를 왼쪽 기둥에
+   세우고 한 줄에 하나씩 놓으면 글자가 세로로 맞아 한눈에 잡힌다.
+
+   **겹쳐보기 바 밖에 있다.** 그 바는 기준 사진이 없으면 통째로 숨는데,
+   Space·Shift 는 그때도 쓰는 키라 거기 얹으면 영영 못 본다. */
+.keyhint{
+  display:grid; grid-template-columns:auto 1fr; gap:3px 8px;
+  align-items:center; margin:6px 0 2px;
+  font:12px/1.45 var(--f-ui); color:var(--ink3);
+}
+/* 줄을 격자에 **녹여** 두 칸으로 편다 — 그래야 키 칸의 폭이 셋 다 같아진다 */
+.keyhint .row{display:contents;}
+.keyhint .row[hidden]{display:none;}
+.keyhint kbd{
   font:600 11px var(--f-mono); padding:1px 5px; border-radius:4px;
-  border:1px solid var(--edge); background:var(--panel2); margin-right:4px;
+  border:1px solid var(--edge); background:var(--panel2);
+  color:var(--ink2); text-align:center;
 }
 .board{
   position:relative;   /* 노트 오버레이(.noteov)의 기준 */
@@ -1064,6 +1077,7 @@ body{
    슬라이더·안내줄은 제 높이를 지킨다. */
 #dock-photo{display:flex; flex-direction:column; flex:1 1 auto; min-height:0;}
 #dock-photo > .ovbar,
+#dock-photo > .keyhint,
 #dock-photo > .knobs,
 #dock-photo > .readout,
 #dock-photo > .btn,
@@ -1096,11 +1110,40 @@ body{
 /* dock 소제목의 부가 정보 — 원래 .sec > h3 에만 걸려 있어 dock에서는 무색이었다 */
 .dock > h3 .aux{font:12.5px/1 var(--f-mono); color:var(--ink2);
   text-transform:none; letter-spacing:0; margin-left:auto;}
-.knobs{display:grid; grid-template-columns:50px minmax(0,1fr) 44px; gap:11px 9px;
+.knobs{display:grid; grid-template-columns:44px minmax(0,1fr) 98px; gap:11px 8px;
   align-items:center; font-size:13px; color:var(--ink2);}
 .knobs input{width:100%; accent-color:var(--accent);}
 .knobs input:disabled{opacity:.4; cursor:not-allowed;}
-.knobs .v{text-align:right; font-family:var(--f-mono); color:var(--ink);}
+/* 값 칸 — 보여주기만 하던 것을 **직접 쳐 넣을 수 있게** 바꿨다. 슬라이더로는
+   맞추기 어려운 값(-3.4°, 137%)을 손으로 적는 길이 필요했다. 평소에는 테두리를
+   지워 종전처럼 '읽는 숫자'로 보이다가, 손이 가면 칸이 드러난다. */
+.knobs .v{display:flex; align-items:center; justify-content:flex-end; gap:1px;
+  font-family:var(--f-mono); color:var(--ink);}
+.knobs .v input{
+  flex:1 1 auto; width:auto; min-width:0; text-align:right; padding:2px 3px;
+  background:transparent; border:1px solid transparent; border-radius:5px;
+  font:inherit; color:inherit; -moz-appearance:textfield;
+}
+.knobs .v input::-webkit-outer-spin-button,
+.knobs .v input::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
+.knobs .v input:hover:not(:disabled){border-color:var(--edge);}
+.knobs .v input:focus{border-color:var(--accent); background:var(--panel2); outline:none;}
+.knobs .v i{font-style:normal; color:var(--ink3);}
+/* ◀ ▶ — 한 번 누르면 조절 바 한 칸(=단축키 한 번). 눌러 두면 이어서 간다.
+   슬라이더는 잡고 흔드는 도구라 한 칸씩 정확히 놓기가 어렵다 — 그 자리를 메운다. */
+.knobs .stepper{display:flex; gap:2px; margin-left:3px; flex:none;}
+.knobs .stepb{
+  width:16px; height:19px; padding:0; flex:none;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--panel); color:var(--ink3);
+  border:1px solid var(--edge); border-radius:4px;
+  font-size:8px; line-height:1; cursor:pointer;
+  -webkit-user-select:none; user-select:none; touch-action:none;
+}
+.knobs .stepb:hover:not(:disabled){border-color:var(--accent); color:var(--accent);}
+.knobs .stepb:active:not(:disabled){background:var(--accent); color:var(--on-accent);
+  border-color:var(--accent);}
+.knobs .stepb:disabled{opacity:.4; cursor:not-allowed;}
 .readout{
   margin:13px 0 0; padding:9px 11px; background:var(--panel2);
   border:1px solid var(--edge-soft); border-radius:7px;

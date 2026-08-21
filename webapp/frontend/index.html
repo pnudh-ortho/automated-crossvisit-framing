@@ -156,16 +156,23 @@
                     <span>기준 겹쳐보기</span>
                   </label>
                   <span class="ovkey"><i class="r"></i>기준<i class="c"></i>현재</span>
-                  <span class="ovhint"><kbd>Tab</kbd> 기준 대보기<i>·</i><kbd>Space</kbd> 크게 보기</span>
+                </div>
+                <!-- 보는 방법. 겹쳐보기 바와 달리 **기준이 없어도 뜬다** —
+                     Space·Shift 는 기준 사진이 없을 때도 쓰는 키다. -->
+                <div class="keyhint">
+                  <span class="row" id="hint-peek" hidden><kbd>Tab</kbd><span>기준 대보기</span></span>
+                  <span class="row"><kbd>Space</kbd><span>크게 보기</span></span>
+                  <span class="row"><kbd>Shift</kbd><span>격자 보기</span></span>
                 </div>
                 <div class="knobs">
-                  <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v" id="v-angle">0.0°</span>
-                  <span>배율</span><input type="range" id="ed-scale" min="50" max="200" value="100"><span class="v" id="v-scale">100%</span>
-                  <span>가로</span><input type="range" id="ed-tx" min="-200" max="200" value="0"><span class="v" id="v-tx">0</span>
-                  <span>세로</span><input type="range" id="ed-ty" min="-200" max="200" value="0"><span class="v" id="v-ty">0</span>
+                  <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v"><input type="number" id="v-angle" min="-10" max="10" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="v-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="v-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
+                  <span>배율</span><input type="range" id="ed-scale" min="50" max="200" value="100"><span class="v"><input type="number" id="v-scale" min="50" max="200" step="1" value="100"><i>%</i><span class="stepper"><button type="button" class="stepb" id="v-scale-dn" tabindex="-1" aria-label="배율 줄이기">◀</button><button type="button" class="stepb" id="v-scale-up" tabindex="-1" aria-label="배율 늘리기">▶</button></span></span>
+                  <span>가로</span><input type="range" id="ed-tx" min="-200" max="200" value="0"><span class="v"><input type="number" id="v-tx" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="v-tx-dn" tabindex="-1" aria-label="가로 줄이기">◀</button><button type="button" class="stepb" id="v-tx-up" tabindex="-1" aria-label="가로 늘리기">▶</button></span></span>
+                  <span>세로</span><input type="range" id="ed-ty" min="-200" max="200" value="0"><span class="v"><input type="number" id="v-ty" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="v-ty-dn" tabindex="-1" aria-label="세로 줄이기">◀</button><button type="button" class="stepb" id="v-ty-up" tabindex="-1" aria-label="세로 늘리기">▶</button></span></span>
                 </div>
-                <button class="btn" id="ed-reset">cover-fit 초기화</button>
-                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율<br><b>1~5</b> 슬롯 · <b>Shift</b> 크게 움직이기 · <b>Space</b> 크게 보기 · 자동 저장</p>
+                <button class="btn" id="ed-reset" title="자동으로 잡아 준 첫 구도로 되돌립니다 — 기준이 있으면 정합 결과, 없으면 프레이밍 예측">initial-fit으로 초기화</button>
+                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율 · 방향키 이동<br>
+                  단축키 한 번 = 조절 바 한 칸(회전 0.1° · 배율 1% · 이동 1px)<br><b>1~5</b> 슬롯 · 자동 저장</p>
               </div>
               <button class="btn primary wide" id="btn-tofin">저장 검토로 ▶</button>
               <p class="tip" id="tofin-note"></p>

@@ -440,6 +440,11 @@ class Photo:
         self.flip = False
         self.flip_user = False     # 사람이 직접 토글했으면 기본값이 덮지 않는다
         self.editor = EditorState()
+        # **initial-fit** — 자동으로 잡아 준 첫 구도. 짝이 있으면 정합 결과,
+        # 없으면 프레이밍 모델의 예측이고, 둘 다 못 쓰면 cover-fit 이다.
+        # 사람이 손으로 만진 뒤 '되돌리기'가 돌아갈 자리라, editor 와 달리
+        # **조작으로 바뀌지 않는다** — _frame_slot 이 다시 계산할 때만 갱신된다.
+        self.editor0 = EditorState()
         self.badge = "ok"          # ok | low | manual | missing
         self.taken_at = None       # EXIF 촬영시각, 서브초 있으면 microsecond까지
         self.exif_seq = None       # EXIF ImageNumber (대개 없다)
@@ -1172,6 +1177,7 @@ def _apply_default_flip(s: "Session", photo: Photo, flips: dict | None = None) -
     if want != photo.flip:
         photo.flip = want
         photo.editor = flip_editor_v(photo.editor)
+        photo.editor0 = flip_editor_v(photo.editor0)
         _drop_eff_cache(s, photo)
 
 
@@ -1271,6 +1277,7 @@ def flip_photo(req: FlipReq):
         if photo.flip != bool(req.on):
             photo.flip = bool(req.on)
             photo.editor = flip_editor_v(photo.editor)
+            photo.editor0 = flip_editor_v(photo.editor0)
             _drop_eff_cache(s, photo)
             _invalidate(s, photo)
         photo.flip_user = True
@@ -1393,6 +1400,7 @@ def _frame_slot(s: "Session", slot: str) -> None:
             _audit({"event": "register_skipped", "reason": "no_reference",
                     "folder": s.folder, "slot": slot})
         _auto_frame(s, photo, win, fallback_badge=badge)
+        photo.editor0 = photo.editor   # 방금 잡은 구도가 이 자리의 initial-fit
         s.progress[slot] = "fallback" if s.mode == "revisit" else "frame"
         return
 
@@ -1411,6 +1419,7 @@ def _frame_slot(s: "Session", slot: str) -> None:
         _audit({"event": "register_error", "folder": s.folder, "slot": slot,
                 "error": f"{type(e).__name__}: {e}"[:300]})
         _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
+        photo.editor0 = photo.editor
         s.progress[slot] = "fallback"
         return
     if res.ok:
@@ -1425,6 +1434,7 @@ def _frame_slot(s: "Session", slot: str) -> None:
                 "score": round(res.score, 4)})
         _auto_frame(s, photo, win, fallback_badge="manual", bgr=arr)
         s.progress[slot] = "fallback"
+    photo.editor0 = photo.editor
     _audit({"event": "frame_timing", "slot": slot,
             "ms": round((time.perf_counter() - t0) * 1000)})
 
@@ -1464,6 +1474,7 @@ def register_session(sid: str, req: RegisterReq = Body(default=RegisterReq())):
         key = f"FACE:{photo.id}"
         s.progress[key] = "run"
         _auto_frame(s, photo, s.face_window)
+        photo.editor0 = photo.editor
         s.progress[key] = "frame"
 
     with s.lock:
@@ -1827,7 +1838,11 @@ def _photo_json(s, p: Photo):
             "thumb": f"/api/thumb/{s.id}/{p.id}?v={int(p.flip)}",
             "card": f"/api/thumb/{s.id}/{p.id}?w=320&v={int(p.flip)}",
             "editor": {"dx": round(p.editor.dx_px, 2), "dy": round(p.editor.dy_px, 2),
-                       "scale": round(p.editor.scale, 4), "angle": round(p.editor.angle_deg, 3)}}
+                       "scale": round(p.editor.scale, 4), "angle": round(p.editor.angle_deg, 3)},
+            # 'initial-fit 으로 초기화' 가 돌아갈 자리
+            "editor0": {"dx": round(p.editor0.dx_px, 2), "dy": round(p.editor0.dy_px, 2),
+                        "scale": round(p.editor0.scale, 4),
+                        "angle": round(p.editor0.angle_deg, 3)}}
 
 
 def _review_json(s):
