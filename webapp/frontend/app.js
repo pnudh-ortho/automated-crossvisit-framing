@@ -103,9 +103,10 @@ function drawBoard(){
       const cv = document.createElement("canvas");
       fitCanvas(cv, s.key);
       cell.appendChild(cv); slotCanvas[s.key] = cv;
-      cell.insertAdjacentHTML("beforeend",
-        `<span class="hk">${s.hk}</span>` +
-        `<span class="tag${p.confidence < 0.75 ? " attn" : ""}">${s.nm} ${Math.round(p.confidence * 100)}%</span>`);
+      // 십자뷰에는 이름표도 확률표도 붙이지 않는다. 자리가 곧 이름이고(위 가운데가
+      // 상악, 아래 가운데가 하악), 분류가 미덥지 않은지는 검수 화면의 사진 카드와
+      // 칸을 고르면 뜨는 편집기 제목에 그대로 적힌다. 판은 사진만 보는 자리다.
+      cell.insertAdjacentHTML("beforeend", `<span class="hk">${s.hk}</span>`);
       cell.onclick = () => pick(s.key);
       renderSlot(s.key);
     } else {
@@ -232,40 +233,41 @@ function peekVisit(){
   return l[l.length - 1] || "";
 }
 
-function drawPeekBadge(){
-  const host = zoomHost();
-  if(!host || !boardEl) return;
-  boardEl.classList.toggle("peeking", PEEK.on && !ZOOM.on);
-  let b = host.querySelector(".peekbadge");
-  if(!PEEK.on && !ZOOM.on){ if(b) b.remove(); return; }
-  if(!b){
-    b = document.createElement("div");
-    b.className = "peekbadge";
-    host.appendChild(b);
-  }
-  if(PEEK.on){
-    const v = peekVisit();
-    b.innerHTML = `<b>${v ? esc(v) + " 차수" : "직전 차수"}</b> 기준 보는 중` +
-                  ` · <kbd>Tab</kbd> 으로 해제`;
-  }else{
-    // 크게 보는 중이라는 것과, 어떻게 돌아가는지. 켜 놓고 잊으면 판이 사라진 줄 안다.
-    b.innerHTML = `크게 보기 · <kbd>Space</kbd> 로 판으로 · <kbd>Tab</kbd> 직전 차수`;
-  }
+/* 판 머리글의 상태 칩 — 차수 배지 오른쪽. 빈 글이면 숨는다. */
+function setChip(id, html){
+  const n = el(id); if(!n) return;
+  n.innerHTML = html || "";
+  n.hidden = !html;
 }
 
-/* 기준이 없을 때(초진) 아무 반응도 없으면 키가 안 먹은 건지 알 수 없다 */
+/* 보기 상태(크게 보기 · 직전 차수 대보기)를 머리글 칩으로 알린다.
+
+   **사진 위에는 아무것도 얹지 않는다.** 예전에는 판 위에 배지를 띄웠는데 놓을
+   자리가 없었다: 판은 십자 격자라 위 가운데가 곧 상악 칸이고, 네 모서리는 노트
+   상자가 쓴다. 크게 보기에서도 캔버스가 판 자리를 통째로 채우므로 확대한 사진을
+   가렸다. 머리글은 두 상태 모두에서 그대로 보이는 유일한 자리다.
+
+   상태 자체는 판에 두른 노란 테두리(.board.peeking)가 계속 말해 주고, 칩은
+   **무엇을 보는 중이고 어떻게 되돌리는지**만 맡는다.
+
+   머리글은 IntraOral·TEMPLATE 두 탭이 함께 쓴다 — 판이 없는 탭에서는 거둔다. */
+function drawPeekBadge(){
+  if(!boardEl) return;
+  boardEl.classList.toggle("peeking", PEEK.on && !ZOOM.on);
+  const io = TAB === "io";
+  const v = peekVisit();
+  setChip("proc-zoom", ZOOM.on && io
+    ? `크게 보기 · <kbd>Space</kbd> 로 판으로` : "");
+  setChip("proc-peek", PEEK.on && io
+    ? `${v ? esc(v) + " 차수" : "직전 차수"} 기준 · <kbd>Tab</kbd> 해제` : "");
+}
+
+/* 기준이 없을 때(초진) 아무 반응도 없으면 키가 안 먹은 건지 알 수 없다.
+   대보기 이야기라 표시도 대보기 칩 자리에서 한다 — 눈이 한 곳만 보면 된다. */
 function flashPeekNote(text){
-  const host = zoomHost();
-  if(!host) return;
-  let b = host.querySelector(".peekbadge");
-  if(!b){
-    b = document.createElement("div");
-    b.className = "peekbadge";
-    host.appendChild(b);
-  }
-  b.textContent = text;
+  setChip("proc-peek", esc(text));
   clearTimeout(PEEK.timer);
-  PEEK.timer = setTimeout(() => { if(!PEEK.on) drawPeekBadge(); }, 1800);
+  PEEK.timer = setTimeout(drawPeekBadge, 1800);
 }
 
 async function togglePeek(){
@@ -1139,7 +1141,10 @@ async function syncPrefs(){
   for(const b of el("set-label").children) b.setAttribute("aria-pressed", b.dataset.f === lf);
   const cs = (r && r.copy_shapes) || "lines";
   for(const b of el("set-shapes").children) b.setAttribute("aria-pressed", b.dataset.c === cs);
-  el("set-raw").checked = !!(r && r.save_raw);
+  const pd = (r && r.photo_dir) || "visit";
+  for(const b of el("set-photodir").children) b.setAttribute("aria-pressed", b.dataset.d === pd);
+  const rd = (r && r.raw_dir) || "none";
+  for(const b of el("set-rawdir").children) b.setAttribute("aria-pressed", b.dataset.d === rd);
   const ns = (r && r.note_sizes) || {};
   el("nsz-soap").value = ns.NOTE_SOAP || "";
   el("nsz-ll").value = ns.NOTE_LL || "";
@@ -1186,17 +1191,25 @@ for(const b of el("set-shapes").children) b.onclick = async () => {
   await setPref({copy_shapes: b.dataset.c});
   syncPrefs();
 };
-/* 끄면 원본은 어디에도 남지 않는다 — 확정과 함께 업로드 임시본이 지워진다.
-   되돌릴 수 없는 선택이라 켤 때가 아니라 **끌 때** 한 번 확인한다. */
-el("set-raw").onchange = async e => {
-  if(!e.target.checked &&
+/* 사진이 갈 자리 — 차수 폴더('교정번호_차수/') 또는 환자 폴더에 바로.
+   다음 확정부터 적용된다. 저장 검토를 열어 둔 채로 바꿨다면 그 화면이 옛 경로를
+   보여주고 있으므로 다시 받아 온다 — 본 것과 저장되는 것이 갈라지면 안 된다. */
+for(const b of el("set-photodir").children) b.onclick = async () => {
+  await setPref({photo_dir: b.dataset.d});
+  syncPrefs();
+  if(VIEW === "fin") loadPlan();
+};
+/* 원본 사본이 갈 자리 — 저장 안 함 · 차수 폴더('교정번호_차수_raw/') · 환자 폴더.
+   '저장 안 함' 이면 원본은 어디에도 남지 않는다(확정과 함께 업로드 임시본이
+   지워진다). 되돌릴 수 없는 선택이라 켤 때가 아니라 **끌 때** 한 번 확인한다. */
+for(const b of el("set-rawdir").children) b.onclick = async () => {
+  if(b.dataset.d === "none" &&
      !confirm("원본을 저장하지 않습니다.\n\n" +
               "앞으로 배정되는 사진은 잘린 상태로만 남고, 잘라낸 영역은 " +
-              "되돌릴 수 없습니다. 계속할까요?")){
-    e.target.checked = true; return;
-  }
-  await setPref({save_raw: e.target.checked});
+              "되돌릴 수 없습니다. 계속할까요?")) return;
+  await setPref({raw_dir: b.dataset.d});
   syncPrefs();
+  if(VIEW === "fin") loadPlan();
 };
 
 function syncThemeSeg(){
@@ -1213,9 +1226,12 @@ function resetSession(){
   setStep("setup", "", "");
   ["pre","proc","fin"].forEach(v => setStep(v, "", "대기"));
   picked = null;
+  FINDIRS = null;           // 확정 저장만 예외 — 거기서 다시 채워 넣는다
   syncFinButtons();
+  syncFinDirButtons();
   exitZoom();
   PEEK.on = false; clearTimeout(PEEK.timer);
+  drawPeekBadge();          // 칩과 판 위 안내를 함께 거둔다
   GRID.on = false;
   NOTES = null; NOTE_DIRTY.clear();
   renderVisitBadges();
@@ -1239,6 +1255,7 @@ async function openPatient(folder){
   picked = PATIENTS[i];
   drawList();
   drawDetail();
+  syncFinDirButtons();      // 환자 폴더는 계획 없이도 열 수 있다
   return picked;
 }
 
@@ -2872,6 +2889,7 @@ function showTab(name){
   if(name === "face") drawFace();
   // 판이 다시 보이면 노트 오버레이도 다시 얹는다 — 탭을 오가도 사라지지 않게.
   if(name === "io") drawNoteOverlay();
+  drawPeekBadge();   // 대보기 칩은 머리글에 있다 — 판이 없는 탭에서는 거둔다
 }
 function syncTabs(){
   const gate = (name, open, tip) => {
@@ -3653,14 +3671,79 @@ async function loadPlan(){
                       + `채우고 오거나, 이대로 확정할 수 있습니다.`;
     btn.disabled = false;
     syncFinButtons(true);
+    // 사진이 실제로 떨어질 폴더는 계획이 정한다 — 차수별 하위 폴더일 수도, 환자
+    // 폴더 바로 아래일 수도 있다(설정). PPT 도 마찬가지로 하위 폴더의 기존 덱에
+    // 이어쓰는 경우가 있어, 이름만 보지 않고 계획의 상대경로에서 폴더를 뗀다.
+    const anyPhoto = p.slots.find(x => !x.empty) || p.faces[0];
+    FINDIRS = {folder: (picked && picked.folder) || "",
+               photos: anyPhoto ? dirPart(anyPhoto.file) : "",
+               ppt: dirPart(p.ppt),
+               exists: !!p.patient_dir_exists};
+    syncFinDirButtons();
   }catch(e){
     body.innerHTML = `<div class="ph">불러오지 못했습니다</div>`;
     err.textContent = e.message;
+    FINDIRS = null; syncFinDirButtons();
   }
 }
 
 el("btn-tofin").onclick = () => { showView("fin"); loadPlan(); };
 el("btn-back-proc").onclick = () => showView("proc");
+
+/* 저장 탭의 '사진 폴더 열기 · PPT 폴더 열기' 가 열 곳. 환자 폴더 이름과 그 안의
+   상대 경로로 들고 있는다 — 절대 경로를 브라우저에 들려 보내면 서버가 그걸 그대로
+   믿어야 한다. 확정 뒤에도 살아 있어야 한다: 세션은 정리돼도 폴더는 남고, 방금
+   저장한 것을 보러 가는 게 이 두 버튼의 본래 쓰임이다. */
+let FINDIRS = null;
+function dirPart(f){ const i = String(f || "").lastIndexOf("/"); return i < 0 ? "" : String(f).slice(0, i); }
+
+/* **초진은 확정 저장 전까지 환자 폴더가 없다.** 폴더를 만드는 곳은 저장 트랜잭션
+   하나뿐이라(storage.Transaction.commit), 그 전에는 열 폴더가 아예 없다. 재진은
+   목록에서 고른 폴더라 처음부터 있다. 그래서 계획이 알려주는 patient_dir_exists
+   를 보고 셋을 함께 켜고 끈다 — 눌러서 실패하느니 꺼져 있는 편이 낫다.
+
+   확정 뒤에는 picked 가 비지만 FINDIRS 가 남아, 셋 다 방금 저장한 그 환자를
+   계속 가리킨다. 세션은 사라져도 폴더는 그때 비로소 생겨 있다.
+
+   함수 선언으로 둔다 — resetSession · openPatient 가 이 줄보다 **위에서**
+   syncFinDirButtons 를 부른다. const 화살표면 TDZ 에 걸린다. */
+function finFolder(){ return (FINDIRS && FINDIRS.folder) || (picked && picked.folder) || ""; }
+
+function syncFinDirButtons(){
+  const btns = [el("btn-open-patient"), el("btn-open-photos"), el("btn-open-pptdir")];
+  if(btns.some(b => !b)) return;
+  const ready = !!(finFolder() && FINDIRS && FINDIRS.exists);
+  for(const b of btns){
+    b.disabled = !ready;
+    b.title = ready ? "탐색기에서 폴더를 엽니다"
+      : FINDIRS ? "확정 저장을 하면 환자 폴더가 만들어집니다 — 그 뒤에 열 수 있습니다"
+                : "저장 검토를 불러오면 켜집니다";
+  }
+}
+
+/* which: "" = 환자 폴더 · "photos" · "ppt" */
+async function openFinDir(which, btn){
+  const folder = finFolder(); if(!folder) return;
+  const err = el("fin-err");
+  err.textContent = ""; btn.disabled = true;
+  try{
+    const r = await api("/api/open-dir", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({folder, sub: which ? ((FINDIRS && FINDIRS[which]) || "") : ""})});
+    // 확정 전에는 차수 폴더가 아직 없다. 서버가 환자 폴더로 물러섰으면 그렇다고
+    // 적는다 — 아무 말도 없으면 "왜 다른 폴더가 떴지" 로 끝난다.
+    if(r.fallback)
+      err.textContent = `아직 만들어지지 않은 폴더라 환자 폴더를 열었습니다 — ${r.opened}`;
+  }catch(e){
+    err.textContent = e.message || "폴더를 열지 못했습니다";
+  }finally{
+    btn.disabled = false;
+    syncFinDirButtons();
+  }
+}
+el("btn-open-patient").onclick = e => openFinDir("", e.currentTarget);
+el("btn-open-photos").onclick = e => openFinDir("photos", e.currentTarget);
+el("btn-open-pptdir").onclick = e => openFinDir("ppt", e.currentTarget);
 
 /* 확정 저장하면 나올 그 PPT 를 임시로 만들어 파워포인트로 연다. 환자 폴더에는
    아무것도 쓰지 않는다 — 화면에서 보던 것과 실제 슬라이드가 같은지 눈으로
@@ -3711,7 +3794,12 @@ el("btn-commit").onclick = async () => {
     setStep("fin", "done", "완료");
     // 서버가 세션을 정리했다. 화면도 같이 비워야 유령 상태가 남지 않는다.
     const saved = picked && picked.folder;
+    // 세션은 버리되 폴더 경로는 살려 둔다 — 방금 저장한 것을 보러 가는 게 아래
+    // 세 버튼의 본래 쓰임이다. resetSession 이 FINDIRS 를 지우므로 되돌려 놓는다.
+    // 여기서 환자 폴더가 **비로소 만들어졌다** — 셋을 켜도 되는 시점이 지금이다.
+    const dirs = FINDIRS ? {...FINDIRS, folder: saved || FINDIRS.folder, exists: true} : null;
     resetSession();
+    FINDIRS = dirs; syncFinDirButtons();
     btn.textContent = "확정 저장";
     // 방금 저장한 환자를 **다시 그린다.** 목록만 새로 받으면 오른쪽 상세는 확정
     // 전 화면(옛 차수 이력·옛 폴더 내용)이 그대로 남아, 사람이 새로고침해야
@@ -3728,6 +3816,27 @@ addEventListener("paste", e => {
   const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
   if(files.length){ e.preventDefault(); addFiles(files); }
 });
+/* 홈화면 — 검색어와 선택을 지우고 환자 목록만 남긴다. 저장 위치와 정렬은
+   건드리지 않는다: 위치를 되돌리면 엉뚱한 폴더에 저장하게 되고, 정렬은
+   localStorage 에 남는 개인 취향이다.
+
+   세션은 **반쯤 버릴 수 없다.** 선택만 풀면 헤더의 환자 칩은 그 환자를 계속
+   가리키는데 사진은 어디에도 안 담긴다(스테이징이 picked 를 본다) — 화면이 서로
+   다른 말을 하게 된다. 그래서 세션은 늘 통째로 버린다.
+
+   되묻는 것은 **담아둔 사진이 있을 때뿐**이다. 사진 없는 빈 세션(새 환자를 등록만
+   해 둔 직후가 대부분이다)은 잃을 것이 없다 — 사진도 편집값도 없고, 환자 폴더는
+   이미 만들어져 그대로 남는다. 거기서도 경고를 띄우면 사람이 확인 창을 습관적으로
+   지나치게 되고, 그러면 정작 사진을 잃는 순간에도 안 읽는다. */
+el("btn-home").onclick = () => {
+  if(STAGED.length &&
+     !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다.\n\n홈화면으로 돌아갈까요?`)) return;
+  resetSession();
+  el("find").value = "";
+  drawList();                 // 필터가 풀린 목록 · 선택 표시도 함께 지워진다
+  drawDetail();
+  el("find").focus();         // 다음 환자는 대개 이름으로 찾는다
+};
 el("find").oninput = drawList;
 el("sort").value = localStorage.getItem("plist_sort") || "new";
 el("sort").onchange = () => { localStorage.setItem("plist_sort", el("sort").value); drawList(); };

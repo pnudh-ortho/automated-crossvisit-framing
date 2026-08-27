@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -75,9 +76,16 @@ def app(_isolate_paths):
         yield c, _isolate_paths
 
 
-def _commit(c, root, *, save_raw: bool):
+def _commit(c, root, *, save_raw: bool, photo_dir: str | None = None,
+            raw_dir: str | None = None):
     if save_raw:
         assert c.post("/api/prefs", json={"save_raw": True}).json()["save_raw"] is True
+    if raw_dir:
+        assert c.post("/api/prefs",
+                      json={"raw_dir": raw_dir}).json()["raw_dir"] == raw_dir
+    if photo_dir:
+        assert c.post("/api/prefs",
+                      json={"photo_dir": photo_dir}).json()["photo_dir"] == photo_dir
     r = c.post("/api/session/first",
                json={"name": NAME, "hospital_id": HOSP, "ortho_id": ORTHO})
     assert r.status_code == 200, r.text
@@ -198,3 +206,78 @@ def test_구운_사진은_창_크기_그대로_들어간다():
     win = WindowCm(x=0, y=0, w=8.3805, h=6.2938)
     off = cover_fit_placement(round(8.3805 * 200), round(6.2938 * 200), win)
     assert round(emu_to_cm(off.ext_cy), 4) != 6.2938
+
+
+# ── 결과물 저장 폴더 (설정) ──────────────────────────────────────────────────
+# 기본은 '교정번호_차수/' 다. 설정에서 '환자 폴더에 바로'를 고르면 폴더 없이
+# 낱개로 간다 — 사진 이름에 차수가 있어 차수끼리 덮어쓰지 않는다.
+def test_기본은_사진은_차수_폴더_원본은_저장_안_함(app):
+    c, _ = app
+    r = c.get("/api/prefs").json()
+    assert r["photo_dir"] == "visit"
+    assert r["raw_dir"] == "none" and r["save_raw"] is False
+
+
+def test_둘_다_환자_폴더에_바로_저장하면_하위_폴더가_없다(app):
+    c, root = app
+    plan, res, pdir = _commit(c, root, save_raw=False,
+                              photo_dir="flat", raw_dir="flat")
+
+    names = {e["file"] for e in plan["slots"] if not e["empty"]}
+    raws = {e["raw"] for e in plan["slots"] if not e["empty"]}
+    assert names == {f"{ORTHO}_A ({i}).jpg" for i in range(1, 6)}, names
+    assert raws == {f"{ORTHO}_A ({i})_raw.jpg" for i in range(1, 6)}, raws
+
+    # 계획과 실제가 같고, 하위 폴더가 하나도 생기지 않았다
+    on_disk = {p.relative_to(pdir).as_posix() for p in pdir.rglob("*") if p.is_file()}
+    assert set(res["files"]) == on_disk
+    assert not [d for d in pdir.iterdir() if d.is_dir()], list(pdir.iterdir())
+    for name in names | raws:
+        assert (pdir / name).exists(), f"{name} 없음"
+
+
+def test_사진과_원본은_각자_제_자리를_따른다(app):
+    """사진은 낱개로, 원본은 차수 폴더로 — 섞어 골라도 서로 간섭하지 않는다."""
+    c, root = app
+    plan, res, pdir = _commit(c, root, save_raw=False,
+                              photo_dir="flat", raw_dir="visit")
+    names = {e["file"] for e in plan["slots"] if not e["empty"]}
+    raws = {e["raw"] for e in plan["slots"] if not e["empty"]}
+    assert names == {f"{ORTHO}_A ({i}).jpg" for i in range(1, 6)}, names
+    assert raws == {f"{RDIR}/{ORTHO}_A ({i})_raw.jpg" for i in range(1, 6)}, raws
+    on_disk = {p.relative_to(pdir).as_posix() for p in pdir.rglob("*") if p.is_file()}
+    assert set(res["files"]) == on_disk
+    assert [d.name for d in pdir.iterdir() if d.is_dir()] == [RDIR]
+
+
+def test_저장_안_함이면_원본이_없다(app):
+    c, root = app
+    plan, res, pdir = _commit(c, root, save_raw=False, raw_dir="none")
+    assert {e["raw"] for e in plan["slots"] if not e["empty"]} == {None}
+    assert not [n for n in res["files"] if "_raw" in n], res["files"]
+
+
+def test_옛_스위치_설정은_차수_폴더로_읽힌다(app):
+    """`save_raw` 만 있던 설치본을 새 버전이 얹어도 원본은 있던 자리 그대로."""
+    c, _ = app
+    main.SETTINGS_FILE.write_text(json.dumps({"save_raw": True}), encoding="utf-8")
+    assert c.get("/api/prefs").json()["raw_dir"] == "visit"
+    main.SETTINGS_FILE.write_text(json.dumps({"save_raw": False}), encoding="utf-8")
+    assert c.get("/api/prefs").json()["raw_dir"] == "none"
+
+
+def test_낱개로_둬도_차수끼리_덮어쓰지_않는다(app):
+    """폴더가 없어져도 파일 이름의 차수가 차수를 갈라 준다."""
+    c, root = app
+    c.post("/api/prefs", json={"photo_dir": "flat"})
+    a = N.photo_filename(ORTHO, "A", 1, main.cfg.naming.photo_pattern)
+    b = N.photo_filename(ORTHO, "B", 1, main.cfg.naming.photo_pattern)
+    assert a != b, (a, b)
+
+
+def test_모르는_값은_받지_않는다(app):
+    c, _ = app
+    assert c.post("/api/prefs", json={"photo_dir": "somewhere"}).status_code == 400
+    assert c.post("/api/prefs", json={"raw_dir": "somewhere"}).status_code == 400
+    r = c.get("/api/prefs").json()
+    assert r["photo_dir"] == "visit" and r["raw_dir"] == "none"

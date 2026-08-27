@@ -2,7 +2,7 @@
 명명 규칙 (Stage 2)
 
 - 환자 폴더명 / PPT 파일명 / 사진 파일명을 config 템플릿으로 생성.
-- 재진 차수 알파벳 자동 증가 (A..Z, 이후 AA, AB, ... 확장).
+- 재진 차수 알파벳 자동 증가 (A..Z, 이후 ZA, ZB, ... 확장).
 - 기존 PPT 파일명을 config 패턴으로 파싱해 식별자 획득 + 자릿수 검증.
 
 패턴/자릿수는 하드코딩하지 않고 config에서 주입한다. 순수 표준 라이브러리.
@@ -229,9 +229,18 @@ def parse_ppt_filename(
                          label="PPT 파일명")
 
 
-# ── 차수 알파벳 (bijective base-26) ──────────────────────────────────────────
+# ── 차수 알파벳 ──────────────────────────────────────────────────────────────
+# 차수는 A..Z 를 쓰다가 스물여섯 번을 넘기면 **Z 를 앞에 달고 다시 A 부터** 간다:
+#   A, B, ... Y, Z, ZA, ZB, ... ZY, ZZ, ZZA, ZZB, ...
+# 교정과가 실제로 환자 폴더에 써 온 순서다. 예전에는 여기서 자릿수 올림(AA, AB)을
+# 했지만 그러면 우리가 만든 폴더와 교정과가 만든 폴더가 같은 차수에 다른 이름을
+# 갖게 된다 — 사람이 쓰는 쪽에 맞춘다.
+#
+# 크기 비교(정렬·"이전 차수" 판정)는 예전 그대로 bijective base-26 값을 쓴다.
+# 새 순서도 이 값으로 단조증가하고(Z=26 < ZA=677 < ZZ=702 < ZZA=18253),
+# 옛 버전이 만들어 둔 AA·AB 폴더도 그대로 읽힌다.
 def letter_to_num(s: str) -> int:
-    """A→1, Z→26, AA→27, AB→28 ..."""
+    """차수 알파벳의 크기값. A→1, Z→26, AA→27, ZA→677 ... (정렬용)"""
     n = 0
     for ch in s:
         if not ("A" <= ch <= "Z"):
@@ -241,7 +250,11 @@ def letter_to_num(s: str) -> int:
 
 
 def num_to_letter(n: int) -> str:
-    """1→A, 26→Z, 27→AA ..."""
+    """`letter_to_num` 의 역함수. 1→A, 26→Z, 27→AA ...
+
+    크기값을 되돌리는 용도다. **다음 차수를 만들 때 쓰지 않는다** — 그건
+    `next_letter` 다 (Z 다음은 AA 가 아니라 ZA).
+    """
     if n < 1:
         raise NamingError("차수 번호는 1 이상")
     out = ""
@@ -251,12 +264,23 @@ def num_to_letter(n: int) -> str:
     return out
 
 
+def next_letter(cur: str) -> str:
+    """한 차수의 바로 다음 글자. 'A'→'B', 'Z'→'ZA', 'ZZ'→'ZZA'.
+
+    끝자리가 Z 면 올림 대신 뒤에 'A' 를 붙인다. 그래서 앞자리는 건드리지 않고,
+    옛 폴더 이름('AA')을 받아도 그 줄기를 그대로 이어 간다('AB').
+    """
+    letter_to_num(cur)               # 형식 검증 — 대문자 A~Z 만
+    if cur.endswith("Z"):
+        return cur + "A"
+    return cur[:-1] + chr(ord(cur[-1]) + 1)
+
+
 def next_visit_letter(existing: list[str] | None) -> str:
-    """기존 차수 목록에서 최대값+1. 없으면 'A'."""
+    """기존 차수 목록에서 가장 큰 차수의 다음 글자. 없으면 'A'."""
     if not existing:
         return "A"
-    mx = max(letter_to_num(x) for x in existing)
-    return num_to_letter(mx + 1)
+    return next_letter(max(existing, key=letter_to_num))
 
 
 # ── 최종 이름 생성 ────────────────────────────────────────────────────────────

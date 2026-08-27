@@ -1177,19 +1177,54 @@ def _months_unit() -> str:
         return "int"
 
 
-def _save_raw() -> bool:
-    """원본을 함께 남길까. 기본은 **아니오**.
+def _raw_dir() -> str:
+    """원본 사본을 남길까, 남긴다면 어디에 — "none" | "visit" | "flat". 기본 "none".
 
     환자 폴더에는 슬라이드에 실린 그대로(잘린 사진)가 간다 — 폴더와 PPT 가 다른
-    그림이면 나중에 어느 쪽이 진짜인지 다투게 된다.
+    그림이면 나중에 어느 쪽이 진짜인지 다투게 된다. 원본은 켤 때만 함께 남는다.
 
-    켜면 원본이 `_raw` 이름으로 함께 남는다. **끄면 원본은 어디에도 남지 않는다** —
-    확정과 함께 업로드 임시본이 지워지고, 잘라낸 영역은 되돌릴 수 없다.
+    "visit" 은 완성본 폴더 옆(`교정번호_차수_raw/`), "flat" 은 환자 폴더에 바로다.
+    낱개로 둬도 이름 뒤에 `_raw` 가 붙어 있어 완성본과 헷갈리지 않는다.
+    **"none" 이면 원본은 어디에도 남지 않는다** — 확정과 함께 업로드 임시본이
+    지워지고, 잘라낸 영역은 되돌릴 수 없다.
+
+    예전 설치본은 이 설정을 켜고 끄는 스위치 하나(`save_raw`)로만 갖고 있었다.
+    그 값이 남아 있으면 켜져 있던 쪽을 차수 폴더로 읽는다 — 새 버전을 얹었다고
+    원본이 갑자기 사라지거나 생기면 안 된다.
     """
     try:
-        return bool(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("save_raw"))
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except Exception:                                   # noqa: BLE001
-        return False
+        return "none"
+    v = d.get("raw_dir")
+    if v in ("none", "visit", "flat"):
+        return v
+    return "visit" if d.get("save_raw") else "none"
+
+
+def _save_raw() -> bool:
+    """원본을 함께 남기나. **어디에** 남기는지는 `_raw_dir`."""
+    return _raw_dir() != "none"
+
+
+def _photo_dir() -> str:
+    """사진을 차수 폴더에 넣을까, 환자 폴더에 바로 둘까 — "visit" | "flat".
+
+    기본은 차수 폴더다(`교정번호_차수/`, 원본은 `교정번호_차수_raw/`). 한 환자
+    폴더에 차수가 쌓여도 한 차수를 통째로 집어 옮기거나 보낼 수 있다.
+
+    낱개로 두는 쪽("flat")도 고를 수 있다. 사진 이름에 차수가 이미 들어 있어
+    (`12345_B (1).jpg`) 폴더가 없어도 차수끼리 덮어쓰지 않는다. 폴더를 열면
+    바로 사진이 보이길 바라는 사람이 있어 설정으로 뒀다.
+
+    **다음 확정부터** 적용된다 — 이미 저장한 사진은 옮기지 않는다. 어차피 이
+    프로그램은 사진을 읽어 차수를 세지 않는다(차수는 PPT 라벨이 진실이다).
+    """
+    try:
+        v = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("photo_dir")
+        return v if v in ("visit", "flat") else "visit"
+    except Exception:                                   # noqa: BLE001
+        return "visit"
 
 
 def _saved_roots() -> list[str]:
@@ -3375,11 +3410,15 @@ def _build_plan(s) -> dict:
     """
     ids = s.ids
     index_by_class = cfg.index_by_class
-    raw = _save_raw()
-    # 새 사진은 차수마다 제 폴더로 간다 — 잘린 완성본은 '교정번호_차수/',
-    # 원본 사본은 '교정번호_차수_raw/'. 기존 사진이 어디 있든 추적하지 않는다.
-    ppre = f"{N.visit_dir(ids.ortho_id, s.visit)}/"
-    rpre = f"{N.visit_raw_dir(ids.ortho_id, s.visit)}/"
+    # 새 사진이 어디로 갈지는 설정을 따른다 — 잘린 완성본과 원본 사본이 **각자**
+    # 제 설정을 갖는다. 기본은 차수마다 제 폴더('교정번호_차수/', 원본은
+    # '교정번호_차수_raw/'). '환자 폴더에 바로'를 고르면 앞에 붙는 폴더 없이
+    # 낱개로 간다 — 파일 이름에 차수가, 원본은 그 뒤에 '_raw' 까지 들어 있어
+    # 폴더가 없어도 서로 덮어쓰지 않는다. 기존 사진이 어디 있든 추적하지 않는다.
+    ppre = "" if _photo_dir() == "flat" else f"{N.visit_dir(ids.ortho_id, s.visit)}/"
+    rdir = _raw_dir()
+    raw = rdir != "none"
+    rpre = "" if rdir == "flat" else f"{N.visit_raw_dir(ids.ortho_id, s.visit)}/"
     slots = []
     for slot in cfg.ppt.slot_names:
         members = s.bins.get(slot, [])
@@ -3412,6 +3451,10 @@ def _build_plan(s) -> dict:
         fidx += 1
     return {
         "patient_dir": str(s.patient_dir),
+        # 초진은 확정 저장 전까지 **환자 폴더 자체가 없다** — 폴더를 만드는 곳은
+        # `storage.Transaction.commit()` 한 군데뿐이다. 그걸 모르면 화면의 '폴더
+        # 열기' 가 없는 폴더를 열려다 실패한다. 그래서 있는지를 함께 알려준다.
+        "patient_dir_exists": s.patient_dir.is_dir(),
         "visit": s.visit,
         "mode": s.mode,
         # 기존 PPT 를 알아봤으면 **그 파일에** 이어 쓴다 — 이름이 옛 형식이거나
@@ -3511,6 +3554,43 @@ def _os_reveal(path: Path) -> None:
     if not shutil.which(opener):
         raise OSError(f"폴더를 열 프로그램을 찾지 못했습니다({opener})")
     subprocess.Popen([opener, str(d)])
+
+
+class OpenDirReq(BaseModel):
+    folder: str          # 환자 루트 기준 환자 폴더 이름
+    sub: str = ""        # 그 안의 상대 경로. 비우면 환자 폴더 자체
+
+
+@app.post("/api/open-dir")
+def open_dir(req: OpenDirReq):
+    """탐색기(Finder)로 폴더를 연다 — 저장한 사진과 PPT 를 바로 보러 가라고.
+
+    **환자 루트 밖은 열지 않는다.** 경로가 브라우저에서 오므로 합쳐서 resolve 한
+    뒤에 루트 아래인지 본다 — `..` 로 거슬러 오르는 것은 여기서 걸린다.
+
+    확정 전에는 차수 폴더가 아직 없다. 그때 "폴더가 없습니다" 로 끝내면 사람은
+    자기가 뭘 잘못했는지 알 수 없다 — **있는 데까지 거슬러 올라가** 그 폴더를 열고,
+    물러섰다는 사실을 함께 돌려준다. 화면이 그걸 그대로 적는다.
+    """
+    root = ROOT.resolve()
+    pdir = (root / req.folder).resolve()
+    asked = (pdir / req.sub).resolve()
+    if root not in asked.parents and asked != pdir:
+        raise HTTPException(400, "환자 폴더 밖은 열 수 없습니다")
+    if pdir != root and root not in pdir.parents:
+        raise HTTPException(400, "환자 폴더 밖은 열 수 없습니다")
+    if not pdir.is_dir():
+        raise HTTPException(404, f"환자 폴더를 찾을 수 없습니다: {req.folder}")
+    # 물러서더라도 **환자 폴더까지만** — 루트를 열어 놓고 "환자 폴더를 열었다"고
+    # 말하면 화면이 거짓말을 한다.
+    d = asked
+    while not d.is_dir() and d != pdir:
+        d = d.parent
+    try:
+        _os_reveal(d)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise HTTPException(500, f"폴더를 열지 못했습니다: {e}")
+    return {"opened": str(d), "fallback": d != asked}
 
 
 class _DrySink:
@@ -4182,6 +4262,10 @@ def update_restart():
 class PrefsReq(BaseModel):
     months_unit: str | None = None
     save_raw: bool | None = None
+    # 사진이 갈 자리 — "visit"(교정번호_차수 폴더) | "flat"(환자 폴더에 바로)
+    photo_dir: str | None = None
+    # 원본 사본이 갈 자리 — "none"(저장 안 함) | "visit" | "flat"
+    raw_dir: str | None = None
     # 형식 **목록** — 첫 번째가 생성용, 전부가 인식용. 빈 목록 = 기본만.
     folder_patterns: list[str] | None = None
     ppt_patterns: list[str] | None = None
@@ -4436,6 +4520,7 @@ def _apply_note_sizes() -> None:
 
 def _prefs_json() -> dict:
     return {"months_unit": _months_unit(), "save_raw": _save_raw(),
+            "photo_dir": _photo_dir(), "raw_dir": _raw_dir(),
             "folder_patterns": _saved_patterns(),
             "folder_pattern_default": cfg.naming.folder_pattern,
             "ppt_patterns": _saved_patterns("ppt_patterns"),
@@ -4462,6 +4547,10 @@ def prefs_set(req: PrefsReq):
     """
     if req.months_unit is not None and req.months_unit not in ("int", "half"):
         raise HTTPException(400, "int 또는 half")
+    if req.photo_dir is not None and req.photo_dir not in ("visit", "flat"):
+        raise HTTPException(400, "visit 또는 flat")
+    if req.raw_dir is not None and req.raw_dir not in ("none", "visit", "flat"):
+        raise HTTPException(400, "none, visit 또는 flat")
     path = SETTINGS_FILE                  # 읽은 그 파일에만 쓴다(_save_setting 주석)
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
@@ -4469,8 +4558,14 @@ def prefs_set(req: PrefsReq):
         d = {}
     if req.months_unit is not None:
         d["months_unit"] = req.months_unit
-    if req.save_raw is not None:
+    if req.save_raw is not None:                       # 스위치만 오는 옛 요청
         d["save_raw"] = bool(req.save_raw)
+        d["raw_dir"] = "visit" if req.save_raw else "none"
+    if req.raw_dir is not None:                        # 둘 다 오면 이쪽이 이긴다
+        d["raw_dir"] = req.raw_dir
+        d["save_raw"] = req.raw_dir != "none"
+    if req.photo_dir is not None:
+        d["photo_dir"] = req.photo_dir
     if req.note_sizes is not None:
         clean = {}
         for k, v in req.note_sizes.items():

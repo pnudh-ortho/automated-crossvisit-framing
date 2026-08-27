@@ -85,6 +85,34 @@ def test_known_letters():
     assert N.num_to_letter(28) == "AB"
 
 
+def test_next_letter_wraps_with_z_prefix():
+    """Z 다음은 ZA — 교정과 폴더가 쓰는 순서."""
+    assert N.next_letter("A") == "B"
+    assert N.next_letter("Y") == "Z"
+    assert N.next_letter("Z") == "ZA"
+    assert N.next_letter("ZA") == "ZB"
+    assert N.next_letter("ZY") == "ZZ"
+    assert N.next_letter("ZZ") == "ZZA"
+    assert N.next_letter("AA") == "AB"   # 옛 폴더 줄기는 그대로 이어 간다
+
+
+def test_next_letter_sequence_is_increasing():
+    """새 순서도 정렬값(letter_to_num)으로 단조증가한다."""
+    cur, seq = "A", []
+    for _ in range(60):
+        seq.append(cur)
+        cur = N.next_letter(cur)
+    nums = [N.letter_to_num(x) for x in seq]
+    assert nums == sorted(nums)
+    assert seq[25:28] == ["Z", "ZA", "ZB"]
+    assert seq[51:53] == ["ZZ", "ZZA"]
+
+
+def test_next_letter_rejects_garbage():
+    assert expect_error(lambda: N.next_letter("a"))
+    assert expect_error(lambda: N.next_letter("A1"))
+
+
 def test_next_visit_empty():
     assert N.next_visit_letter([]) == "A"
     assert N.next_visit_letter(None) == "A"
@@ -92,8 +120,9 @@ def test_next_visit_empty():
 
 def test_next_visit_increment():
     assert N.next_visit_letter(["A", "B", "C"]) == "D"
-    assert N.next_visit_letter(["Z"]) == "AA"
-    assert N.next_visit_letter(["A", "Z", "C"]) == "AA"  # 최대값 기준
+    assert N.next_visit_letter(["Z"]) == "ZA"
+    assert N.next_visit_letter(["A", "Z", "C"]) == "ZA"   # 최대값 기준
+    assert N.next_visit_letter(["Z", "ZA", "ZB"]) == "ZC"
 
 
 def test_seq_token_recognition():

@@ -62,6 +62,8 @@
 
     <div class="view on" data-view="setup">
       <div class="toolbar">
+        <button class="btn" id="btn-home"
+                title="검색과 선택을 지우고 환자 목록으로 돌아갑니다">⌂ 홈화면</button>
         <div class="rootbar">
           <span class="eyebrow">저장 위치</span>
           <select class="ident rootsel" id="root-sel" title="저장 위치 고르기"></select>
@@ -104,7 +106,7 @@
     <div class="view" data-view="proc">
       <div class="card grow">
         <div class="sec grow">
-          <h3 class="hd"><span class="hd-l"><span class="tabs" id="proc-tabs" role="tablist"><button type="button" role="tab" data-tab="io" aria-selected="true">IntraOral</button><button type="button" role="tab" data-tab="face" aria-selected="false">TEMPLATE</button></span><span class="vbadge" id="proc-visit" hidden></span></span><div class="seg" id="seg"></div><div class="seg" id="face-seg" hidden></div></h3>
+          <h3 class="hd"><span class="hd-l"><span class="tabs" id="proc-tabs" role="tablist"><button type="button" role="tab" data-tab="io" aria-selected="true">IntraOral</button><button type="button" role="tab" data-tab="face" aria-selected="false">TEMPLATE</button></span><span class="vbadge" id="proc-visit" hidden></span><span class="vbadge modechip" id="proc-zoom" hidden></span><span class="vbadge modechip" id="proc-peek" data-tone="warn" hidden></span></span><div class="seg" id="seg"></div><div class="seg" id="face-seg" hidden></div></h3>
           <div class="pane work on" data-pane="io">
             <div class="board-wrap"><div class="board" id="board"></div></div>
             <div class="dock">
@@ -207,6 +209,13 @@
           <button class="btn" id="btn-back-proc" disabled>◀ 검수·조정으로</button>
         </div>
         <button class="btn primary wide" id="btn-commit" disabled>확정 저장</button>
+        <!-- 저장한 것을 보러 가는 셋. 윗줄과 같은 finact 그리드에 칸만 셋이라,
+             확정 저장을 가운데 두고 위아래가 한 덩어리로 읽힌다. -->
+        <div class="finact trio">
+          <button class="btn" id="btn-open-patient" disabled>환자 폴더 열기</button>
+          <button class="btn" id="btn-open-photos" disabled>사진 폴더 열기</button>
+          <button class="btn" id="btn-open-pptdir" disabled>PPT 폴더 열기</button>
+        </div>
         <p class="tip"><b>PPT에서 확인하기</b>는 저장될 그대로를 임시 파일로 열어 봅니다 —
           환자 폴더에는 아무것도 쓰지 않습니다.<br>
           확정하면 사진과 PPT가 한 번에 기록되고, 중간에 실패하면 전부 되돌아갑니다(원자적 저장).</p>
@@ -305,9 +314,17 @@
         <button data-c="none">복사 안 함</button><button data-c="lines">선만 복사</button><button data-c="all">전부 복사</button>
       </div>
     </div>
-    <div class="setrow">
-      <span class="settl">원본 저장<small class="sub">켜면 원본이 raw 폴더에 함께 남습니다</small></span>
-      <input type="checkbox" id="set-raw">
+    <div class="setrow stack">
+      <span class="settl">사진 저장 폴더</span>
+      <div class="seg" id="set-photodir">
+        <button data-d="visit">교정번호_차수 폴더</button><button data-d="flat">환자 폴더에 바로</button>
+      </div>
+    </div>
+    <div class="setrow stack">
+      <span class="settl">원본 저장 폴더</span>
+      <div class="seg" id="set-rawdir">
+        <button data-d="none">저장 안 함</button><button data-d="visit">교정번호_차수_raw 폴더</button><button data-d="flat">환자 폴더에 바로</button>
+      </div>
     </div>
     <div class="setrow">
       <span class="settl">여백 색<small class="sub">사진을 돌리거나 줄일 때 드러나는
