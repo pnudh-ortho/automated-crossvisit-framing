@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -1039,6 +1040,48 @@ def _log_framer() -> None:
 
 
 app = FastAPI(title="교정과 사진 자동화", lifespan=_lifespan)
+
+
+@app.exception_handler(Exception)
+def _unhandled(request, exc):
+    """처리하지 못한 예외를 **화면에 그대로 적어 보낸다.**
+
+    이 핸들러가 없으면 Starlette 이 평문 "Internal Server Error" 를 보내고, 화면은
+    그걸 JSON 으로 읽으려다 `Unexpected token 'I'` 라는 정체불명의 말을 띄운다 —
+    사진을 올리다 그 말을 본 사람이 있었다. 서버 창을 못 보는 사람(외래에서 쓰는
+    사람 대부분이다)에게는 그게 곧 "원인을 알 길이 없음" 이다. 무엇이 어디서
+    터졌는지 화면에 적어 주면 스크린샷 한 장으로 끝난다.
+
+    감사 로그에도 남긴다 — 화면은 닫히면 사라지지만 기록은 남아야 한다. 다만
+    로그를 쓰다 또 터지면(외장 드라이브가 빠진 경우가 그렇다) 오류를 알리는
+    일 자체가 무너지므로, 기록 실패는 삼킨다.
+
+    되던지지 않아도 된다. Starlette 이 이 응답을 보낸 **뒤** 예외를 다시 올려서
+    서버 창에는 전체 트레이스백이 종전대로 찍힌다.
+    """
+    tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    head = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    # **우리 코드의 프레임만** 남긴다. 그대로 두면 uvicorn·anyio 의 속사정이 화면의
+    # 몇 줄을 다 먹고, 정작 어느 파일 몇 줄에서 터졌는지가 밀려 나간다.
+    frames = [f for f in traceback.extract_tb(exc.__traceback__)
+              if "site-packages" not in f.filename]
+    where = ""
+    if frames:                                   # 마지막 = 실제로 터진 우리 줄
+        last = frames[-1]
+        where = f" ({Path(last.filename).name}:{last.lineno} {last.name})"
+    try:
+        S.append_audit(LOG_FILE, {"event": "unhandled_error",
+                                  "path": str(request.url.path),
+                                  "error": head, "trace": "".join(tb)[-4000:]})
+    except Exception:                            # noqa: BLE001 — 기록 실패로 알림을 막지 않는다
+        pass
+    return JSONResponse(status_code=500, content={
+        "detail": f"처리하지 못한 오류 — {head}{where}",
+        # 화면에 붙일 꼬리. 전체는 서버 창과 감사 로그에 있다. 우리 프레임이
+        # 하나도 없으면(라이브러리 안에서만 터진 경우) 원본 꼬리로 물러선다.
+        "trace": ((("".join(traceback.format_list(frames[-3:])).rstrip()
+                    + "\n" + head) if frames else "".join(tb[-4:]).rstrip())[-1500:]),
+    })
 
 SESSIONS: dict[str, "Session"] = {}
 # 환자 루트는 실행 중에 바뀔 수 있다(Setup의 '저장 위치 변경').

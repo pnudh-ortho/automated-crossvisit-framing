@@ -494,6 +494,26 @@ body{
 .note b{color:var(--warn);}
 
 /* ── 모달 ────────────────────────────────────────────────────────────────── */
+/* 서버가 처리하지 못한 오류의 꼬리표. 오류 문구 자체는 나던 자리에 한 줄로 그대로
+   두고, 긴 기록은 여기를 눌러 창에서 본다 — 화면에 트레이스백을 쏟아 놓으면 정작
+   "무엇을 해야 하는가" 가 그 속에 묻힌다. 외래에서 쓰는 사람은 서버 창을 볼 수
+   없으니, 볼 길 자체는 있어야 한다. */
+.errchip{
+  position:fixed; right:14px; bottom:14px; z-index:40;
+  display:flex; align-items:center; gap:6px;
+  padding:8px 13px; border-radius:999px;
+  border:1px solid var(--bad); background:var(--panel); color:var(--bad);
+  font:600 12.5px/1 var(--f-ui); cursor:pointer;
+  box-shadow:0 6px 20px rgba(0,0,0,.28);
+}
+.errchip:hover{background:var(--panel2);}
+.errchip[hidden]{display:none;}      /* display:flex 가 hidden 을 이긴다 */
+.errlog{
+  margin:10px 0 0; max-height:46vh; overflow:auto;
+  padding:10px 12px; border:1px solid var(--edge); border-radius:9px;
+  background:var(--panel2); color:var(--ink);
+  font:12px/1.55 var(--f-mono); white-space:pre-wrap; word-break:break-word;
+}
 .modal{
   border:1px solid var(--edge); border-radius:12px; padding:20px 22px;
   background:var(--panel); color:var(--ink); font:14px/1.5 var(--f-ui);

@@ -46,6 +46,21 @@
   </div>
 </dialog>
 
+<!-- ══ 서버 오류 기록 ══
+     오류 문구는 나던 자리에 한 줄로 그대로 두고, 터미널에 찍히던 기록은 이 꼬리표를
+     눌러 창에서 본다. 서버 창을 볼 수 없는 자리에서 쓰는 사람이 대부분이다. -->
+<button class="errchip" id="err-chip" hidden>⚠ 서버 오류 · 자세히 보기</button>
+
+<dialog class="modal wide" id="dlg-err">
+  <h3>서버 오류 기록</h3>
+  <p class="sub" id="err-where">—</p>
+  <pre class="errlog" id="err-log"></pre>
+  <menu>
+    <button class="btn" id="err-copy">복사</button>
+    <button class="btn" id="err-close">닫기</button>
+  </menu>
+</dialog>
+
 <!-- ══ 알림 배너 — 업데이트 · 가중치 누락 ══ -->
 <div id="banner" class="banner" hidden></div>
 

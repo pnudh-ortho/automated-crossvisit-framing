@@ -915,12 +915,77 @@ async function assign(pid, slot, at){
 
 /* ══ Setup ═══════════════════════════════════════════════════════════════════
    초진/재진을 사용자가 고르지 않는다. 폴더를 열면 서버가 PPT 유무로 판정한다. */
+/* ── 서버 오류 기록 ────────────────────────────────────────────────────────
+   서버가 처리하지 못한 예외는 종전에 서버 창(터미널)에만 찍혔다. 외래에서 쓰는
+   사람은 그 창을 볼 수 없으니, 화면에는 정체불명의 말만 남고 원인은 아무도 모르는
+   채 끝났다. 이제 기록을 여기 담아 두고 꼬리표 → 창으로 보여 준다. 스크린샷 한
+   장이면 어디서 터졌는지가 넘어온다.
+
+   함수 선언으로 둔다 — `api` 가 이 줄보다 위에서도 부를 수 있다. */
+let LAST_ERR = null;
+
+function noteServerError(url, detail, log){
+  LAST_ERR = {url: String(url), detail: detail || "", log: log || "",
+              at: new Date().toLocaleString("ko-KR")};
+  const chip = el("err-chip");
+  if(chip) chip.hidden = false;
+}
+
+function openErrLog(){
+  if(!LAST_ERR) return;
+  el("err-where").textContent = `${LAST_ERR.at} · ${LAST_ERR.url}`;
+  el("err-log").textContent =
+    (LAST_ERR.detail ? LAST_ERR.detail + "\n\n" : "") + LAST_ERR.log;
+  el("dlg-err").showModal();
+}
+
+el("err-chip").onclick = openErrLog;
+el("err-close").onclick = () => el("dlg-err").close();
+el("err-copy").onclick = async e => {
+  const b = e.currentTarget, label = b.textContent;
+  try{
+    await navigator.clipboard.writeText(el("err-log").textContent);
+    b.textContent = "복사됨";
+  }catch(_){
+    // 클립보드가 막힌 환경 — 직접 긁어 갈 수 있게 통째로 선택해 준다
+    const r = document.createRange(); r.selectNodeContents(el("err-log"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    b.textContent = "선택됨 — Ctrl+C";
+  }
+  setTimeout(() => { b.textContent = label; }, 1600);
+};
+
 const api = async (url, opt) => {
   const r = await fetch(url, opt);
-  const d = r.status === 204 ? null : await r.json();
+  /* 본문을 **글자로 먼저** 받는다. 서버가 처리하지 못한 예외를 만나면 평문으로
+     "Internal Server Error" 가 오는데, 그걸 곧장 JSON 으로 읽으면 화면에는 진짜
+     원인 대신 `Unexpected token 'I', "Internal S"...` 가 뜬다. 사진을 올리다 그
+     말을 본 사람이 있었다 — 서버에서 난 모든 오류가 그렇게 정체불명이 됐다.
+     이제 파싱에 실패하면 받은 본문을 그대로 보여주고, 어디를 봐야 하는지 짚는다. */
+  const body = r.status === 204 ? "" : await r.text();
+  let d = null, isJson = false;
+  if(body){
+    try{ d = JSON.parse(body); isJson = true; }catch(_){ d = null; }
+  }
   if(!r.ok){
-    const e = new Error(d?.detail || "요청 실패"); e.status = r.status; e.data = d;
+    const plain = body.trim().replace(/\s+/g, " ").slice(0, 300);
+    // 서버가 처리하지 못한 예외는 `trace` 를 함께 보낸다. 화면의 오류 문구는
+    // 한 줄로 두고 — 무엇을 해야 하는지가 트레이스백에 묻히면 안 된다 — 기록은
+    // 꼬리표로 넘겨 '자세히 보기' 창에서 보게 한다.
+    const e = new Error(isJson
+      ? (d?.detail || "요청 실패")
+      : `서버 오류 (${r.status})${plain ? " — " + plain : ""}`);
+    if(isJson && d?.trace) noteServerError(url, d.detail || "", d.trace);
+    else if(!isJson && r.status >= 500) noteServerError(url, e.message, body);
+    e.status = r.status; e.data = d;
     if(r.status === 410) onSessionExpired();
+    throw e;
+  }
+  // 200 인데 JSON 이 아니다. null 을 조용히 돌려주면 부르는 쪽에서 엉뚱한 자리의
+  // TypeError 로 터진다 — 여기서 무슨 일인지 말하고 멈춘다.
+  if(body && !isJson){
+    const e = new Error(`서버 응답을 읽지 못했습니다 (${r.status})`);
+    e.status = r.status; e.data = null;
     throw e;
   }
   return d;
