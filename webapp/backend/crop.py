@@ -57,10 +57,46 @@ def window_affine(img_w: int, img_h: int, win: WindowCm, st: EditorState,
     return np.hstack([A, b.reshape(2, 1)])
 
 
+# ── 밝기(감마) ────────────────────────────────────────────────────────────────
+#
+# 눈금은 -50 ~ +50, 0 이 원본이다. `out = 255 * (in/255) ** exponent` 를 쓰고
+# exponent = 2 ** (-value/50) 이라 +50 이 감마 2.0, -50 이 0.5 로 로그 대칭이다.
+#
+# ### 왜 곱셈(게인)이 아니라 감마인가
+#
+# 감마는 **0 과 255 를 고정점으로 남긴다** — 아무리 올려도 흰색은 흰색에 머물고
+# 중간톤만 움직인다. 곱셈은 반대로 밝은 쪽부터 밀어 올려 날려버리는데, 교정
+# 사진은 배경이 밝은 회색이고 치아가 흰색이라 정확히 그 부분이 먼저 망가진다.
+# 포토샵도 같은 이유로 CS3 에서 단순 산술 밝기를 걷어내고 비선형으로 바꿨다.
+#
+# 화면 미리보기(app.js)는 SVG `feComponentTransfer type="gamma"` 로 **같은 지수**를
+# 쓴다. 어긋나면 미리보기가 거짓말을 한다.
+BRIGHT_MIN, BRIGHT_MAX = -50.0, 50.0
+
+
+def bright_exponent(value: float) -> float:
+    """밝기 눈금 → 감마 지수. 눈금은 범위 밖이면 잘라서 받는다."""
+    v = max(BRIGHT_MIN, min(BRIGHT_MAX, float(value or 0.0)))
+    return 2.0 ** (-v / 50.0)
+
+
+def gamma_lut(value: float) -> np.ndarray | None:
+    """밝기 눈금 → 256칸 LUT. 0(원본)이면 None — 손대지 않는다는 뜻이다."""
+    if not value:
+        return None
+    e = bright_exponent(value)
+    x = np.arange(256, dtype=np.float64) / 255.0
+    return np.clip(np.power(x, e) * 255.0, 0, 255).astype(np.uint8)
+
+
 def render_window(img_bgr: np.ndarray, win: WindowCm, st: EditorState, flip_v: bool,
                   px_per_cm: float, editor_ppc: float,
-                  letterbox_bgr=(0, 0, 0)) -> np.ndarray:
-    """검수 화면의 창에 보이는 그림을 그대로 만들어 낸다 (BGR)."""
+                  letterbox_bgr=(0, 0, 0), brightness: float = 0.0) -> np.ndarray:
+    """검수 화면의 창에 보이는 그림을 그대로 만들어 낸다 (BGR).
+
+    `brightness` 는 감마 눈금(-50~+50, 0=원본)이다. **워프 전에** 사진에만 먹인다 —
+    나중에 먹이면 창을 못 덮은 자리의 레터박스 색까지 같이 밝아진다.
+    """
     ih, iw = img_bgr.shape[:2]
     out_w = max(1, int(round(win.w * px_per_cm)))
     out_h = max(1, int(round(win.h * px_per_cm)))
@@ -76,6 +112,10 @@ def render_window(img_bgr: np.ndarray, win: WindowCm, st: EditorState, flip_v: b
         src = cv2.resize(img_bgr, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
         M = window_affine(src.shape[1], src.shape[0], win, st, flip_v,
                           out_w, out_h, editor_ppc)
+
+    lut = gamma_lut(brightness)
+    if lut is not None:
+        src = cv2.LUT(src, lut)
 
     return cv2.warpAffine(src, M, (out_w, out_h), flags=cv2.INTER_LINEAR,
                           borderMode=cv2.BORDER_CONSTANT, borderValue=letterbox_bgr)

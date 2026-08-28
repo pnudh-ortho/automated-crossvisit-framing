@@ -512,12 +512,16 @@ def _bake_window(photo, win: WindowCm, st: EditorState, flip_v: bool, dst: Path)
     """
     ppcm = cfg.geometry.export_px_per_cm
     if not ppcm:
-        return None, None                    # 굽기 꺼짐 — 종전 방식
+        # 굽기 꺼짐 — 원본을 그대로 넣는 종전 방식. 이 길에서는 **밝기가 사라진다**
+        # (원본 파일에는 손대지 않으므로). geometry.export_px_per_cm 을 0 으로 두면
+        # 밝기 조절이 결과물에 안 남는다는 뜻이다.
+        return None, None
     arr = _imread(photo.path)
     if arr is None:
         return None, None                    # 못 읽으면 종전 방식으로 물러난다
     out = Cr.render_window(arr, win, st, flip_v, ppcm, PPC,
-                           Cr.hex_to_bgr(_letterbox_color()))
+                           Cr.hex_to_bgr(_letterbox_color()),
+                           brightness=getattr(photo, "brightness", 0.0))
     # EXIF 를 원본에서 옮겨 심는다 — cv2.imwrite 는 EXIF 를 쓸 줄 모른다. 스테이징
     # 원본은 회전이 이미 픽셀에 구워져 있어(orientation ≤1) 그대로 옮겨도 뷰어가
     # 이중 회전하지 않는다. 화질 규약은 종전과 동일 (q95, subsampling=0 = 4:4:4).
@@ -1405,6 +1409,10 @@ class Photo:
         # 파일과 PPT 안의 이미지는 그대로 두고 표시만 뒤집으므로, editor 값도
         # **뒤집힌 화면 기준**으로 들고 있다. 슬롯이 바뀌면 _put 이 환산한다.
         self.flip_v = False
+        # 밝기(감마) 눈금 -50~+50, 0 이 원본. **사진에 달린 값**이다 — 창이 아니라
+        # 사진의 성질이라, 같은 사진이 여러 자리에 들어가면(파생 자리 10·11) 자동으로
+        # 같은 밝기가 된다. EditorState 는 기하 전용이라 여기에 섞지 않는다.
+        self.brightness = 0.0
         self.editor = EditorState()  # 현재 배치(편집기 값, flip_v면 반전 화면 기준)
         # **initial-fit** — 자동으로 잡아 준 첫 구도. 재진이면 차수 간 정합 결과,
         # 초진이면 프레이밍 모델의 예측이고, 둘 다 못 쓰면 cover-fit 이다.
@@ -3385,6 +3393,26 @@ def adjust(req: AdjustReq):
             "clamped_scale": st.scale}
 
 
+class BrightReq(BaseModel):
+    session_id: str
+    photo_id: str
+    value: float               # 감마 눈금 -50~+50, 0 = 원본
+
+
+@app.post("/api/brightness")
+def set_brightness(req: BrightReq):
+    """사진 한 장의 밝기. **자리가 아니라 사진**에 붙으므로 슬롯을 받지 않는다.
+
+    구도(/api/adjust · /api/face/adjust)와 나눠 둔 이유가 그것이다 — 구도는 창마다
+    다르지만 밝기는 그 사진이 어디에 놓이든 같아야 한다. 값은 굽는 순간에만
+    픽셀에 들어가므로, 분류·차수 간 정합은 늘 원본을 본다.
+    """
+    s = get_session(req.session_id)
+    photo = _photo(s, req.photo_id)
+    photo.brightness = max(Cr.BRIGHT_MIN, min(Cr.BRIGHT_MAX, float(req.value or 0.0)))
+    return {"photo_id": photo.id, "brightness": round(photo.brightness, 1)}
+
+
 # ── 이미지 서빙 ───────────────────────────────────────────────────────────────
 @app.get("/api/thumb/{sid}/{pid}")
 def thumb(sid: str, pid: str, w: int = 0):
@@ -4080,7 +4108,7 @@ def _photo_json(s, p: Photo):
     return {"id": p.id, "label": p.label, "confidence": round(p.confidence, 3),
             "slot": p.slot, "badge": p.badge, "ref_visit": p.ref_visit,
             "framing": p.framing, "framing_note": p.framing_note,
-            "flip_v": p.flip_v,
+            "flip_v": p.flip_v, "brightness": round(p.brightness, 1),
             "taken_at": p.taken_at.isoformat(sep=" ", timespec="milliseconds") if p.taken_at else None,
             "thumb": f"/api/thumb/{s.id}/{p.id}",
             # 상자의 카드처럼 작게 보이는 자리에 쓴다 — 원본을 내려받을 이유가 없다

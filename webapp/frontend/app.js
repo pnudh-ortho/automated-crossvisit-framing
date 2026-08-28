@@ -40,6 +40,45 @@ function getImg(url){
   imgCache.set(url, pr); return pr;
 }
 
+/* 밝기 — 감마. 서버(crop.gamma_lut)와 **같은 지수**를 쓴다: 2 ** (-눈금/50).
+
+   CSS 의 `filter: brightness()` 는 곱셈이라 조금만 올려도 흰 배경과 치아부터
+   날아간다. 감마는 0 과 255 를 고정점으로 남기고 중간톤만 움직이므로, SVG
+   feComponentTransfer 로 직접 건다.
+
+   `color-interpolation-filters="sRGB"` 를 빠뜨리면 안 된다 — SVG 필터의 기본값은
+   linearRGB 라, 그대로 두면 브라우저가 서버와 다른 공간에서 계산해 미리보기가
+   결과물과 어긋난다.
+
+   눈금마다 필터를 **따로** 만들어 두고 다시는 고치지 않는다. 하나를 돌려쓰며
+   그리기 사이에 지수를 바꿔 넣으면 어느 그림에 어느 값이 걸릴지 보장되지 않는다.
+   눈금이 정수 -50~+50 이라 요소는 많아야 100 개다. */
+const brightFilters = new Map();
+function brightFilter(v){
+  const n = Math.round(clamp(+v || 0, -50, 50));
+  if(!n) return "none";
+  let id = brightFilters.get(n);
+  if(!id){
+    const NS = "http://www.w3.org/2000/svg";
+    id = "bright" + (n < 0 ? "m" : "p") + Math.abs(n);
+    const filt = document.createElementNS(NS, "filter");
+    filt.setAttribute("id", id);
+    filt.setAttribute("color-interpolation-filters", "sRGB");
+    const ct = document.createElementNS(NS, "feComponentTransfer");
+    const e = Math.pow(2, -n / 50).toFixed(5);
+    for(const nm of ["feFuncR", "feFuncG", "feFuncB"]){
+      const fn = document.createElementNS(NS, nm);
+      fn.setAttribute("type", "gamma");
+      fn.setAttribute("exponent", e);
+      ct.appendChild(fn);
+    }
+    filt.appendChild(ct);
+    el("bright-defs").appendChild(filt);
+    brightFilters.set(n, id);
+  }
+  return `url(#${id})`;
+}
+
 /* 창을 사진으로 빈틈없이 덮는다 — PPT의 cover-fit과 같은 규약 */
 function coverDraw(c, img, W, H){
   const k = Math.max(W / img.width, H / img.height);
@@ -49,10 +88,12 @@ function coverDraw(c, img, W, H){
    파일은 그대로 두고 여기서만 뒤집는다 — PPT도 같은 방식(a:xfrm/@flipV)이다.
    반전을 사진 쪽(scale/rotate 안쪽)에 걸어야 st의 dx·dy·angle이 화면에서 본
    그대로의 뜻을 유지한다(드래그 아래 = dy 증가, Q/E = 화면 기준 회전). */
-function drawComposite(c, W, H, img, st, border, flipV){
+function drawComposite(c, W, H, img, st, border, flipV, bright){
   c.clearRect(0, 0, W, H); c.fillStyle = LETTERBOX; c.fillRect(0, 0, W, H);
   if(img){
-    c.save(); c.translate(W / 2 + st.dx, H / 2 + st.dy);
+    // 필터는 save/restore 안에서만 건다 — 레터박스 바탕과 테두리는 손대지 않는다
+    c.save(); c.filter = brightFilter(bright);
+    c.translate(W / 2 + st.dx, H / 2 + st.dy);
     c.rotate(st.angle * Math.PI / 180); c.scale(st.scale, st.scale);
     if(flipV) c.scale(1, -1);
     coverDraw(c, img, W, H); c.restore();
@@ -89,7 +130,8 @@ function fitCanvas(cv, key){
 
 const boardEl = document.getElementById("board"), segEl = document.getElementById("seg");
 const slotCanvas = {};
-const ED = {slot:null, dx:0, dy:0, scale:1, angle:0, img:null, drag:false, lx:0, ly:0, timer:null};
+const ED = {slot:null, dx:0, dy:0, scale:1, angle:0, bright:0,
+            img:null, drag:false, lx:0, ly:0, timer:null, btimer:null};
 
 function drawBoard(){
   boardEl.innerHTML = ""; segEl.innerHTML = "";
@@ -154,7 +196,7 @@ async function renderSlot(key){
       return;
     }
   }
-  drawComposite(ctx, w, h, img, p.editor, false, p.flip_v);
+  drawComposite(ctx, w, h, img, p.editor, false, p.flip_v, p.brightness);
   paintGrid(ctx, cv, w, h, slotWindow(key));
 }
 
@@ -297,6 +339,7 @@ async function pick(key){
   ED.slot = key;
   ED.dx = p.editor.dx; ED.dy = p.editor.dy; ED.scale = p.editor.scale; ED.angle = p.editor.angle;
   ED.flip_v = !!p.flip_v;
+  ED.bright = +p.brightness || 0;
   ED.img = await getImg(p.thumb);
   [...boardEl.children].forEach(c => c.setAttribute("aria-pressed", c.style.gridArea === meta.area));
   [...segEl.children].forEach(g => g.setAttribute("aria-pressed", g.dataset.key === key));
@@ -360,12 +403,12 @@ function equalize(d){                     // 8비트 그레이 히스토그램 �
   return g;
 }
 
-function drawAnaglyph(ctx, W, H, refImg, curImg, st, flipV){
+function drawAnaglyph(ctx, W, H, refImg, curImg, st, flipV, bright){
   const a = document.createElement("canvas"), b = document.createElement("canvas");
   a.width = b.width = W; a.height = b.height = H;
   // 기준영상은 **이전 차수 슬라이드에 보이던 그림**이라 창에 그대로 깔면 된다
   drawComposite(a.getContext("2d"), W, H, refImg, {dx:0, dy:0, scale:1, angle:0}, false, false);
-  drawComposite(b.getContext("2d"), W, H, curImg, st, false, flipV);
+  drawComposite(b.getContext("2d"), W, H, curImg, st, false, flipV, bright);
   const A = a.getContext("2d").getImageData(0, 0, W, H);
   const B = b.getContext("2d").getImageData(0, 0, W, H);
   const ga = equalize(A.data), gb = equalize(B.data);
@@ -421,9 +464,9 @@ function renderEditor(){
   if(ZOOM.on && PEEK.on && OV.img && OV.slot === ED.slot){
     drawComposite(ctx, w, h, OV.img, {dx:0, dy:0, scale:1, angle:0}, false, false);
   }else if(OV.on && OV.img && OV.slot === ED.slot){
-    drawAnaglyph(ctx, w, h, OV.img, ED.img, ED, ED.flip_v);
+    drawAnaglyph(ctx, w, h, OV.img, ED.img, ED, ED.flip_v, ED.bright);
   }else{
-    drawComposite(ctx, w, h, ED.img, ED, true, ED.flip_v);
+    drawComposite(ctx, w, h, ED.img, ED, true, ED.flip_v, ED.bright);
   }
   paintGrid(ctx, cv, w, h, slotWindow(ED.slot));
   updateReadout();
@@ -515,16 +558,41 @@ function syncKnobs(){
   el("ed-scale").value = Math.round(clamp(ED.scale, .5, 2) * 100);
   el("ed-tx").value = Math.round(clamp(ED.dx, -200, 200));
   el("ed-ty").value = Math.round(clamp(ED.dy, -200, 200));
+  el("ed-bright").value = Math.round(clamp(ED.bright, -50, 50));
   setNum("v-angle", ED.angle.toFixed(1));
   setNum("v-scale", Math.round(ED.scale * 100));
   setNum("v-tx", Math.round(ED.dx));
   setNum("v-ty", Math.round(ED.dy));
+  setNum("v-bright", Math.round(ED.bright));
 }
 
 function afterEdit(){
   const p = primaryOf(ED.slot);
   if(p) p.editor = {dx: ED.dx, dy: ED.dy, scale: ED.scale, angle: ED.angle};
   syncKnobs(); renderEditor(); renderSlot(ED.slot); saveEdit();
+}
+
+/* 밝기는 **사진**에 붙는다 — 자리마다 다른 구도(/api/adjust)와 통로를 나눠 둔
+   이유가 그것이다. 같은 사진이 여러 자리에 들어가면 밝기도 같이 따라간다. */
+function afterBright(){
+  const p = primaryOf(ED.slot);
+  if(p) p.brightness = ED.bright;
+  syncKnobs(); renderEditor(); renderSlot(ED.slot); saveBright();
+}
+
+function saveBright(){
+  clearTimeout(ED.btimer);
+  el("ed-saved").textContent = "…";
+  ED.btimer = setTimeout(async () => {
+    const p = primaryOf(ED.slot); if(!p) return;
+    try{
+      await api("/api/brightness", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({session_id: SESSION.session_id,
+                              photo_id: p.id, value: ED.bright})});
+      el("ed-saved").textContent = "저장됨";
+    }catch(e){ el("ed-saved").textContent = "저장 실패"; }
+  }, 200);
 }
 
 function saveEdit(){
@@ -553,6 +621,7 @@ function bindEditor(){
   el("ed-scale").oninput = () => { ED.scale = +el("ed-scale").value / 100; afterEdit(); };
   el("ed-tx").oninput = () => { ED.dx = +el("ed-tx").value; afterEdit(); };
   el("ed-ty").oninput = () => { ED.dy = +el("ed-ty").value; afterEdit(); };
+  el("ed-bright").oninput = () => { ED.bright = +el("ed-bright").value; afterBright(); };
   // 값 칸과 ◀ ▶ 는 **조절 바와 같은 눈금**을 쓴다(회전 0.1° · 배율 1% · 이동 1px).
   // 배율만 칸의 단위가 % 라, 읽고 쓸 때 100 을 곱하고 나눈다.
   const onSlot = () => !!ED.slot;
@@ -564,6 +633,8 @@ function bindEditor(){
           afterEdit, syncKnobs, onSlot);
   bindNum("v-ty", -200, 200, 1, () => ED.dy, v => ED.dy = v,
           afterEdit, syncKnobs, onSlot);
+  bindNum("v-bright", -50, 50, 1, () => ED.bright, v => ED.bright = v,
+          afterBright, syncKnobs, onSlot);
   /* **initial-fit** = 자동으로 잡아 준 첫 구도. 재진이면 차수 간 정합 결과,
      초진이면 프레이밍 모델의 예측이고, 둘 다 못 쓴 자리에서만 cover-fit 이다.
      예전에는 무조건 cover-fit(가운데·무회전)으로 돌아가서, 손이 미끄러졌을 때
@@ -722,7 +793,7 @@ addEventListener("keyup", e => {
 addEventListener("pointerdown", () => { shiftAlone = false; }, true);
 addEventListener("blur", () => { shiftAlone = false; });
 
-/* 키보드: 1~5 슬롯, 방향키 이동, Q/E 회전, A/D 배율 (e.code라 한/영 무관) */
+/* 키보드: 1~5 슬롯, 방향키 이동, Q/E 회전, A/D 배율, W/S 밝기 (e.code라 한/영 무관) */
 addEventListener("keydown", e => {
   if(VIEW !== "proc") return;
   // 글을 치는 중에는 사진이 움직이면 안 된다. TEXTAREA(노트 오버레이)가 빠져
@@ -751,12 +822,19 @@ addEventListener("keydown", e => {
   }
   const E = face ? FED : ED;
   if(face ? !(FED.cell && faceSlots()[FED.cell]) : !ED.slot) return;
+  // 파생 자리(10·11)는 슬라이드 4 좌측을 그대로 따라간다. 조절 바는 잠가 뒀는데
+  // (setFaceKnobsEnabled) 키는 안 잠겨 있었다 — 사진이 화면에서는 움직이는데
+  // 서버는 400 으로 되받아("조정할 수 없는 자리입니다") 저장 칸에 오류만 뜨고,
+  // 새로고침하면 되돌아갔다. 두 조작이 같은 규칙을 써야 화면이 거짓말을 안 한다.
+  if(face && (cellOf(FED.cell) || {}).from) return;
   // 한 번 누를 때 움직이는 양 = **조절 바 한 칸**. 이동 1px(0.1mm) · 회전 0.1°
   // · 배율 1%. 키와 슬라이더가 다른 눈금을 쓰면 "슬라이더로 1 올렸다가 키로
   // 되돌리기"가 안 되고, 같은 화면의 두 도구가 서로 다른 자를 들게 된다.
   // 크게 옮길 일은 드래그와 휠이 맡는다(눌러 두면 키가 자동 반복된다).
-  const mv = 1, rot = .1, sc = .01;
-  let hit = true;
+  const mv = 1, rot = .1, sc = .01, br = 1;
+  // 밝기는 사진에 붙는 값이라 저장 통로가 구도와 다르다(/api/brightness). 어느
+  // 쪽을 눌렀는지 갈라 둬야 뒤에서 맞는 곳으로 보낸다.
+  let hit = true, bright = false;
   switch(code){
     case "ArrowLeft":  E.dx = clamp(E.dx - mv, -200, 200); break;
     case "ArrowRight": E.dx = clamp(E.dx + mv, -200, 200); break;
@@ -766,9 +844,16 @@ addEventListener("keydown", e => {
     case "KeyE": E.angle = clamp(E.angle + rot, -10, 10); break;
     case "KeyA": E.scale = clamp(E.scale - sc, .5, 2); break;
     case "KeyD": E.scale = clamp(E.scale + sc, .5, 2); break;
+    // 밝기 — A/D(배율) · Q/E(회전)와 같은 손자리에 위아래로 놓았다. 위가 밝게다.
+    case "KeyW": E.bright = clamp(E.bright + br, -50, 50); bright = true; break;
+    case "KeyS": E.bright = clamp(E.bright - br, -50, 50); bright = true; break;
     default: hit = false;
   }
-  if(hit){ e.preventDefault(); face ? afterFaceEdit() : afterEdit(); }
+  if(hit){
+    e.preventDefault();
+    if(bright) face ? afterFaceBright() : afterBright();
+    else face ? afterFaceEdit() : afterEdit();
+  }
 });
 
 /* ══ Pre-processing (AI) ═/* ══ Pre-processing (AI) ═════════════════════════════════════════════════════
@@ -1934,7 +2019,8 @@ const slideLabelOf = n => (((CASE && CASE.labels) || {})[n]) || "";
 /* 얼굴 자리 편집기 — 구내(ED)와 같은 규약이다. dx·dy 는 백엔드와 같은 단위
    (창cm × px_per_cm = 1270px 기준)로 들고, 화면 캔버스는 그보다 작게 쓰므로
    그릴 때만 배율 k 를 곱한다. 그래서 캔버스 해상도를 바꿔도 저장값은 그대로다. */
-const FED = {cell:null, dx:0, dy:0, scale:1, angle:0, img:null, drag:false, lx:0, ly:0, timer:null};
+const FED = {cell:null, dx:0, dy:0, scale:1, angle:0, bright:0,
+             img:null, drag:false, lx:0, ly:0, timer:null, btimer:null};
 const faceCanvas = {};                        // cell -> 보드 캔버스
 const FACE_EDIT_W = 520, FACE_CELL_W = 240;   // 캔버스 실픽셀 폭
 
@@ -2001,13 +2087,13 @@ function faceFit(cv, c, fallbackW){
   return {w, h, k: w / (c.w * facePpc())};
 }
 
-function drawFaceComposite(ctx, W, H, img, st, k, border, flipV){
+function drawFaceComposite(ctx, W, H, img, st, k, border, flipV, bright){
   ctx.clearRect(0, 0, W, H); ctx.fillStyle = LETTERBOX; ctx.fillRect(0, 0, W, H);
   if(img){
     // 6000x4000을 한 번에 줄여 그리므로 보간 품질을 명시한다(기본값은 브라우저마다 다르다)
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.save();
+    ctx.save(); ctx.filter = brightFilter(bright);
     ctx.translate(W / 2 + st.dx * k, H / 2 + st.dy * k);
     ctx.rotate(st.angle * Math.PI / 180); ctx.scale(st.scale, st.scale);
     if(flipV) ctx.scale(1, -1);        // 교합면은 뒤집어 본다 (drawComposite 와 같은 규약)
@@ -2038,7 +2124,8 @@ async function renderIoCell(slot){
   const r = c.w / win.w;                         // 슬롯 창 → 이 창
   const st = {dx: p.editor.dx * r, dy: p.editor.dy * r,
               scale: p.editor.scale, angle: p.editor.angle};
-  drawFaceComposite(cv.getContext("2d"), w, h, await getImg(p.thumb), st, k, false, p.flip_v);
+  drawFaceComposite(cv.getContext("2d"), w, h, await getImg(p.thumb), st, k, false,
+                    p.flip_v, p.brightness);
 }
 
 function drawIoCells(sheet, n){
@@ -2074,7 +2161,8 @@ async function renderFaceCell(key){
   // 편집 중인 자리는 아직 저장 전 값이 있으므로 FED 를 그대로 쓴다
   const st = key === FED.cell ? FED : faceEditorOf(key);
   const ctx = cv.getContext("2d");
-  drawFaceComposite(ctx, w, h, p ? await getImg(p.thumb) : null, st, k, false);
+  drawFaceComposite(ctx, w, h, p ? await getImg(p.thumb) : null, st, k, false,
+                    false, p ? p.brightness : 0);
   // 슬라이드 뷰에도 같은 격자를 얹는다 — 이 판은 **슬라이드의 축소판**이라,
   // 편집기에서 맞춘 구도가 실제 장에서 어떻게 앉는지 여기서 확인하게 된다.
   // 사진이 없는 빈 자리와 파생 자리(10·11)는 그대로 둔다: 잴 것이 없거나
@@ -2213,6 +2301,7 @@ function showInfoDock(){
    여기서 고쳐 봐야 다음 새로고침에 되돌아온다. 조작부를 잠가 그 사실을 알린다. */
 function setFaceKnobsEnabled(on){
   for(const id of ["fed-angle", "fed-scale", "fed-tx", "fed-ty", "fed-reset",
+                   "fed-bright", "fv-bright", "fv-bright-dn", "fv-bright-up",
                    "fv-angle", "fv-scale", "fv-tx", "fv-ty",
                    "fv-angle-dn", "fv-angle-up", "fv-scale-dn", "fv-scale-up",
                    "fv-tx-dn", "fv-tx-up", "fv-ty-dn", "fv-ty-up"])
@@ -2323,6 +2412,7 @@ async function pickFace(key){
   const st = faceEditorOf(key);
   FED.dx = st.dx; FED.dy = st.dy; FED.scale = st.scale; FED.angle = st.angle;
   const pid = faceSlots()[key];
+  FED.bright = pid ? (+facePhoto(pid).brightness || 0) : 0;
   FED.img = pid ? await getImg(facePhoto(pid).thumb) : null;
   // 모델이 예측을 기각한 자리는 cover-fit 이라 사람이 잡아 줘야 한다 — 그 사실을 밝힌다
   const how = c.from ? ` · ${posName((cellOf(c.from) || {}).pos)} 자리를 따라갑니다`
@@ -2343,7 +2433,7 @@ function renderFaceEditor(){
   cv.style.aspectRatio = `${c.w}/${c.h}`;
   const {w, h, k} = faceFit(cv, c, FACE_EDIT_W);
   const ctx = cv.getContext("2d");
-  drawFaceComposite(ctx, w, h, FED.img, FED, k, true);
+  drawFaceComposite(ctx, w, h, FED.img, FED, k, true, false, FED.bright);
   // 파생 자리(10·11 분석)에는 안 그린다 — 여기서 고칠 수 없는 자리라, 기준선만
   // 떠 있으면 "어긋나 보이는데 왜 못 고치지" 가 된다. 게다가 그 장에는 양식
   // 계측선이 이미 얹혀 있다.
@@ -2366,10 +2456,12 @@ function syncFaceKnobs(){
   el("fed-scale").value = Math.round(clamp(FED.scale, .5, 2) * 100);
   el("fed-tx").value = Math.round(clamp(FED.dx, -200, 200));
   el("fed-ty").value = Math.round(clamp(FED.dy, -200, 200));
+  el("fed-bright").value = Math.round(clamp(FED.bright, -50, 50));
   setNum("fv-angle", FED.angle.toFixed(1));
   setNum("fv-scale", Math.round(FED.scale * 100));
   setNum("fv-tx", Math.round(FED.dx));
   setNum("fv-ty", Math.round(FED.dy));
+  setNum("fv-bright", Math.round(FED.bright));
 }
 
 function afterFaceEdit(){
@@ -2395,6 +2487,28 @@ function saveFaceEdit(){
         FED.scale = r.clamped_scale;
         syncFaceKnobs(); renderFaceEditor(); renderFaceCell(FED.cell);
       }
+      el("face-saved").textContent = "저장됨";
+    }catch(e){ el("face-saved").textContent = "저장 실패"; }
+  }, 200);
+}
+
+function afterFaceBright(){
+  const pid = faceSlots()[FED.cell], p = pid ? facePhoto(pid) : null;
+  if(p) p.brightness = FED.bright;
+  syncFaceKnobs(); renderFaceEditor(); renderFaceCell(FED.cell);
+  saveFaceBright();
+}
+
+function saveFaceBright(){
+  clearTimeout(FED.btimer);
+  el("face-saved").textContent = "…";
+  FED.btimer = setTimeout(async () => {
+    const pid = faceSlots()[FED.cell]; if(!pid) return;
+    try{
+      await api("/api/brightness", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({session_id: SESSION.session_id,
+                              photo_id: pid, value: FED.bright})});
       el("face-saved").textContent = "저장됨";
     }catch(e){ el("face-saved").textContent = "저장 실패"; }
   }, 200);
@@ -2426,6 +2540,9 @@ function bindFaceEditor(){
   knob("fed-scale", () => FED.scale = +el("fed-scale").value / 100);
   knob("fed-tx",    () => FED.dx = +el("fed-tx").value);
   knob("fed-ty",    () => FED.dy = +el("fed-ty").value);
+  el("fed-bright").oninput = () => {
+    if(has()){ FED.bright = +el("fed-bright").value; afterFaceBright(); }
+  };
   bindNum("fv-angle", -10, 10, .1, () => FED.angle, v => FED.angle = v,
           afterFaceEdit, syncFaceKnobs, has);
   bindNum("fv-scale", 50, 200, 1, () => FED.scale * 100, v => FED.scale = v / 100,
@@ -2434,6 +2551,8 @@ function bindFaceEditor(){
           afterFaceEdit, syncFaceKnobs, has);
   bindNum("fv-ty", -200, 200, 1, () => FED.dy, v => FED.dy = v,
           afterFaceEdit, syncFaceKnobs, has);
+  bindNum("fv-bright", -50, 50, 1, () => FED.bright, v => FED.bright = v,
+          afterFaceBright, syncFaceKnobs, has);
   el("fed-reset").onclick = () => {
     if(!has()) return;
     const z = faceEditors0()[FED.cell] || {dx: 0, dy: 0, scale: 1, angle: 0};
