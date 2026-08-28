@@ -148,14 +148,17 @@ def _fake_face_frame():
 
 
 def test_face_framing_leaves_no_letterbox(monkeypatch=None):
-    """모델 crop(3:4)과 얼굴 자리(0.725)가 어긋나므로 cover 로 끌어올려야 한다.
+    """`_frame_face_cell` 이 돌려준 구도에는 위아래 검은 띠가 없다.
 
-    끌어올리지 않으면 위아래에 검은 띠가 남는다 — 케이스 발표용 얼굴 사진에서
-    가장 눈에 띄는 결함이다. 여기서는 그 두 가지를 같이 못박는다:
-      · 예측을 그대로 앉히면 실제로 띠가 생긴다(= clamp 가 하는 일이 있다)
-      · _frame_face_cell 이 돌려준 구도에는 띠가 없다
+    케이스 발표용 얼굴 사진에서 가장 눈에 띄는 결함이다. 양식의 얼굴 자리는 모델
+    crop 과 같은 3:4 라 예측이 이미 창을 꽉 채우고 clamp 가 할 일이 없다. 그래서
+    둘을 갈라서 못박는다:
+      · 실제 양식에서 결과에 띠가 없다 (자리가 3:4 라는 것까지 같이 고정한다)
+      · 3:4 를 벗어난 창에서는 clamp 가 실제로 일한다 — 양식이 바뀌어도 얼굴만은
+        cover 로 끌어올린다는 약속이 살아 있는지 본다
     """
-    from coords import cover_base_ext_cm as cbe, min_cover_scale
+    from coords import WindowCm, apply_cover_clamp, min_cover_scale
+    from coords import cover_base_ext_cm as cbe
     s = _session_with_faces(9)
     M._auto_assign_faces(s)
 
@@ -167,16 +170,24 @@ def test_face_framing_leaves_no_letterbox(monkeypatch=None):
     photo = M._photo(s, s.face_slots["4L"])
     bw, bh = cbe(photo.w, photo.h, win)
     need = min_cover_scale(0.0, bw, bh, win)
-
-    raw = M.framing_to_editor(fake, win, photo.w, photo.h)
-    assert raw.scale < need - 1e-9, "이 양식에서는 clamp 가 필요 없다 — 테스트 전제 확인 필요"
+    assert abs(win.w / win.h - 0.75) < 1e-6, f"얼굴 자리가 3:4 가 아니다 ({win.w / win.h})"
 
     how = M._frame_face_cell(s, "4L")
     assert how == "model", how
     got = s.face_editors["4L"]
     assert got.scale >= need - 1e-9, f"레터박스가 남는다 (scale={got.scale} < {need})"
-    print(f"PASS 얼굴 프레이밍 cover 보장: 예측 {raw.scale:.4f} → 보정 {got.scale:.4f} "
-          f"(필요 {need:.4f})")
+
+    # 3:4 를 벗어난 창에서는 예측을 그대로 앉히면 띠가 생기고, clamp 가 그걸 없앤다.
+    narrow = WindowCm(x=win.x, y=win.y, w=win.w, h=win.w / 0.725)
+    nbw, nbh = cbe(photo.w, photo.h, narrow)
+    nneed = min_cover_scale(0.0, nbw, nbh, narrow)
+    raw = M.framing_to_editor(fake, narrow, photo.w, photo.h)
+    assert raw.scale < nneed - 1e-9, "3:4 아닌 창인데 clamp 가 할 일이 없다 — 전제 확인 필요"
+    fixed = apply_cover_clamp(raw, narrow, nbw, nbh)
+    assert fixed.scale >= nneed - 1e-9, f"clamp 가 띠를 못 없앴다 ({fixed.scale} < {nneed})"
+
+    print(f"PASS 얼굴 프레이밍 cover 보장: 3:4 자리 {got.scale:.4f} (필요 {need:.4f}) · "
+          f"0.725 창 {raw.scale:.4f} → {fixed.scale:.4f} (필요 {nneed:.4f})")
 
 
 def test_face_framing_falls_back_to_cover():

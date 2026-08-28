@@ -3122,11 +3122,12 @@ def _face_frame_result(s: "Session", photo):
 def _frame_face_cell(s: "Session", cell: str) -> str:
     """자리 하나의 초기 구도를 프레이밍 모델로 잡는다. 근거('model'|'cover')를 돌려준다.
 
-    모델의 FACE crop 은 3:4(0.75)인데 케이스 덱의 얼굴 자리는 0.725 로 조금 더
-    길쭉하다. `framing_to_editor` 는 예측을 창 안에 min() 으로 앉히므로 그대로
-    두면 위아래에 검은 띠가 남는다. 얼굴은 **항상** cover 로 끌어올린다
-    (config.geometry.allow_letterbox 와 무관) — 사람 얼굴에 검은 띠가 남는 것보다
-    좌우를 3% 남짓 더 자르는 편이 낫다. 회전이 섞여도 같은 함수가 막아 준다.
+    케이스 덱의 얼굴 자리는 모델의 FACE crop 과 같은 3:4(0.75)라, 예측이 창을
+    그대로 채우고 cover 는 대개 하는 일이 없다. 그래도 얼굴은 **항상** cover 로
+    끌어올린다 (config.geometry.allow_letterbox 와 무관) — `framing_to_editor` 는
+    예측을 창 안에 min() 으로 앉히므로, 회전이 섞이거나 양식의 얼굴 자리가 3:4 를
+    벗어나면 위아래에 검은 띠가 남는다. 사람 얼굴에 띠가 남는 것보다 가장자리를
+    조금 더 자르는 편이 낫다.
     """
     pid = s.face_slots.get(cell)
     anchor = CASE_ANCHORS.get(cell)
