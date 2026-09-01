@@ -1254,6 +1254,27 @@ def _save_raw() -> bool:
     return _raw_dir() != "none"
 
 
+# ── 반전 기본값 (Fastest Lap) ────────────────────────────────────────────────
+# 본편은 반전을 **자리**로 정한다(config.flip_v_slots) — 교합면 슬롯은 늘 뒤집는다.
+# Fastest Lap 은 그럴 수 없다: 기준 사진이 사람이 떨어뜨린 것이라 이미 뒤집힌
+# 완성본일 수도, 안 뒤집힌 원본일 수도 있다. 그래서 풀×카테고리 표를 기본값으로
+# 두고 사람이 사진마다 고칠 수 있게 한다.
+FLIP_DEFAULTS = {"cur": {"IO_UPPER": True, "IO_LOWER": True}, "ref": {}}
+FLIP_CLASSES = [c for c in cfg.classes if c != "OTHERS"]
+
+
+def _flip_defaults() -> dict:
+    saved = _setting("flip_defaults") or {}
+    out = {}
+    for pool in ("ref", "cur"):
+        base = dict(FLIP_DEFAULTS.get(pool, {}))
+        got = saved.get(pool)
+        if isinstance(got, dict):
+            base = {k: bool(v) for k, v in got.items() if k in FLIP_CLASSES}
+        out[pool] = base
+    return out
+
+
 def _photo_dir() -> str:
     """사진을 차수 폴더에 넣을까, 환자 폴더에 바로 둘까 — "visit" | "flat".
 
@@ -1404,6 +1425,11 @@ class Photo:
         self.label = None
         self.confidence = 0.0
         self.probs = {}
+        # 어느 풀에서 온 사진인가 — 'cur'(오늘 찍은 것) | 'ref'(정합용 기준).
+        # 'ref' 는 Fastest Lap 모드에서만 생긴다.
+        self.pool = "cur"
+        # 사람이 ↕ 로 직접 뒤집었나. 그러면 분류가 바뀌어도 기본값이 덮지 않는다.
+        self.flip_user = False
         self.slot = None           # 배정된 슬롯(SLOT_*) 또는 'FACE' 또는 None
         # 교합면은 사용자가 상하반전된 화면에서 본다(config.flip_v_slots). 원본
         # 파일과 PPT 안의 이미지는 그대로 두고 표시만 뒤집으므로, editor 값도
@@ -1443,6 +1469,25 @@ class Session:
         # 상자 = 순서 있는 목록. 0번이 대표(슬라이드에 들어가고 (1)~(5) 이름을 받음).
         # 나머지는 같은 자리의 추가 촬영본으로 파일만 저장된다.
         self.bins: dict[str, list[str]] = {}   # 'SLOT_*'|'FACE' -> [photo_id]
+        # Fastest Lap 모드 — 덱을 **읽되 쓰지 않고** 사진만 저장한다.
+        self.fast = False
+        # 환자를 고르지 않고 진행할 때 쓰는 두 칸. 그때는 `ids`·`visit`·
+        # `patient_dir` 이 전부 비어 있고, 저장 루트 아래 이 폴더로 간다.
+        # 환자를 골랐으면 둘 다 비어 있고 환자 폴더 쪽이 진실이다.
+        self.folder = ""
+        self.prefix = ""
+        # 기준 풀의 상자. 'cur' 풀은 위 `bins` 를 그대로 쓴다 — 본편과 같은
+        # 자리라 검수·저장 경로가 한 줄도 안 바뀌고 그대로 돈다.
+        self.ref_bins: dict[str, list[str]] = {}
+        # 슬롯별 기준영상을 **무엇으로** 구웠나 — (사진, 반전). 그대로면 안 굽는다.
+        self.ref_src: dict[str, tuple] = {}
+        # 얼굴은 자리가 아니라 사진 단위 — pid -> 계산 당시 반전값
+        self.face_framed: dict[str, bool] = {}
+        # 정합 진행 상태. 병렬로 도는 동안 화면이 이걸 폴링해 슬롯별로 보여준다.
+        # 값: wait | run | reg | frame | fallback
+        self.progress: dict[str, str] = {}
+        # 병렬 정합이 세션 상태를 같이 만지므로 잠근다. 본편(순차)은 쓰지 않는다.
+        self.lock = threading.RLock()
         # 어느 슬롯을 **어느 사진으로** 정합/프레이밍했나. 검수로 다시 들어올 때
         # 대표가 그대로면 건너뛴다 — 좌·우를 고치고 돌아오면 그 두 칸만 다시 돈다.
         self.framed: dict[str, str] = {}       # 'SLOT_*' -> photo_id
@@ -1978,7 +2023,8 @@ def _ppt_reject_reason(name: str, ids) -> dict:
     except N.NamingError:
         return {"why": "등록된 PPT 이름 양식과 맞지 않습니다"}
     if got.ortho_id != ids.ortho_id:
-        return {"why": f"교정번호가 다릅니다 ({got.ortho_id})"}
+        # 번호를 함께 실어 준다 — 화면이 "폴더 이름을 이 번호로" 를 제안할 수 있다.
+        return {"why": f"교정번호가 다릅니다 ({got.ortho_id})", "ortho": got.ortho_id}
     return {"why": "인식 가능"}
 
 
@@ -2403,6 +2449,85 @@ def folder_pick_ppt(req: PptPickReq):
     return {"ok": True, "ppt": rel}
 
 
+class FolderRenameReq(BaseModel):
+    folder: str                        # 지금 이름
+    name: str                          # 바꿀 이름
+
+
+def _move_ppt_choice(old: str, new: str) -> None:
+    """기억해 둔 덱을 새 폴더 이름으로 옮긴다.
+
+    열쇠가 **폴더 경로**라, 이름을 바꾸면 그냥 두었을 때 기억을 잃는다 — 다음
+    차수가 엉뚱한 덱으로 갈 수 있다.
+    """
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:                                   # noqa: BLE001
+        return
+    choice = d.get("ppt_choice")
+    if not isinstance(choice, dict):
+        return
+    got = choice.pop(N.nfc(old), None) or choice.pop(N.nfc(Path(old).name), None)
+    if got is None:
+        return
+    choice[N.nfc(new)] = got
+    d["ppt_choice"] = choice
+    try:
+        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    except OSError:
+        pass
+
+
+@app.post("/api/folder/rename")
+def folder_rename(req: FolderRenameReq):
+    """환자 폴더의 이름을 고친다.
+
+    폴더 이름은 이 프로그램에서 **환자 신원의 출처**다 — 사진 이름도 차수 폴더도
+    거기서 나온다(`_build_plan`). 그래서 덱과 교정번호가 어긋나면 고칠 곳은
+    폴더 이름이다. 탐색기에서 하면 창을 오가며 손으로 맞춰야 하고, 그러다 사본이
+    생겨 **어느 쪽을 고쳤는지 잃는다** — 실제로 그렇게 막혔다. 여기서 하면 고친
+    직후 그 이름으로 다시 읽는다.
+    """
+    root = ROOT.resolve()
+    src = (root / req.folder).resolve()
+    if not str(src).startswith(str(root)) or not src.is_dir():
+        raise HTTPException(404, f"환자 폴더를 찾을 수 없습니다: {req.folder}")
+
+    name = (req.name or "").strip().strip(".")
+    if not name:
+        raise HTTPException(400, "새 폴더 이름을 적어 주세요")
+    if set(chr(92) + '/:*?"<>|') & set(name):
+        raise HTTPException(400, '폴더 이름에 \\ / : * ? " < > | 는 쓸 수 없습니다')
+    dst = (root / name).resolve()
+    if dst.parent != root:
+        raise HTTPException(400, "저장 위치 바로 아래여야 합니다")
+    if dst == src:
+        return {"ok": True, "folder": src.name, "changed": False}
+    if dst.exists():
+        raise HTTPException(409, f"같은 이름의 폴더가 이미 있습니다: {name}")
+
+    # 규칙에 맞아야 목록에 다시 뜬다 — 아니면 '표시하지 않은 폴더' 로 빠져,
+    # 고쳤는데 사라진 것처럼 보인다.
+    try:
+        _parse_folder(name, label="폴더명",
+                      hospital_digits=cfg.identifiers.hospital_id.digits,
+                      ortho_digits=cfg.identifiers.ortho_id.digits,
+                      name_regex=cfg.identifiers.name.allow_regex)
+    except N.NamingError as e:
+        raise HTTPException(400, str(e))
+
+    try:
+        src.rename(dst)
+    except OSError as e:
+        raise HTTPException(409, "이름을 바꾸지 못했습니다 — 폴더나 그 안의 파일이 "
+                                 f"다른 프로그램에서 열려 있을 수 있습니다 ({type(e).__name__})")
+    _move_ppt_choice(str(src), str(dst))
+    S.append_audit(LOG_FILE, {"event": "folder_rename",
+                              "from": src.name, "to": dst.name})
+    return {"ok": True, "folder": dst.name, "changed": True}
+
+
 class OpenReq(BaseModel):
     folder: str | None = None          # 기존 환자: 폴더명
     name: str | None = None            # 새 환자: 식별자 3종
@@ -2410,6 +2535,9 @@ class OpenReq(BaseModel):
     ortho_id: str | None = None
     # 확인 줄에서 고친 값 — 이번 차수 글자, 새 슬라이드를 넣을 자리
     visit: str | None = None
+    # Fastest Lap — 덱을 읽어 차수·레이아웃은 물려받되 **쓰지는 않는다**.
+    # 사진만 환자 폴더에 저장하고, 차수는 사람이 PowerPoint 에서 추가한다.
+    fast: bool = False
     insert_after: int | None = None   # 이 번호의 슬라이드 **뒤**에 (0 = 맨 앞)
     visit_word: str | None = None     # 라벨에 쓸 낱말 (재진 · F/U · 디본딩)
 
@@ -2462,6 +2590,7 @@ def session_open(req: OpenReq):
 
     # mode = PPT를 어떻게 만들 것인가. 기존 PPT가 있어야만 'revisit'(이어붙이기).
     s = Session("revisit" if has_ppt else "first", ids, N.next_visit_letter(visits))
+    s.fast = bool(req.fast)
     s.patient_dir = d
     if has_ppt:
         s.ppt_path = ppt_path
@@ -2477,9 +2606,12 @@ def session_open(req: OpenReq):
         src_no = _prev_visit_slide_no(scan)
         s.slot_windows = _layout_from_ppt(prs, src_no)
         # 기준영상도 그 PPT의 창으로 복원해야 정합이 같은 좌표계에서 이뤄진다.
-        seen = Rd.read_all_visits(prs, cfg, PPC, s.slot_windows)
-        s.references = Rd.references_for_registration(seen)
-        if not s.references:
+        # **Fastest Lap 은 복원하지 않는다.** 그쪽 기준은 사람이 떨어뜨린 사진에서
+        # 오고(fastlap._ref_bake), 여기서 되살린 그림은 곧바로 덮이거나 버려진다 —
+        # 차수마다 다섯 장을 디코드하는 값이 통째로 헛돈다.
+        seen = {} if s.fast else Rd.read_all_visits(prs, cfg, PPC, s.slot_windows)
+        s.references = Rd.references_for_registration(seen) if seen else {}
+        if not s.references and not s.fast:
             # PPT 는 찾았는데 기준영상이 0 — 라벨(차수)을 못 읽었거나 십자뷰가
             # 인식 조건에 안 맞는 것이다. 정합이 왜 안 됐는지 나중에 추적하게 남긴다.
             S.append_audit(LOG_FILE, {
@@ -2544,7 +2676,10 @@ def session_open(req: OpenReq):
         s.visit_word = w
     SESSIONS[s.id] = s
 
-    return {"session_id": s.id, "mode": s.mode, "visit": s.visit,
+    return {"session_id": s.id, "mode": s.mode, "visit": s.visit, "fast": s.fast,
+            # Fastest Lap 의 얼굴 검수 창. 본편은 케이스 덱의 자리마다 창이 달라
+            # 여기 실을 수 없지만, 저쪽은 사진 단위라 창이 하나뿐이다.
+            **({"face_window": _FL.face_window_json()} if s.fast else {}),
             "prev_visits": visits, "folder": d.name,
             "folder_exists": d.is_dir(), "ppt_exists": has_ppt,
             "windows": _windows_json(s.slot_windows),
@@ -2656,8 +2791,13 @@ def _shot_order_key(p: "Photo", idx: int) -> tuple:
             idx)
 
 
-async def _stage_photos(s: "Session", files: list[UploadFile]) -> list[Photo]:
-    """세션 임시폴더에 저장만 한다. 분류는 하지 않는다."""
+async def _stage_photos(s: "Session", files: list[UploadFile],
+                        pool: str = "cur") -> list[Photo]:
+    """세션 임시폴더에 저장만 한다. 분류는 하지 않는다.
+
+    `pool` 은 Fastest Lap 의 두 드롭존을 가른다 — 'cur'(오늘) | 'ref'(정합용 기준).
+    본편은 언제나 'cur' 이다.
+    """
     from PIL import Image as _Im, ImageOps as _Ops
     staged = []
     for uf in files:
@@ -2686,6 +2826,7 @@ async def _stage_photos(s: "Session", files: list[UploadFile]) -> list[Photo]:
         except Exception:
             continue                                # 이미지가 아니거나 깨진 파일
         photo = Photo(pid, dst, pw, ph)
+        photo.pool = pool
         photo.orig_name = uf.filename or dst.name
         photo.taken_at = taken
         photo.exif_seq = seq
@@ -2982,7 +3123,7 @@ def _detach(s, pid) -> None:
     _photo(s, pid).slot = None
 
 
-def _sync_flip(photo) -> None:
+def _sync_flip(s, photo, flips: dict | None = None) -> None:
     """슬롯에 맞춰 반전 여부를 갱신하고, 바뀌면 편집기 값을 그 프레임으로 옮긴다.
 
     `flip_v` 는 "editor 값이 어느 프레임 기준인가"를 뜻한다. 반전 프레임과 원본
@@ -2992,8 +3133,19 @@ def _sync_flip(photo) -> None:
 
     상자에서 빼기만 할 때(_detach)는 일부러 건드리지 않는다 — 값이 어느 프레임인지는
     변하지 않았고, 다시 어딘가에 넣을 때 여기서 한 번만 맞추면 된다.
+
+    **여기가 `flip_v` 를 쓰는 유일한 자리다** — 나머지는 전부 읽기(굽기·정합·
+    프레이밍·화면). 그래서 Fastest Lap 의 다른 규칙도 이 한 곳만 갈라 놓으면
+    되고, 공유하는 편집기·정합·저장 코드는 한 줄도 손대지 않는다.
     """
-    want = photo.slot in cfg.flip_v_slots
+    if s.fast:
+        # 사람이 ↕ 로 고른 사진은 분류가 바뀌어도 그 선택이 이긴다.
+        if photo.flip_user:
+            return
+        flips = _flip_defaults() if flips is None else flips
+        want = bool(flips.get(photo.pool, {}).get(_category_of(photo) or "", False))
+    else:
+        want = photo.slot in cfg.flip_v_slots
     if want != photo.flip_v:
         photo.flip_v = want
         photo.editor = flip_editor_v(photo.editor)
@@ -3011,7 +3163,18 @@ def _put(s, photo, key, at=None) -> None:
         idx -= 1
     lst.insert(min(idx, len(lst)), photo.id)
     photo.slot = key
-    _sync_flip(photo)
+    _sync_flip(s, photo)
+
+
+def _category_of(photo) -> str | None:
+    """상자 열쇠 → 분류 카테고리. 아직 배정 전이면 라벨을 그대로 쓴다.
+
+    반전 기본값이 **카테고리별**이라 상자가 정해져야 값이 나온다 — 그래서
+    `_sync_flip` 은 `_put` 이 자리를 정한 **뒤에** 불린다.
+    """
+    if photo.slot == "FACE":
+        return "FACE"
+    return _slot_to_class(photo.slot) or photo.label
 
 
 def _unassign(s, pid): _detach(s, pid)
@@ -3171,7 +3334,12 @@ def face_auto(req: FaceAutoReq):
 @app.get("/api/notes/{sid}")
 def notes_get(sid: str):
     """입력 칸 정의 + 지금까지 채운 값 + 박스별 미리보기."""
-    return _notes_json(get_session(sid))
+    s = get_session(sid)
+    # 노트는 덱에 적는 글이다 — 덱을 만들지 않는 진행에는 없다.
+    # 환자 없이 연 세션은 환자 정보(ids)조차 없어 미리보기를 만들 수도 없다.
+    if s.fast:
+        raise HTTPException(400, "이 세션에는 차수 노트가 없습니다 (PPT 를 만들지 않는 진행)")
+    return _notes_json(s)
 
 
 class NotesReq(BaseModel):
@@ -3191,6 +3359,9 @@ class NotesReq(BaseModel):
 @app.post("/api/notes")
 def notes_set(req: NotesReq):
     s = get_session(req.session_id)
+    # 노트는 덱에 적는 글이다 — 덱을 만들지 않는 진행에는 없다.
+    if s.fast:
+        raise HTTPException(400, "이 세션에는 차수 노트가 없습니다 (PPT 를 만들지 않는 진행)")
     for k, sel in (req.period or {}).items():
         if k not in PERIOD_KEYS:
             continue
@@ -3446,6 +3617,19 @@ def thumb(sid: str, pid: str, w: int = 0):
     return FileResponse(dst)
 
 
+def _ref_order(key: str) -> int:
+    """기준영상 열쇠의 정렬값. 차수 글자면 그 크기, 아니면 맨 앞.
+
+    Fastest Lap 은 사람이 떨어뜨린 사진을 구워 `'기준'` 이라는 열쇠로 넣는다 —
+    차수 글자가 아니다. `letter_to_num` 은 그런 열쇠에 예외를 던지므로, 겹쳐보기
+    엔드포인트가 두 모드에서 함께 돌게 여기서 받아 준다.
+    """
+    try:
+        return N.letter_to_num(key)
+    except N.NamingError:
+        return -1
+
+
 @app.get("/api/reference/{sid}/{slot}")
 def reference(sid: str, slot: str, visit: str = ""):
     """기준영상 한 장. **이전 차수 슬라이드에 보이던 그림 그대로**다.
@@ -3457,7 +3641,7 @@ def reference(sid: str, slot: str, visit: str = ""):
     refs = s.references.get(slot, {})
     if not refs:
         raise HTTPException(404, "기준영상 없음")
-    key = visit if visit in refs else sorted(refs, key=N.letter_to_num)[-1]
+    key = visit if visit in refs else sorted(refs, key=_ref_order)[-1]
     ok, buf = cv2.imencode(".png", refs[key])
     if not ok:
         raise HTTPException(500, "기준영상을 만들지 못했습니다")
@@ -3468,7 +3652,7 @@ def reference(sid: str, slot: str, visit: str = ""):
 def reference_list(sid: str):
     """슬롯마다 **어느 차수를 겹쳐볼 수 있나**. 화면의 겹쳐보기 목록이 이걸 쓴다."""
     s = get_session(sid)
-    return {slot: sorted(refs, key=N.letter_to_num)
+    return {slot: sorted(refs, key=_ref_order)
             for slot, refs in s.references.items() if refs}
 
 
@@ -4840,6 +5024,9 @@ def weights_status():
 
 
 app.mount("/static", _NoCacheStatic(directory=str(FRONTEND_DIR)), name="static")
+# 설명 그림 등 프로그램 폴더의 자산. 지금까지 `assets/` 는 바탕화면 바로가기의
+# 아이콘 경로로만 쓰였고 화면에는 나가지 않았다 — 설정 창의 안내 그림이 처음이다.
+app.mount("/assets", _NoCacheStatic(directory=str(PROGRAM_DIR / "assets")), name="assets")
 
 
 def _port_free(port: int) -> bool:
@@ -4962,6 +5149,19 @@ def run():
     _write_lock(port)
     threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}/")).start()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+
+
+# ── Fastest Lap ───────────────────────────────────────────────────────────────
+# **맨 끝에서** 부른다. `fastlap` 은 이 모듈의 헬퍼를 `import main as M` 로 그대로
+# 쓰는데, 여기까지 오면 main 은 이미 다 정의돼 있다. 새 파일로 갈라 둔 것은
+# fastest_lap 브랜치와의 cherry-pick 을 지키기 위해서다 — 이 파일이 흔들리면
+# 코어 수정이 그쪽 브랜치에 안 붙는다.
+#
+# **속성을 건드리지 않는다.** 둘은 서로를 부르므로 어느 쪽이 먼저 불리느냐에
+# 따라 상대가 반쯤 만들어진 상태일 수 있다 — 실제로 테스트가 `fastlap` 을 먼저
+# 임포트하면 여기서 아직 없는 `router` 를 찾아 터졌다. 라우터를 앱에 붙이는 일은
+# **fastlap 이 제 끝에서** 한다. 그때는 어느 방향이든 양쪽이 다 서 있다.
+import fastlap as _FL                                            # noqa: E402,F401
 
 
 if __name__ == "__main__":

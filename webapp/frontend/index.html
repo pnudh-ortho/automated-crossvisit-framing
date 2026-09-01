@@ -15,10 +15,14 @@
 <header class="head">
   <span class="mark">CRoCs<span class="full"> - <b>C</b>rop &amp; <b>Ro</b>tation &amp; <b>C</b>la<b>s</b>sification</span></span>
   <span class="sp"></span>
-  <!-- 기능 설명 영상 — 버튼처럼 보이지만 새 탭으로 나가는 링크다 -->
+  <!-- 설명 영상 둘 — 버튼처럼 보이지만 새 탭으로 나가는 링크다.
+       진행 방식이 둘이라 영상도 둘이다: 본편(PPT 까지) · Fastest Lap(사진만). -->
   <a class="btn howto" id="btn-howto" target="_blank" rel="noopener"
      href="https://drive.google.com/file/d/1yj7vNDRpuMNhYOqb7ddAmORKv4igaoe8/view?usp=sharing"
-     title="기능 설명 영상을 새 탭에서 엽니다">▶ 기능 설명 영상</a>
+     title="기능 설명 영상을 새 탭에서 엽니다">▶ 기능 설명<span class="vfull"> 영상</span></a>
+  <a class="btn howto" id="btn-howto-fast" target="_blank" rel="noopener"
+     href="https://drive.google.com/file/d/1LGhZfbNo-Nf_V7U6JpgOUOOM0T-EilZl/view?usp=sharing"
+     title="Fastest Lap 설명 영상을 새 탭에서 엽니다">▶ Fastest Lap<span class="vfull"> 설명 영상</span></a>
   <span class="sp"></span>
   <span class="pchip" id="pchip" hidden></span>
   <button class="btn" id="btn-upd-check" title="새 버전이 있는지 지금 확인합니다">업데이트 확인</button>
@@ -100,8 +104,11 @@
              카드 안은 통째로 갈아끼워지므로 안에 두면 매번 사라진다. -->
         <div class="pcol">
           <div class="card plist" id="plist"></div>
-          <button class="btn wide soon" type="button" disabled
-                  title="준비 중입니다"><span class="soon-t">⚡Fastest Lap Mode⚡</span><span class="soon-d">8월말 예정</span></button>
+          <!-- 진행 방식 선택. 켜면 오른쪽 카드가 그 모습으로 다시 그려진다 —
+               사진 넣는 칸이 좌우로 갈리고, 저장이 PPT 를 만들지 않는다. -->
+          <button class="btn primary wide soon" type="button" id="btn-fast"
+                  aria-pressed="false"
+                  title="PPT 없이 사진만 빠르게 저장합니다"><span class="soon-t">⚡Fastest Lap Mode⚡</span><span class="soon-d">PPT 없이 사진만 저장</span></button>
         </div>
         <div class="card detail" id="detail"></div>
       </div>
@@ -114,6 +121,9 @@
           <div class="bins" id="bins"></div>
           <div class="bin wide" id="bin-others" data-slot=""></div>
           <button class="btn primary wide" id="btn-toproc" disabled>검수·조정으로 ▶</button>
+          <!-- Fastest Lap 의 정합은 슬롯별로 병렬이라 "지금 몇 번째"가 없다.
+               대신 자리마다 어디까지 왔는지를 함께 보여준다. -->
+          <div class="regprog" id="reg-progress" hidden></div>
         </div>
       </div>
     </div>
@@ -233,9 +243,13 @@
           <button class="btn" id="btn-open-photos" disabled>사진 폴더 열기</button>
           <button class="btn" id="btn-open-pptdir" disabled>PPT 폴더 열기</button>
         </div>
-        <p class="tip"><b>PPT에서 확인하기</b>는 저장될 그대로를 임시 파일로 열어 봅니다 —
+        <p class="tip" id="fin-tip-full"><b>PPT에서 확인하기</b>는 저장될 그대로를 임시 파일로 열어 봅니다 —
           환자 폴더에는 아무것도 쓰지 않습니다.<br>
           확정하면 사진과 PPT가 한 번에 기록되고, 중간에 실패하면 전부 되돌아갑니다(원자적 저장).</p>
+        <p class="tip" id="fin-tip-fast">확정하면 <b>사진만</b> 기록되고, 중간에 실패하면
+          전부 되돌아갑니다(원자적 저장).<br>
+          <b>PPT는 만들지도 고치지도 않습니다</b> — 차수를 기록으로 남기려면 PowerPoint에서
+          슬라이드를 직접 추가하세요.</p>
       </div></div>
     </div>
 
@@ -360,6 +374,53 @@
     </div>
     </details>
   </div>
+  <div class="sec">
+    <details class="fold">
+    <summary>⚡Fastest Lap <small class="sub">— 상하반전 기본값 · 파일 이름</small></summary>
+    <p class="sub">PPT 없이 사진만 저장하는 진행에서만 쓰이는 값입니다.</p>
+
+    <h5 class="setsub">상하반전 기본값</h5>
+    <p class="sub">자동 분류가 끝나면 이 표대로 뒤집어 놓습니다 — 카테고리가
+      정해져야 값이 나오기 때문입니다. 사진마다 <b>↕ 상하반전</b>으로 고칠 수 있고,
+      한 번 고친 사진은 분류가 바뀌어도 그 선택이 남습니다.</p>
+    <div id="fl-flipgrid"></div>
+    <!-- 접이를 열면 창 **오른쪽 밖**에 뜨는 방향 예시.
+         (좌: 거울로 찍은 그대로 · 우: 반전을 적용한 모습) -->
+    <img class="flipguide" src="/assets/flip_appendix.png" alt="상하반전 예시">
+
+    <h5 class="setsub">파일 이름 <small class="sub">— 환자를 고르지 않고 저장할 때만</small></h5>
+    <p class="sub">환자 폴더에 저장할 때는 본편 양식(<span class="ident">{ortho_id}_{visit} ({index})</span>)을
+      그대로 씁니다 — 한 폴더에 이름 체계가 둘이면 나중에 읽을 수 없습니다.</p>
+    <p class="sub" id="fl-numnote"></p>
+    <!-- 번호 규칙은 **글자 이름일 때만** 뜻이 있다. 이름이 (1) 꼴이면 번호가 곧
+         이름이라 붙일 것이 없다 — 회색으로 남겨 두면 "왜 안 되지?"만 남으므로
+         그때는 통째로 감춘다(fast.js fastDrawPrefs). -->
+    <div id="fl-numrows" hidden>
+      <div class="setrow"><span>번호 붙이기</span>
+        <div class="seg" id="fl-nummode">
+          <button data-m="multi_only">여러 장일 때만</button><button data-m="always">항상</button>
+        </div>
+      </div>
+      <div class="setrow"><span>시작 번호</span>
+        <div class="seg" id="fl-numstart">
+          <button data-s="1">1</button><button data-s="0">0</button>
+        </div>
+      </div>
+    </div>
+    <div class="setrow"><span>접두어와 이름 사이</span>
+      <span class="row" style="gap:8px">
+        <input class="ident" id="fl-sep" maxlength="3" style="width:72px">
+        <!-- 공백은 칸에서 안 보인다 — 지금 무엇이 들어 있는지 말로 적어 준다 -->
+        <span class="sub" id="fl-sepname"></span>
+      </span>
+    </div>
+    <p class="sub">카테고리 이름 — 파일 이름에 이 글자가 들어갑니다</p>
+    <div class="aliasgrid" id="fl-aliasgrid"></div>
+    <p class="sub" style="margin-top:8px">이렇게 저장됩니다</p>
+    <div class="egname" id="fl-prefex">—</div>
+    <p class="err" id="fl-preferr"></p>
+    </details>
+  </div>
   <menu><button class="btn" id="set-close">닫기</button></menu>
 
   <!-- ══ 유지관리 — 되돌리기 · 삭제 ══ -->
@@ -393,6 +454,7 @@
 </dialog>
 
 <script src="/static/app.js"></script>
+<script src="/static/fast.js"></script>
 <!-- 밝기(감마) 필터가 눈금마다 하나씩 만들어져 들어온다 (app.js: brightFilter).
      캔버스가 `ctx.filter = "url(#bright…)"` 로 참조만 하므로 화면에는 아무것도 안 그린다. -->
 <svg id="bright-defs" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"></svg>

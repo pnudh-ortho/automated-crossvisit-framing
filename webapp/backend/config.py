@@ -158,6 +158,13 @@ class CaseDeckCfg(BaseModel):
     intraoral_slides: dict[str, int] = {}
 
 
+class PerfCfg(BaseModel):
+    """성능 손잡이. 없는 config.yaml 이면 전부 자동으로 산다."""
+    # 슬롯별 정합/프레이밍 동시 실행 수. 0 = 자동(min(3, cpu//2)).
+    # ONNX 세션 자체가 코어를 여럿 쓰므로 너무 키우면 서로 밟는다.
+    pair_workers: int = 0
+
+
 class Config(BaseModel):
     paths: Paths
     naming: NamingCfg
@@ -171,6 +178,7 @@ class Config(BaseModel):
     thresholds: Thresholds
     geometry: Geometry
     ppt: PptCfg
+    perf: PerfCfg = PerfCfg()
     case_deck: CaseDeckCfg = CaseDeckCfg()
     notes: NotesCfg = NotesCfg()
     patient_info: PatientInfoCfg = PatientInfoCfg()

@@ -1,5 +1,10 @@
 "use strict";
 let SESSION = null;
+/* Fastest Lap — 환자를 고른 뒤 **PPT 없이 사진만** 남기는 진행 방식.
+   켜면 사진 넣는 칸이 좌우로 갈리고(기준·오늘), 저장이 덱을 만들지 않는다.
+   화면을 그리는 쪽은 fast.js 에 있고, 여기에는 갈림길만 둔다 — 그래야 본편
+   코드가 그대로 남아 fastest_lap 브랜치로 cherry-pick 이 계속 흐른다. */
+let FAST = false;
 const STEPS = [
   {v:"setup", n:1, nm:"환자 · 사진", code:"Setup & Upload",      st:"",     state:""},
   {v:"pre",   n:2, nm:"자동 분류",   code:"Pre-processing (AI)", st:"대기", state:""},
@@ -30,7 +35,14 @@ const SLOTS = [
   {key:"SLOT_UPPER", nm:"상악", area:"u", hk:4},
   {key:"SLOT_LOWER", nm:"하악", area:"b", hk:5},
 ];
-const primaryOf = key => (REVIEW && REVIEW.bins && REVIEW.bins[key] || [])[0] || null;
+/* 편집기가 다루는 대상. 보통은 자리(SLOT_*)의 대표 사진이지만, Fastest Lap 의
+   얼굴은 자리가 없어 **사진 자체**가 대상이라 열쇠가 `FACE:<사진id>` 로 온다.
+   (본편의 얼굴은 케이스 덱의 슬라이드 자리에 매달려 별도 편집기 FED 가 맡는다.) */
+const FACE_KEY = "FACE:";
+const isFaceKey = k => typeof k === "string" && k.startsWith(FACE_KEY);
+const primaryOf = key => isFaceKey(key)
+  ? (STAGED.find(p => p.id === key.slice(FACE_KEY.length)) || null)
+  : (REVIEW && REVIEW.bins && REVIEW.bins[key] || [])[0] || null;
 
 const imgCache = new Map();
 function getImg(url){
@@ -108,6 +120,7 @@ function drawComposite(c, W, H, img, st, border, flipV, bright){
    없을 때만 템플릿 기본값으로 물러난다. 화면·미리보기·PPT가 같은 창을 써야
    에디터에서 맞춘 그림이 슬라이드에서도 그대로 나온다. */
 function slotWindow(key){
+  if(isFaceKey(key)) return (SESSION && SESSION.face_window) || null;
   return (SESSION && SESSION.windows && SESSION.windows[key])
       || (HEALTH && HEALTH.windows && HEALTH.windows[key]) || null;
 }
@@ -163,6 +176,8 @@ function drawBoard(){
     g.onclick = () => pick(s.key);
     segEl.appendChild(g);
   }
+  // Fastest Lap 은 얼굴도 한 장씩 조정한다 — 사진마다 선택기에 칸이 하나 붙는다.
+  if(FAST) fastFaceSeg();
   if(ED.slot && primaryOf(ED.slot)) pick(ED.slot);
   else { const f = SLOTS.find(x => primaryOf(x.key)); if(f) pick(f.key); }
   syncBoardShape();    // 판 비율은 그 덱의 슬라이드를 따른다
@@ -236,7 +251,9 @@ const PEEK = {on: false, timer: null};
    **같은 자리에서 깜빡이는** 편이 어긋난 곳을 훨씬 잘 잡아낸다. 그래서 이 상태의
    Tab 은 다섯 칸이 아니라 **이 큰 사진 한 장**을 직전 차수로 바꾼다. 두 모드에서
    Tab 의 뜻은 하나다 — "지금 보고 있는 것을 직전 차수로". */
-const ZOOM = {on: false};
+/* `face` 는 **얼굴을 세우느라** 판 자리를 쓰고 있다는 표시다. 사람이 Space 로
+   켠 크게 보기와 구분해야, 슬롯으로 돌아갈 때 사람이 켠 것까지 끄지 않는다. */
+const ZOOM = {on: false, face: false};
 
 /* 판을 감싼 칸. 캔버스를 여기에 넣는다 — 판(.board) 안이 아니다.
    drawBoard 가 판의 내용을 통째로 비우므로, 안에 두면 다시 그릴 때 사라진다. */
@@ -255,6 +272,7 @@ function toggleZoom(){
     el("ed-fit").appendChild(cv);      // 제자리 = 캔버스를 감싸는 칸 안
     cv.classList.remove("zoom");
     boardEl.hidden = false;
+    ZOOM.face = false;                 // 사람이 껐다 — 얼굴 때문이었다는 표시도 내린다
   }
   drawPeekBadge();
   renderEditor();
@@ -335,17 +353,28 @@ function redrawBoardSlots(){
 
 async function pick(key){
   const p = primaryOf(key); if(!p) return;
-  const meta = SLOTS.find(x => x.key === key);
+  const face = isFaceKey(key);
+  const meta = face ? null : SLOTS.find(x => x.key === key);
   ED.slot = key;
   ED.dx = p.editor.dx; ED.dy = p.editor.dy; ED.scale = p.editor.scale; ED.angle = p.editor.angle;
   ED.flip_v = !!p.flip_v;
   ED.bright = +p.brightness || 0;
   ED.img = await getImg(p.thumb);
-  [...boardEl.children].forEach(c => c.setAttribute("aria-pressed", c.style.gridArea === meta.area));
+  // 얼굴은 십자뷰 판에 자리가 없다 — 판의 강조는 모두 끄고 선택기만 표시한다.
+  [...boardEl.children].forEach(c => c.setAttribute(
+    "aria-pressed", String(!!meta && c.style.gridArea === meta.area)));
   [...segEl.children].forEach(g => g.setAttribute("aria-pressed", g.dataset.key === key));
+  // 얼굴은 십자뷰 판에 자리가 없다 — **판 자리를 그대로 무대로 쓴다.** 캔버스를
+  // 그리로 옮기는 길은 이미 있다(크게 보기). 3:4 세로 사진이 가운데 서고 남는
+  // 좌우는 십자뷰 슬라이드와 같은 색으로 채운다.
+  if(face && !ZOOM.on){ ZOOM.face = true; toggleZoom(); }
+  else if(!face && ZOOM.on && ZOOM.face){ ZOOM.face = false; toggleZoom(); }
+  for(const host of [el("ed-fit"), zoomHost()])
+    if(host) host.style.background = face ? LETTERBOX : "";
   showPhotoDock();   // 노트 서식을 보던 중이면 사진 편집기로 돌아온다
   el("dock-title").firstChild.textContent =
-    `${meta.nm} · ${p.label || "—"} ${Math.round((p.confidence || 0) * 100)}%`;
+    `${meta ? meta.nm : faceLabel(key)} · ${p.label || "—"} ` +
+    `${Math.round((p.confidence || 0) * 100)}%`;
   syncKnobs(); renderEditor();
   await syncOverlayBar(); renderEditor();   // 기준영상이 늦게 오면 한 번 더 그린다
 }
@@ -600,10 +629,14 @@ function saveEdit(){
   el("ed-saved").textContent = "…";
   ED.timer = setTimeout(async () => {
     try{
-      const r = await api("/api/adjust", {method:"POST",
+      // 얼굴은 자리가 없으므로 사진으로 보낸다. 나머지는 같은 값이다.
+      const face = isFaceKey(ED.slot);
+      const geo = {dx: ED.dx, dy: ED.dy, scale: ED.scale, angle: ED.angle};
+      const r = await api(face ? "/api/fl/adjust" : "/api/adjust", {method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({session_id: SESSION.session_id, slot: ED.slot,
-                              dx: ED.dx, dy: ED.dy, scale: ED.scale, angle: ED.angle})});
+        body: JSON.stringify(face
+          ? {session_id: SESSION.session_id, photo_id: ED.slot.slice(FACE_KEY.length), ...geo}
+          : {session_id: SESSION.session_id, slot: ED.slot, ...geo})});
       // 서버가 cover 조건으로 배율을 되돌릴 수 있다 — 창에 빈틈이 생기지 않게
       if(r.clamped_scale && Math.abs(r.clamped_scale - ED.scale) > 1e-6){
         ED.scale = r.clamped_scale;
@@ -873,12 +906,13 @@ async function runClassify(){
   preMsg("분류 중…", "busy");
   loadRefList();          // 겹쳐보기 목록 (재진에서만 내용이 있다)
   try{
-    const r = await api(`/api/classify/${SESSION.session_id}`, {method:"POST"});
+    const r = await api(FAST ? `/api/fl/classify/${SESSION.session_id}`
+                             : `/api/classify/${SESSION.session_id}`, {method:"POST"});
     REVIEW = r.review; STAGED = r.photos;
     preMsg("");
     drawBins();
     renderVisitBadges();   // 예상 기준 → 실제로 정합에 쓰인 기준으로 갱신
-    drawFace();
+    if(!FAST) drawFace();
   }catch(e){ preMsg(e.message, "err"); }
 }
 function preMsg(text, kind){
@@ -899,6 +933,11 @@ function photoCard(p, isPrimary, binKey){   // binKey는 PPT 배지 표시에만
 
 function drawBins(){
   if(!REVIEW) return;
+  if(FAST) return fastDrawPairs();
+  // fast 화면은 이 두 칸의 클래스를 제 것으로 갈아끼운다 — 본편으로 돌아오면
+  // 되돌려 놓아야 격자가 그쪽 모양으로 남지 않는다.
+  el("bins").className = "bins";
+  el("bin-others").className = "bin wide";
   const box = el("bins");
   box.innerHTML = BINS.map(b => {
     const list = (REVIEW.bins && REVIEW.bins[b.key]) || [];
@@ -974,7 +1013,7 @@ async function sortFace(){
   const btn = el("face-sort");
   if(btn) btn.disabled = true;
   try{
-    const r = await api("/api/sort", {method:"POST",
+    const r = await api(FAST ? "/api/fl/sort" : "/api/sort", {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({session_id: SESSION.session_id, slot: "FACE"})});
     REVIEW = r.review; STAGED = r.photos;
@@ -990,7 +1029,7 @@ async function sortFace(){
 
 async function assign(pid, slot, at){
   try{
-    const r = await api("/api/assign", {method:"POST",
+    const r = await api(FAST ? "/api/fl/assign" : "/api/assign", {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({session_id: SESSION.session_id, photo_id: pid, slot, at})});
     REVIEW = r.review; STAGED = r.photos;
@@ -1096,7 +1135,12 @@ let PATIENTS = [], SKIPPED = [], picked = null, RULES = {}, STAGED = [], VIEW = 
 
 /* ── 저장 위치 고르기 ──────────────────────────────────────────────────────
    브라우저는 서버의 절대 경로를 모르므로 탐색을 서버에 맡긴다(/api/fs). */
-async function drawRootPicker(path, host){
+async function drawRootPicker(path, host, onPick, labels){
+  // `onPick` 을 주면 고른 경로를 그쪽으로 넘긴다. 안 주면 종전대로 **저장 루트**를
+  // 바꾼다 — Fastest Lap 의 '저장할 폴더' 처럼 루트가 아닌 자리를 고를 때 쓴다.
+  // `labels` 로 머리글·안내·확인 버튼 글을 갈아 끼운다(용도가 다르면 글도 달라야 한다).
+  const L = Object.assign({title: "저장 위치 고르기", ok: "이 폴더로 지정",
+    hint: "환자 폴더가 들어 있는(또는 들어갈) 폴더를 고르세요"}, labels || {});
   const d = host || el("detail");
   d.innerHTML = `<p class="empty">폴더를 읽는 중…</p>`;
   let r;
@@ -1106,14 +1150,14 @@ async function drawRootPicker(path, host){
     el("pk-cancel").onclick = () => closePicker(host); return; }
 
   d.innerHTML =
-    `<div class="who">저장 위치 고르기</div>` +
-    `<div class="no">환자 폴더가 들어 있는(또는 들어갈) 폴더를 고르세요</div>` +
+    `<div class="who">${esc(L.title)}</div>` +
+    `<div class="no">${esc(L.hint)}</div>` +
     `<div class="drives" id="pk-drives"></div>` +
     `<div class="crumb"><button class="btn" id="pk-up"${r.parent ? "" : " disabled"}>▲ 상위</button>` +
       `<span class="ident">${esc(r.path)}</span></div>` +
     `<div class="dlist" id="pk-list"></div>` +
     `<p style="margin:14px 0 0; display:flex; gap:8px;">` +
-      `<button class="btn primary" id="pk-ok">이 폴더로 지정</button>` +
+      `<button class="btn primary" id="pk-ok">${esc(L.ok)}</button>` +
       `<button class="btn" id="pk-new">＋ 새 폴더</button>` +
       `<button class="btn" id="pk-cancel">취소</button></p>` +
     `<p class="err" id="pk-err"></p>`;
@@ -1122,7 +1166,7 @@ async function drawRootPicker(path, host){
   for(const x of r.drives){
     const b = document.createElement("button");
     b.className = "btn"; b.style.padding = "4px 10px"; b.style.fontSize = "12px";
-    b.textContent = x; b.onclick = () => drawRootPicker(x, host);
+    b.textContent = x; b.onclick = () => drawRootPicker(x, host, onPick, L);
     drv.appendChild(b);
   }
 
@@ -1131,7 +1175,7 @@ async function drawRootPicker(path, host){
   for(const x of r.dirs){
     const b = document.createElement("button");
     b.className = "drow"; b.textContent = "📁 " + x.name;
-    b.onclick = () => drawRootPicker(x.path, host);
+    b.onclick = () => drawRootPicker(x.path, host, onPick, L);
     list.appendChild(b);
   }
 
@@ -1142,12 +1186,13 @@ async function drawRootPicker(path, host){
       const res = await api("/api/fs/mkdir", {method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({path: r.path, name})});
-      drawRootPicker(res.path, host);   // 만든 폴더 안으로 들어가 바로 지정할 수 있게
+      drawRootPicker(res.path, host, onPick, L);   // 만든 폴더 안으로 들어가 바로 지정할 수 있게
     }catch(e){ el("pk-err").textContent = e.message; }
   };
-  el("pk-up").onclick = () => r.parent && drawRootPicker(r.parent, host);
+  el("pk-up").onclick = () => r.parent && drawRootPicker(r.parent, host, onPick, L);
   el("pk-cancel").onclick = () => closePicker(host);
   el("pk-ok").onclick = async () => {
+    if(onPick){ closePicker(host); onPick(r.path); return; }
     try{
       const res = await api("/api/root", {method:"POST",
         headers:{"Content-Type":"application/json"}, body: JSON.stringify({path: r.path})});
@@ -1199,6 +1244,7 @@ function setRootLabel(path){
 /* ── 설정 창 ─────────────────────────────────────────────────────────────── */
 function openSettings(){
   syncThemeSeg();
+  fastSyncPrefs();     // Fastest Lap 항목 — 창을 열 때마다 서버 값으로 맞춘다
   closePicker(el("set-picker"));
   el("dlg-set").showModal();
   syncPrefs();
@@ -1490,6 +1536,8 @@ function visitLine(p){
 function drawDetail(){
   const p = picked, d = el("detail");
   if(!p){
+    // fast 모드는 환자 없이도 진행할 수 있다 — 저장 폴더 이름을 직접 적는다.
+    if(FAST){ d.innerHTML = fastFolderHtml(); fastBindZones(); drawStaged(); return; }
     d.innerHTML = `<div class="sec"><p class="empty">왼쪽에서 환자를 고르거나<br><b>＋ 새 환자</b>로 등록하세요</p></div>`;
     return;
   }
@@ -1508,19 +1556,22 @@ function drawDetail(){
          </div>
          ${timeline(p)}
          <div class="plan">
-         <span class="vbig">${V}</span>${p.ppt ? "재진 — 기존 PPT에 슬라이드 1장 추가"
-                                               : p.visits.length ? "PPT를 새로 만들어 기록" : "초진 — PPT를 새로 만듭니다"}<br>
+         <span class="vbig">${V}</span>${FAST
+             ? "사진만 저장 — PPT는 만들지도 고치지도 않습니다"
+             : p.ppt ? "재진 — 기존 PPT에 슬라이드 1장 추가"
+             : p.visits.length ? "PPT를 새로 만들어 기록" : "초진 — PPT를 새로 만듭니다"}<br>
          사진 <span class="ident">${esc(first)}</span><span class="mid"> … </span><span class="ident">${esc(last)}</span>
          </div>
          ${lost ? pptLostNote(p) : ""}
        </div>
-       ${p.ppt ? `<div class="slides" id="pv-slides">
+       ${!FAST && p.ppt ? `<div class="slides" id="pv-slides">
          <div class="pv face" title="Face" hidden></div>
          <div class="pv" title="Intraoral" hidden><div class="pvgrid"></div></div>
        </div>` : ""}
        ${visitConfirm(p, V)}
      </div>
 
+     ${FAST ? fastZonesHtml() : `
      <div class="sec">
        <h3>사진 추가 <span class="aux"><span id="stage-msg"></span><span id="staged-n"></span></span></h3>
        <div class="dropzone" id="dz">
@@ -1539,7 +1590,7 @@ function drawDetail(){
          <input type="file" id="file-input" multiple accept="image/*" hidden>
        </div>
        <button class="btn primary wide" id="btn-go" disabled>자동 분류로 ▶</button>
-     </div>
+     </div>`}
 
      <div class="sec sec-folder">
        <h3>폴더 내용 <span class="aux ident">${esc(p.folder)}</span></h3>
@@ -1549,6 +1600,7 @@ function drawDetail(){
   loadFolder(p.folder);
   bindDrop();
   bindVisitConfirm(p);
+  bindOrthoFix(p);
   drawStaged();
 }
 
@@ -1574,13 +1626,14 @@ function visitConfirm(p, V){
     ${p.label_fallback ? `<div class="vc-warn">⚠ 십자뷰를 인식하지 못해 라벨만으로 차수를 세었습니다</div>` : ""}
     ${visitWordPick(p, V)}
     <label>이번 차수 <input id="v-letter" maxlength="2" value="${V}" autocomplete="off"></label>
-    ${p.ppt && p.suggest_after ? `<label>새 슬라이드는
+    ${!FAST && p.ppt && p.suggest_after ? `<label>새 슬라이드는
       <input id="v-pos" type="number" min="0" max="${p.ppt_slides || 999}"
              value="${p.suggest_after}">번 뒤에
       <span class="vc-aux">(전체 ${p.ppt_slides || "?"}장)</span></label>` : ""}
     <span class="vc-err" id="vc-err"></span>
     ${p.ppt ? `<div class="vc-note">이 환자 PPT가 <b>PowerPoint에서 열려 있으면</b>
-      읽고 저장하지 못합니다 — 진행 전에 닫아 주세요</div>` : ""}
+      ${FAST ? "차수와 레이아웃을 읽지 못할 수 있습니다 — 이 진행은 PPT 를 고치지 않습니다"
+             : "읽고 저장하지 못합니다 — 진행 전에 닫아 주세요"}</div>` : ""}
   </div>`;
 }
 
@@ -1659,7 +1712,55 @@ function pptLostNote(p){
   return `<div class="note" style="margin-top:10px">
     <b>PPT를 찾을 수 없어 새로 만듭니다.</b>
     ${diag.map(g => `<br>· <span class="ident">${esc(g.name)}</span> — ${esc(g.why)}`).join("")}
+    ${orthoFixNote(p, diag)}
     </div>`;
+}
+
+/* 교정번호가 어긋나 덱이 기각됐을 때 — 어느 번호가 맞는지 고르게 한다.
+
+   **폴더 이름이 신원의 출처다**: 사진 이름도 차수 폴더도 거기서 나온다. 그래서
+   "덱 번호가 맞다" 는 곧 폴더 이름을 고친다는 뜻이고, "폴더 번호가 맞다" 는 그
+   덱을 이 환자 것으로 지정한다는 뜻이다. 번호만 몰래 바꿔 쓰면 폴더 이름과 그
+   안의 사진 이름이 서로 다른 번호를 말하게 되어, 나중에 어느 쪽이 진짜인지
+   가릴 수 없다. */
+function orthoFixNote(p, diag){
+  const other = diag.find(g => g.ortho && g.ortho !== p.ortho_id);
+  if(!other) return "";
+  return `<div class="orthofix">
+    <b>어느 번호가 맞습니까?</b>
+    <button class="btn" data-ortho-keep="1">폴더 번호 <span class="ident">${esc(p.ortho_id)}</span> 가 맞음
+      <small>이 덱을 이 환자 것으로 지정</small></button>
+    <button class="btn" data-ortho-rename="${esc(other.ortho)}">덱 번호 <span class="ident">${esc(other.ortho)}</span> 가 맞음
+      <small>폴더 이름을 고침</small></button>
+    <span class="sub" data-ortho-pick="${esc(other.name)}"></span>
+  </div>`;
+}
+
+/* 폴더 이름 고치기 — 고친 뒤 그 이름으로 다시 읽는다. 탐색기에서 하면 창을
+   오가야 하고, 사본이 생기면 어느 쪽을 고쳤는지 잃는다. */
+async function renameFolder(folder, suggest){
+  const name = (prompt("새 폴더 이름", suggest) || "").trim();
+  if(!name || name === folder) return;
+  try{
+    const r = await api("/api/folder/rename", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({folder, name})});
+    await loadPatients();
+    await openPatient(r.folder);
+  }catch(e){ alert(e.message || "이름을 바꾸지 못했습니다"); }
+}
+
+/* 상세 카드 안에서만 찾는다 — 함수 선언으로 둔다(`el` 과 같은 이유: 최상위
+   핸들러가 이 줄보다 위에서도 부를 수 있고, const 화살표면 TDZ 로 멈춘다). */
+function detailEl(sel){ return document.querySelector(`#detail ${sel}`); }
+
+function bindOrthoFix(p){
+  const keep = detailEl("[data-ortho-keep]"), ren = detailEl("[data-ortho-rename]"),
+        pick = detailEl("[data-ortho-pick]");
+  if(keep && pick) keep.onclick = () => pickPpt(p.folder, pick.dataset.orthoPick);
+  // 폴더 이름의 교정번호만 덱의 것으로 바꿔 제안한다. 사람이 그 자리에서 고칠 수 있다.
+  if(ren) ren.onclick = () => renameFolder(
+    p.folder, p.folder.replace(p.ortho_id, ren.dataset.orthoRename));
 }
 
 /* 첫 진료 → (이력 펼치기) → 마지막 진료. 세로로 놓아 시간축이 그대로 읽히게. */
@@ -1719,6 +1820,11 @@ const shotName = (ortho, visit, i) => (RULES.photo_pattern || "{ortho_id}_{visit
    차수 십자 5장 + 얼굴 2장을 복원해 준다. PPT를 읽지 못하면 미리보기는 없다 —
    폴더의 사진 파일을 직접 읽는 일은 하지 않는다. */
 async function fillSlidePreviews(folder){
+  // Fastest Lap 은 이 요청을 보내지 않는다. `/api/ppt_preview` 는 **덱을 열어**
+  // 사진 일곱 장을 복원하는데, 이 모드가 덜어내려는 것이 바로 그 시간이다.
+  // 게다가 여기서 되살린 그림은 이 모드에서 아무 데도 쓰이지 않는다 — 정합
+  // 기준은 사람이 떨어뜨린 사진에서 온다.
+  if(FAST) return;
   const box = el("pv-slides"); if(!box) return;
   try{
     const d = await api("/api/ppt_preview?folder=" + encodeURIComponent(folder));
@@ -1759,11 +1865,17 @@ async function loadFolder(folder){
     if(!d.items.length){ box.innerHTML = `<p class="empty">폴더가 비어 있습니다</p>`; return; }
     // 구형 .ppt 는 그 줄에만 표시한다 — 무엇을 해야 하는지는 위 안내가 말한다
     // 덱이 여럿이면 눌러서 고를 수 있다. 하나뿐이면 누를 것이 없으므로 종전 그대로.
-    const decks = d.items.filter(i => i.kind === "ppt").length;
+    // **고르지 않은 덱은 언제나 누를 수 있다.** 예전에는 "덱이 여럿일 때만" 이었는데,
+    // 그 전제는 하나뿐인 덱은 곧 고른 덱이라는 것이었다. 그게 깨지는 자리가 있다 —
+    // 폴더 이름의 교정번호가 덱과 다르면 그 하나뿐인 덱이 **기각되어** 아무것도
+    // 선택되지 않는다. 그때 누를 곳이 없으면 사람에게 남는 길은 폴더 이름을 고쳐
+    // 다시 읽히는 것뿐인데, 그건 훨씬 어렵고 실제로 막혔다.
+    const anySel = d.items.some(i => i.kind === "ppt" && i.selected);
     box.innerHTML = d.items.map(it =>
       `<div class="frow" data-kind="${it.kind}"${
-        it.kind === "ppt" && decks > 1 && !it.selected
-          ? ` data-pick="${esc(it.name)}" title="이 PPT 에 이어붙입니다"` : ""}>` +
+        it.kind === "ppt" && !it.selected
+          ? ` data-pick="${esc(it.name)}" title="${anySel ? "이 PPT 에 이어붙입니다"
+              : "이 PPT 에 이어붙입니다 — 폴더 이름과 교정번호가 달라도 지정할 수 있습니다"}"` : ""}>` +
         `<span class="ic">${it.kind === "ppt" ? "📄" : it.kind === "deck" ? "📄"
                             : it.kind === "photo" ? "🖼" : "▫"}</span>` +
         `<span class="fn">${esc(it.name)}${it.selected ?
@@ -1801,6 +1913,7 @@ const fmtSize = n => n < 1024 ? `${n} B`
 
 /* 사진 투입 — 끌어다 놓기 / 붙여넣기 / 파일 선택 */
 function bindDrop(){
+  if(FAST) return fastBindZones();
   const dz = el("dz"), fi = el("file-input");
   const pick = el("btn-pick"); if(pick) pick.onclick = e => { e.stopPropagation(); fi.click(); };
   dz.onclick = () => fi.click();
@@ -1817,24 +1930,28 @@ function bindDrop(){
 }
 
 async function ensureSession(){
+  if(FAST && !picked) return fastFolderSession();
   if(SESSION && SESSION.folder === picked.folder) return SESSION;
   const err = el("vc-err");
   if(err && err.textContent) throw new Error(err.textContent);
   const r = await api("/api/session", {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({folder: picked.folder, ...visitOverride()})});
+    body: JSON.stringify({folder: picked.folder, fast: FAST, ...visitOverride()})});
   startSession(r);
   return r;
 }
 
-async function addFiles(files){
+async function addFiles(files, pool){
   stageMsg(`${files.length}장 올리는 중…`, "busy");
   try{
     await ensureSession();
     const fd = new FormData();
     for(const f of files) fd.append("files", f);
-    const r = await api(`/api/photos/${SESSION.session_id}`, {method:"POST", body: fd});
+    const url = FAST ? `/api/fl/photos/${SESSION.session_id}?pool=${pool || "cur"}`
+                     : `/api/photos/${SESSION.session_id}`;
+    const r = await api(url, {method:"POST", body: fd});
     STAGED = r.photos;
+    if(FAST) REVIEW = r.review;
     stageMsg("");
     drawStaged();
     // 노트를 다시 받는다 — 날짜·개월은 사진 EXIF 촬영일에서 오는데, 노트는
@@ -1846,13 +1963,15 @@ async function addFiles(files){
 
 async function dropStaged(pid){
   try{
-    const r = await api(`/api/photos/${SESSION.session_id}/${pid}`, {method:"DELETE"});
+    const r = await api(FAST ? `/api/fl/photos/${SESSION.session_id}/${pid}`
+                             : `/api/photos/${SESSION.session_id}/${pid}`, {method:"DELETE"});
     STAGED = r.photos; drawStaged();
     loadNotes();     // 사진이 빠지면 촬영일 최빈값도 달라질 수 있다
   }catch(e){ stageMsg(e.message, "err"); }
 }
 
 function drawStaged(){
+  if(FAST) return fastDrawZones();
   const box = el("thumbs"); if(!box) return;
   const empty = el("dz-empty");
   if(empty) empty.hidden = STAGED.length > 0;
@@ -1899,8 +2018,10 @@ function syncPreview(){
 async function openSession(body, errId){  // 새 환자 모달 전용
   const err = el(errId); if(err) err.textContent = "";
   try{
+    // 새 환자는 이 길에서 곧바로 세션이 열린다 — 켜 둔 진행 방식을 함께 보낸다.
     const r = await api("/api/session", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({...body, fast: FAST})});
     dlg().close();
     startSession(r);
     picked = {folder: r.folder, name: r.ids.name, hospital_id: r.ids.hospital_id,
@@ -1932,12 +2053,15 @@ function startSession(r){
       imgCache.delete(url);
   }
   SESSION = r;
+  // 모드는 세션에 박힌다. 진행 중에 바꾸려면 세션을 버려야 한다 — 이미 잡아 둔
+  // 구도·기준영상이 다른 규칙 위에서 계산된 값이기 때문이다.
+  setFast(!!r.fast);
   // 세션이 만들어진 뒤에는 차수·위치를 못 바꾼다 — 세션이 이미 그 값으로 산다
   for(const id of ["v-letter", "v-pos"]){ const n = el(id); if(n) n.disabled = true; }
   el("pchip").innerHTML =
     `<span class="nm">${esc(r.ids.name)}</span>` +
     `<span class="id">${[r.ids.hospital_id, r.ids.ortho_id].filter(Boolean).join(" · ")}</span>` +
-    `<span class="visit" title="차수 ${r.visit}">${r.visit}</span>`;
+    (r.visit ? `<span class="visit" title="차수 ${r.visit}">${r.visit}</span>` : "");
   el("pchip").hidden = false;
 
   STAGED = []; REVIEW = null; ED.slot = null;
@@ -1964,6 +2088,13 @@ function setStep(v, state, st){
 function visitInfo(){
   if(!SESSION) return null;
   const v = SESSION.visit, prev = SESSION.prev_visits || [];
+  // 환자 없이 여는 진행에는 차수가 없다. 그대로 두면 빈 글자로 "재진  · 기준 없음"
+  // 이 뜬다 — 기준 사진을 제대로 주고 정합이 됐을 때도 그렇게 보인다.
+  if(!v){
+    const used = REVIEW && Object.values(REVIEW.slots || {}).some(p => p && p.ref_visit);
+    return {text: "사진만 저장", basis: used ? "기준 사진으로 정합" : "",
+            tone: used ? "revisit" : "first"};
+  }
   const first = v === "A";
   let basis = "", tone = first ? "first" : "revisit";
 
@@ -3028,6 +3159,10 @@ async function saveNotes(payload){
 const saveNoteBoxes = boxes => saveNotes({boxes});
 
 async function loadNotes(){
+  // 노트는 **덱에 적는 글**이다. fast 모드는 덱을 만들지 않으므로 받을 것이 없고,
+  // 환자 없이 여는 세션은 환자 정보 자체가 없어 서버가 만들 수도 없다.
+  // 부르는 자리가 여럿이라(사진을 넣고 뺄 때마다) 여기 한 곳에서 막는다.
+  if(FAST) return;
   if(!SESSION) return;
   try{
     NOTES = await api(`/api/notes/${SESSION.session_id}`);
@@ -3053,6 +3188,8 @@ function queueNoteValues(){
    FACE는 케이스 덱을 만드는 초진에서만 열린다 — 재진은 십자뷰만 이어붙인다. */
 let TAB = "io";
 function faceTabOpen(){
+  // fast 모드는 덱을 만들지 않는다 — 얼굴을 놓을 슬라이드 자리 자체가 없다.
+  if(FAST) return false;
   return !!(CASE && CASE.enabled && SESSION && SESSION.mode === "first");
 }
 function showTab(name){
@@ -3085,7 +3222,8 @@ function syncTabs(){
                      : "초진에서 케이스 덱을 만들 때만 쓸 수 있습니다");
   // 노트는 세션이 열리자마자 받아 둔다 — 자동분류를 마치고 검수·조정에 들어온
   // 순간부터 십자뷰 판 위에 텍스트 박스가 얹혀 있어야 하기 때문이다.
-  if(SESSION && !NOTES) loadNotes();
+  // fast 모드는 덱을 안 만드니 적을 곳이 없다 — 받지 않는다.
+  if(SESSION && !NOTES && !FAST) loadNotes();
   showTab(TAB);   // 못 여는 탭이면 showTab이 알아서 io로 돌린다
 }
 
@@ -3781,6 +3919,8 @@ el("btn-refresh").onclick = loadPatients;
    자리를 하나씩 부르는 것은 진행을 보이기 위해서다 — 서버도 한 번에 한 장씩
    추론하므로 묶어 보내도 빨라지지 않는다. 이미 계산한 자리는 서버가 건너뛴다. */
 el("btn-toproc").onclick = async () => {
+  // fast 는 슬롯별로 **병렬**이라 한 번만 부르고 진행은 폴링으로 본다.
+  if(FAST) return fastRegister();
   const b = el("btn-toproc"), label = b.textContent;
   const todo = SLOTS.map(s => s.key).filter(k => primaryOf(k));
   b.disabled = true;
@@ -3826,6 +3966,7 @@ function syncFinButtons(planned){
 }
 
 async function loadPlan(){
+  if(FAST) return fastLoadPlan();
   const body = el("fin-body"), err = el("fin-err"), btn = el("btn-commit");
   err.textContent = ""; btn.disabled = true; syncFinButtons(false);
   if(!SESSION){ body.innerHTML = `<div class="ph">세션이 없습니다</div>`; return; }
@@ -3896,17 +4037,22 @@ function finFolder(){ return (FINDIRS && FINDIRS.folder) || (picked && picked.fo
 function syncFinDirButtons(){
   const btns = [el("btn-open-patient"), el("btn-open-photos"), el("btn-open-pptdir")];
   if(btns.some(b => !b)) return;
+  // 환자 없이 저장하는 진행은 열 폴더가 하나뿐이고, 그 자리가 저장 루트 밖일 수도
+  // 있다 — 루트 기준 상대경로로 여는 아래 길로는 닿지 않는다.
+  if(FAST && !picked) return fastSyncDirButtons(btns);
   const ready = !!(finFolder() && FINDIRS && FINDIRS.exists);
   for(const b of btns){
     b.disabled = !ready;
     b.title = ready ? "탐색기에서 폴더를 엽니다"
-      : FINDIRS ? "확정 저장을 하면 환자 폴더가 만들어집니다 — 그 뒤에 열 수 있습니다"
+      : FINDIRS ? `확정 저장을 하면 ${FAST && !picked ? "저장" : "환자"} 폴더가 만들어집니다`
+                  + " — 그 뒤에 열 수 있습니다"
                 : "저장 검토를 불러오면 켜집니다";
   }
 }
 
 /* which: "" = 환자 폴더 · "photos" · "ppt" */
 async function openFinDir(which, btn){
+  if(FAST && !picked) return fastOpenDir(btn);
   const folder = finFolder(); if(!folder) return;
   const err = el("fin-err");
   err.textContent = ""; btn.disabled = true;
@@ -3953,6 +4099,7 @@ el("btn-openppt").onclick = async () => {
 };
 
 el("btn-commit").onclick = async () => {
+  if(FAST) return fastCommit();
   const err = el("fin-err"), btn = el("btn-commit");
   err.textContent = ""; btn.disabled = true; btn.textContent = "저장 중…";
   try{
