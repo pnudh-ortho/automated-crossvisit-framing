@@ -1065,3 +1065,50 @@ def test_이름을_바꿀_수_없는_경우는_막는다(tmp_path):
     assert client.post("/api/folder/rename",
                        json={"folder": a.name, "name": "../밖으로"}).status_code == 400
     assert a.is_dir(), "막힌 요청은 아무것도 바꾸지 않는다"
+
+
+# ── 사진 통째로 비우기 ───────────────────────────────────────────────────────
+def test_사진을_비우면_딸린_상태도_함께_비운다():
+    """목록만 비우면 겉보기엔 깨끗한데 속은 아닌 세션이 남는다 — 상자에 없는
+    사진의 열쇠가 남으면 그 뒤 모든 응답이 404 로 넘어지고, 계산 기록이 남으면
+    새로 올린 사진이 '이미 했다' 로 정합을 건너뛴다."""
+    s = _ready(_session(fast=False))              # 본편 세션, 다섯 자리 채움
+    s.framed = {M.cfg.ppt.slot_names[0]: s.slots[M.cfg.ppt.slot_names[0]]}
+    s.face_slots = {"4L": s.photos[0].id}
+    s.first_date = "26.09.04"
+    paths = [p.path for p in s.photos]
+
+    r = client.delete(f"/api/photos/{s.id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 5 and r.json()["photos"] == []
+    assert s.photos == [] and s.bins == {} and s.framed == {}
+    assert s.face_slots == {} and s.face_manual is False
+    assert s.first_date is None, "초진일은 사진 EXIF 에서 왔다"
+    assert not any(q.exists() for q in paths), "임시 파일도 지운다"
+    # 세션은 살아 있다 — 고른 환자와 차수는 그대로다
+    assert client.get(f"/api/notes/{s.id}").status_code == 200
+
+
+def test_본편_기준영상은_사진을_비워도_남는다():
+    """그것은 이전 차수 슬라이드에서 복원한 것이라 사진과 무관하다."""
+    s = _ready(_session(fast=False))
+    s.references = {"SLOT_UPPER": {"A": "그림"}}
+    client.delete(f"/api/photos/{s.id}")
+    assert s.references == {"SLOT_UPPER": {"A": "그림"}}
+
+
+def test_fast_는_칸마다_따로_비운다():
+    """왼쪽만 잘못 넣었는데 오른쪽까지 지워지면 처음 실수보다 나쁘다."""
+    s = _session(fast=True)
+    ref, cur = _photo(s, 1200, "ref"), _photo(s, 1201, "cur")
+    FL._put(s, ref, "SLOT_UPPER")
+    FL._put(s, cur, "SLOT_UPPER")
+    FL._ref_bake(s, "SLOT_UPPER")
+    assert "SLOT_UPPER" in s.references
+
+    r = client.delete(f"/api/fl/photos/{s.id}?pool=ref")
+    assert r.status_code == 200 and r.json()["removed"] == 1
+    assert [p.id for p in s.photos] == [cur.id], "오늘 사진은 그대로"
+    assert s.ref_bins["SLOT_UPPER"] == []
+    assert "SLOT_UPPER" not in s.references, "그 사진으로 구운 기준영상도 함께"
+    assert client.delete(f"/api/fl/photos/{s.id}?pool=없는풀").status_code == 400

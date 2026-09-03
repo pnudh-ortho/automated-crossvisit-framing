@@ -1134,8 +1134,12 @@ body{
   display:block;
   background:var(--well); border-radius:6px; cursor:move; touch-action:none;
 }
-#ed-reset, #fed-reset{width:100%; margin-top:10px; height:30px; font-size:13px;
-  display:flex; align-items:center; justify-content:center;}
+/* 되돌리기 둘을 반씩 나눠 나란히 둔다 — 왼쪽 raw(조정 없음), 오른쪽 initial-fit.
+   글이 길어 좁은 화면에서는 두 줄로 접히게 둔다(.btn 의 nowrap 을 푼다). */
+.resets{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:10px;}
+.resets .btn{width:100%; height:30px; font-size:12.5px; padding:0 8px;
+  display:flex; align-items:center; justify-content:center;
+  white-space:normal; line-height:1.15; text-align:center;}
 /* dock 소제목의 부가 정보 — 원래 .sec > h3 에만 걸려 있어 dock에서는 무색이었다 */
 .dock > h3 .aux{font:12.5px/1 var(--f-mono); color:var(--ink2);
   text-transform:none; letter-spacing:0; margin-left:auto;}
@@ -1195,9 +1199,10 @@ body{
 /* 저장 화면의 보조 동작 두 개 — 한 줄에 반씩. 아래의 '확정 저장'(wide)과
    같은 높이로 맞춰, 세 버튼이 두 줄짜리 한 덩어리로 읽히게 한다. */
 .finact{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;}
-/* 폴더 열기 셋. auto-fit 이라 판이 좁아지면 한 줄에 둘·하나로 접힌다 — .btn 이
-   nowrap 이라 억지로 세 칸을 붙들면 글자가 칸 밖으로 삐져나온다. */
-.finact.trio{grid-template-columns:repeat(auto-fit, minmax(112px, 1fr));}
+/* 칸 수를 못 박지 않는 줄. auto-fit 이라 판이 좁아지면 한 줄에 둘·하나로 접히고,
+   숨긴 칸(모드마다 다르다)이 있으면 나머지가 그 자리를 나눠 갖는다 — .btn 이
+   nowrap 이라 억지로 붙들면 글자가 칸 밖으로 삐져나온다. */
+.finact.fill{grid-template-columns:repeat(auto-fit, minmax(112px, 1fr));}
 .finact .btn{
   height:34px; display:flex; align-items:center; justify-content:center;
   min-width:0;              /* 긴 글자가 칸을 밀어내지 않게 */
@@ -1352,7 +1357,8 @@ body{
   .dock > h3{ margin:0 0 7px; }
   .edfit{ margin-bottom:8px; }
   .knobs{ gap:8px 9px; }
-  #ed-reset, #fed-reset{ height:27px; margin-top:7px; }
+  .resets{ margin-top:7px; }
+  .resets .btn{ height:27px; font-size:12px; }
   .tip{ margin-top:7px; font-size:12px; }
   .ovbar{ margin:5px 0 2px; }
 }
@@ -1527,3 +1533,13 @@ body:not([data-mode="fast"]) #fin-tip-fast{display:none;}
 .orthofix .btn{display:inline-flex; align-items:baseline; gap:6px;}
 .orthofix .btn small{font-weight:400; color:var(--ink3);}
 .orthofix .btn:hover small{color:var(--ink2);}
+
+/* ── 되돌릴 수 없는 동작 ─────────────────────────────────────────────────────
+   테두리만 붉게 두고, 누르려고 다가가면 채워진다 — 평소에는 옆 버튼들과 무게가
+   같고 손이 닿는 순간에만 경고가 된다. `프로그램 삭제` 도 이 규칙을 쓴다(지금껏
+   `danger` 가 붙어 있었을 뿐 규칙이 없어 보통 버튼으로 보였다). */
+.btn.danger{border-color:var(--bad); color:var(--bad);}
+.btn.danger:hover:not(:disabled){background:var(--bad); color:#fff; border-color:var(--bad);}
+/* 머리글 줄에 얹히는 것은 납작하게 — 제목 높이를 넘기지 않는다 */
+.aux .btn.danger, .upzone > h3 .btn.danger{height:22px; padding:0 8px; font-size:12px;}
+.upzone > h3 .btn.danger{margin-left:auto;}

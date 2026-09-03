@@ -135,6 +135,21 @@ function canvasSize(key){
   return {w: Math.max(1, Math.round(win.w * ppc)),
           h: Math.max(1, Math.round(win.h * ppc))};
 }
+/* 이동 조절 바의 범위를 **창의 절반**으로 잡는다 — 사진 가운데를 창 가장자리까지
+   밀 수 있다는 뜻이다. 바·값 칸·◀▶ 셋이 이 값을 함께 읽는다.
+
+   전에는 ±200px 고정이었다. 창이 자리마다 다른데(구내 840×630 · 얼굴 840×1120 ·
+   케이스 덱은 양식마다) 한 숫자로 맞을 리가 없다: 얼굴 창에서 200px 는 높이의
+   18% 라, 원본에서 얼굴이 치우쳐 찍히면 가운데로 옮길 방법이 없었다.
+
+   종전보다 좁아지지는 않게 200 을 하한으로 둔다. */
+function setMoveRange(ids, wPx, hPx){
+  const put = (id, lim) => { const n = el(id); if(n){ n.min = -lim; n.max = lim; } };
+  const x = Math.max(200, Math.round(wPx / 2));
+  const y = Math.max(200, Math.round(hPx / 2));
+  put(ids[0], x); put(ids[1], x); put(ids[2], y); put(ids[3], y);
+}
+
 function fitCanvas(cv, key){
   const {w, h} = canvasSize(key);
   if(cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
@@ -360,6 +375,9 @@ async function pick(key){
   ED.flip_v = !!p.flip_v;
   ED.bright = +p.brightness || 0;
   ED.img = await getImg(p.thumb);
+  // 범위를 **먼저** 잡는다 — 아래 syncKnobs 가 이 범위로 값을 자른다.
+  const box = canvasSize(key);
+  setMoveRange(["ed-tx", "v-tx", "ed-ty", "v-ty"], box.w, box.h);
   // 얼굴은 십자뷰 판에 자리가 없다 — 판의 강조는 모두 끄고 선택기만 표시한다.
   [...boardEl.children].forEach(c => c.setAttribute(
     "aria-pressed", String(!!meta && c.style.gridArea === meta.area)));
@@ -538,6 +556,10 @@ function setNum(id, v){
    값이 범위 밖이거나 숫자가 아닐 때도 같은 길로 실제 값이 다시 써진다. */
 function bindNum(id, lo, hi, step, get, set, apply, resync, editable){
   const n = el(id); if(!n) return;
+  // 범위는 **칸에 적힌 것**을 쓴다 — 이동 폭은 창 크기에 따라 자리마다 다르고,
+  // `setMoveRange` 가 min/max 를 갈아 끼운다. 여기서 굳혀 두면 바는 넓어졌는데
+  // 값 칸과 ◀▶ 만 옛 범위에 갇힌다. 안 적혀 있으면 넘겨받은 값이다.
+  const range = () => [n.min === "" ? lo : +n.min, n.max === "" ? hi : +n.max];
   n.onchange = () => {
     // syncKnobs 는 타이핑 중인 칸을 건드리지 않는다 — 포커스를 먼저 놓아 주어야
     // 잘라 낸 값·되돌린 값이 칸에 실제로 써진다.
@@ -545,7 +567,7 @@ function bindNum(id, lo, hi, step, get, set, apply, resync, editable){
     if(!editable()){ resync(); return; }
     const v = parseFloat(n.value);
     if(!Number.isFinite(v)){ resync(); return; }
-    set(clamp(v, lo, hi));
+    set(clamp(v, ...range()));
     apply();
   };
   n.onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); n.blur(); } };
@@ -554,7 +576,7 @@ function bindNum(id, lo, hi, step, get, set, apply, resync, editable){
   const bump = dir => {
     if(!editable()) return;
     const v = Math.round((get() + dir * step) / step) * step;
-    set(clamp(+v.toFixed(4), lo, hi));
+    set(clamp(+v.toFixed(4), ...range()));
     apply();
   };
   holdRepeat(el(id + "-dn"), () => bump(-1));
@@ -582,11 +604,21 @@ function holdRepeat(btn, fn){
   addEventListener("pointercancel", stop);
 }
 
+/* 조절 바 한 칸에 값을 쓴다. 자르는 기준은 **그 바에 적힌 범위**다.
+
+   여기에 숫자를 못 박으면 범위를 넓혀도 바는 옛 자리에 붙어 있고, 사람이 그 바를
+   건드리는 순간 `oninput` 이 그 값을 읽어 사진을 거기로 끌어당긴다 — 넓힌 것이
+   도로 무효가 된다. 드래그는 원래 제한이 없어서 그 어긋남은 지금도 난다. */
+function knobVal(id, v){
+  const n = el(id); if(!n) return;
+  n.value = Math.round(clamp(v, +n.min, +n.max));
+}
+
 function syncKnobs(){
   el("ed-angle").value = ED.angle.toFixed(1);
   el("ed-scale").value = Math.round(clamp(ED.scale, .5, 2) * 100);
-  el("ed-tx").value = Math.round(clamp(ED.dx, -200, 200));
-  el("ed-ty").value = Math.round(clamp(ED.dy, -200, 200));
+  knobVal("ed-tx", ED.dx);
+  knobVal("ed-ty", ED.dy);
   el("ed-bright").value = Math.round(clamp(ED.bright, -50, 50));
   setNum("v-angle", ED.angle.toFixed(1));
   setNum("v-scale", Math.round(ED.scale * 100));
@@ -673,6 +705,15 @@ function bindEditor(){
      예전에는 무조건 cover-fit(가운데·무회전)으로 돌아가서, 손이 미끄러졌을 때
      되돌리면 **정합까지 함께 버려졌다** — 그 자리를 다시 잡으려면 눈대중으로
      맞추는 수밖에 없었다. 서버가 그 값을 editor0 로 함께 내려 준다. */
+  /* raw = **아무 조정도 없는 상태**. 원본이 창을 덮도록만 놓는다(cover-fit).
+     initial-fit 이 "자동이 잡아 준 자리" 라면 이쪽은 "손도 자동도 대기 전" 이다 —
+     자동 결과가 엉뚱할 때 거기서 다시 시작할 자리가 필요하다.
+     밝기는 건드리지 않는다: 구도와 통로가 다르고(사진에 붙는다) 옆 버튼도 그렇다. */
+  el("ed-reset-raw").onclick = () => {
+    if(!primaryOf(ED.slot)) return;
+    ED.dx = 0; ED.dy = 0; ED.scale = 1; ED.angle = 0;
+    afterEdit();
+  };
   el("ed-reset").onclick = () => {
     const p = primaryOf(ED.slot); if(!p) return;
     const z = p.editor0 || {dx: 0, dy: 0, scale: 1, angle: 0};
@@ -1466,9 +1507,18 @@ async function loadPatients(){
 }
 
 /* 목록 정렬 — 폴더 이름/폴더 수정 시각 기준. 선택은 브라우저에 남는다. */
+/* 이름 비교기. **번호를 사람이 세는 순서로** 본다 — 그러지 않으면 폴더 이름의
+   숫자가 글자로 비교되어 `1, 10, 100, 11, 2` 가 된다(0 을 채워 둔 곳만 우연히
+   맞았다). 이름 안의 교정번호도 같이 제대로 선다.
+
+   Collator 를 **한 번 만들어 둔다**: `localeCompare` 는 부를 때마다 안에서
+   collator 를 새로 만드는데, 여기는 검색어를 한 글자 칠 때마다 목록 전체를 다시
+   정렬하는 자리다. 만들어 두면 종전보다도 빠르다(환자 800명 0.50ms → 0.08ms). */
+const NAME_ORDER = new Intl.Collator("ko", {numeric: true});
+
 function sortRows(rows){
   const mode = (el("sort") && el("sort").value) || "new";
-  const byName = (a, b) => a.folder.localeCompare(b.folder, "ko");
+  const byName = (a, b) => NAME_ORDER.compare(a.folder, b.folder);
   const byDate = (a, b) => (a.updated || "").localeCompare(b.updated || "") || byName(a, b);
   const cmp = mode === "old" ? byDate
             : mode === "az"  ? byName
@@ -1573,7 +1623,10 @@ function drawDetail(){
 
      ${FAST ? fastZonesHtml() : `
      <div class="sec">
-       <h3>사진 추가 <span class="aux"><span id="stage-msg"></span><span id="staged-n"></span></span></h3>
+       <h3>사진 추가 <span class="aux"><span id="stage-msg"></span>
+         <button class="btn danger" type="button" id="btn-clear" hidden
+                 title="담아둔 사진을 통째로 비웁니다 — 고른 환자와 차수는 그대로 둡니다">모두 지우기</button>
+         <span id="staged-n"></span></span></h3>
        <div class="dropzone" id="dz">
          <div class="dz-empty" id="dz-empty">
            <svg class="dz-mark" viewBox="0 0 34 34" aria-hidden="true">
@@ -1927,6 +1980,32 @@ function bindDrop(){
     if(files.length) addFiles(files);
   });
   el("btn-go").onclick = runClassify;
+  const clr = el("btn-clear"); if(clr) clr.onclick = () => clearStaged();
+}
+
+/* 담아둔 사진을 통째로 비운다.
+
+   **묻고 지운다.** × 하나는 다시 넣기 쉽지만 서른 장을 다시 고르는 것은 그렇지
+   않다. 되돌리기는 두지 않는다 — 임시 파일을 남겨 두면 상태가 두 겹이 되고
+   폴더만 부푼다(`⌂ 홈화면` 도 같은 방식으로 묻는다).
+
+   세션은 살려 둔다: 고른 환자와 차수는 그대로고 사진만 비운다. */
+async function clearStaged(pool){
+  const list = pool ? STAGED.filter(p => p.pool === pool) : STAGED;
+  if(!list.length) return;
+  const what = pool === "ref" ? "정합용 기준 사진 " : pool === "cur" ? "오늘 사진 " : "담아둔 사진 ";
+  if(!confirm(`${what}${list.length}장을 모두 지웁니다.\n\n계속할까요?`)) return;
+  stageMsg("지우는 중…", "busy");
+  try{
+    const r = await api(FAST
+      ? `/api/fl/photos/${SESSION.session_id}` + (pool ? `?pool=${pool}` : "")
+      : `/api/photos/${SESSION.session_id}`, {method: "DELETE"});
+    STAGED = r.photos;
+    if(FAST) REVIEW = r.review;
+    stageMsg("");
+    drawStaged();
+    loadNotes();     // 촬영일이 사라졌다 — 노트의 날짜·개월도 다시 받는다
+  }catch(e){ stageMsg(e.message, "err"); }
 }
 
 async function ensureSession(){
@@ -1983,6 +2062,7 @@ function drawStaged(){
   for(const b of box.querySelectorAll(".x"))
     b.onclick = e => { e.stopPropagation(); dropStaged(b.dataset.pid); };
   const n = el("staged-n"); if(n) n.textContent = STAGED.length ? `${STAGED.length}장` : "";
+  const clr = el("btn-clear"); if(clr) clr.hidden = !STAGED.length;
   // 버튼은 항상 자리를 지킨다 — 사진이 들어와도 아래 요소가 움직이지 않게
   const go = el("btn-go"); if(go) go.disabled = !STAGED.length;
   setStep("setup", STAGED.length ? "done" : "",
@@ -2431,7 +2511,8 @@ function showInfoDock(){
 /* 파생 자리(10·11)는 볼 수만 있다 — 슬라이드 4 좌측을 그대로 따라가므로
    여기서 고쳐 봐야 다음 새로고침에 되돌아온다. 조작부를 잠가 그 사실을 알린다. */
 function setFaceKnobsEnabled(on){
-  for(const id of ["fed-angle", "fed-scale", "fed-tx", "fed-ty", "fed-reset",
+  for(const id of ["fed-angle", "fed-scale", "fed-tx", "fed-ty",
+                   "fed-reset", "fed-reset-raw",
                    "fed-bright", "fv-bright", "fv-bright-dn", "fv-bright-up",
                    "fv-angle", "fv-scale", "fv-tx", "fv-ty",
                    "fv-angle-dn", "fv-angle-up", "fv-scale-dn", "fv-scale-up",
@@ -2554,6 +2635,9 @@ async function pickFace(key){
   else for(const b of el("face-board").querySelectorAll(".fcell"))
     b.classList.toggle("on", b.dataset.cell === key);
   setFaceKnobsEnabled(!c.from && !!pid);
+  // 케이스 덱의 얼굴 자리는 양식마다 창이 다르다 — 그 창에 맞춘다
+  setMoveRange(["fed-tx", "fv-tx", "fed-ty", "fv-ty"],
+               c.w * facePpc(), c.h * facePpc());
   syncFaceKnobs(); renderFaceEditor();
 }
 
@@ -2585,8 +2669,8 @@ addEventListener("resize", () => {
 function syncFaceKnobs(){
   el("fed-angle").value = FED.angle.toFixed(1);
   el("fed-scale").value = Math.round(clamp(FED.scale, .5, 2) * 100);
-  el("fed-tx").value = Math.round(clamp(FED.dx, -200, 200));
-  el("fed-ty").value = Math.round(clamp(FED.dy, -200, 200));
+  knobVal("fed-tx", FED.dx);
+  knobVal("fed-ty", FED.dy);
   el("fed-bright").value = Math.round(clamp(FED.bright, -50, 50));
   setNum("fv-angle", FED.angle.toFixed(1));
   setNum("fv-scale", Math.round(FED.scale * 100));
@@ -2684,6 +2768,11 @@ function bindFaceEditor(){
           afterFaceEdit, syncFaceKnobs, has);
   bindNum("fv-bright", -50, 50, 1, () => FED.bright, v => FED.bright = v,
           afterFaceBright, syncFaceKnobs, has);
+  el("fed-reset-raw").onclick = () => {
+    if(!has()) return;
+    FED.dx = 0; FED.dy = 0; FED.scale = 1; FED.angle = 0;
+    afterFaceEdit();
+  };
   el("fed-reset").onclick = () => {
     if(!has()) return;
     const z = faceEditors0()[FED.cell] || {dx: 0, dy: 0, scale: 1, angle: 0};
@@ -4159,15 +4248,22 @@ addEventListener("paste", e => {
    해 둔 직후가 대부분이다)은 잃을 것이 없다 — 사진도 편집값도 없고, 환자 폴더는
    이미 만들어져 그대로 남는다. 거기서도 경고를 띄우면 사람이 확인 창을 습관적으로
    지나치게 되고, 그러면 정작 사진을 잃는 순간에도 안 읽는다. */
-el("btn-home").onclick = () => {
+/* 홈화면으로. 저장 검토에서도 부른다 — 확정한 뒤 다음 환자로 가는 길이,
+   화면 위쪽으로 되짚어 올라가는 것뿐이면 번거롭다. 확정 뒤에는 담아둔 사진이
+   없으므로 묻지 않고 바로 돌아간다. */
+function goHome(){
   if(STAGED.length &&
      !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다.\n\n홈화면으로 돌아갈까요?`)) return;
   resetSession();
   el("find").value = "";
+  showView("setup");          // 저장 검토에서 눌렀으면 화면도 함께 돌아온다
   drawList();                 // 필터가 풀린 목록 · 선택 표시도 함께 지워진다
   drawDetail();
   el("find").focus();         // 다음 환자는 대개 이름으로 찾는다
-};
+}
+
+el("btn-home").onclick = goHome;
+el("btn-home-fin").onclick = goHome;
 el("find").oninput = drawList;
 el("sort").value = localStorage.getItem("plist_sort") || "new";
 el("sort").onchange = () => { localStorage.setItem("plist_sort", el("sort").value); drawList(); };

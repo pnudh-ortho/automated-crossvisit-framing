@@ -481,6 +481,39 @@ async def add_photos(sid: str, pool: str = "cur", files: list[UploadFile] = File
     return {"added": len(staged), **_state(s)}
 
 
+@router.delete("/photos/{sid}")
+def drop_pool(sid: str, pool: str = ""):
+    """드롭존 하나를 통째로 비운다. `pool` 을 비우면 양쪽 다.
+
+    **칸마다 따로 비울 수 있어야 한다.** 왼쪽(기준)만 잘못 넣었는데 오른쪽
+    (오늘)까지 지워지면 처음 실수보다 나쁘다.
+    """
+    if pool and pool not in POOLS:
+        raise HTTPException(400, "pool 은 ref 또는 cur")
+    s = _fast(sid)
+    with s.lock:
+        gone = [p for p in s.photos if not pool or p.pool == pool]
+        ids = {p.id for p in gone}
+        s.photos = [p for p in s.photos if p.id not in ids]
+        for bins in (s.bins, s.ref_bins):
+            for k in list(bins):
+                bins[k] = [x for x in bins[k] if x not in ids]
+        s.framed = {k: v for k, v in s.framed.items()
+                    if (v[0] if isinstance(v, tuple) else v) not in ids}
+        s.face_framed = {k: v for k, v in s.face_framed.items() if k not in ids}
+        # 기준 사진이 빠졌으면 그 사진으로 구운 기준영상도 함께 버린다
+        for slot, srcref in list(s.ref_src.items()):
+            if srcref[0] in ids:
+                del s.ref_src[slot]
+                s.references.pop(slot, None)
+        s.progress = {}
+    for p in gone:
+        p.path.unlink(missing_ok=True)
+    for q in s.tmp.glob("card_*"):
+        q.unlink(missing_ok=True)
+    return {"removed": len(gone), **_state(s)}
+
+
 @router.delete("/photos/{sid}/{pid}")
 def drop_photo(sid: str, pid: str):
     s = _fast(sid)

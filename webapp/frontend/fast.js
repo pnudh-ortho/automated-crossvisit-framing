@@ -39,7 +39,9 @@ function fastZonesHtml(){
   const zone = (pool, sub) => `
        <div class="upzone" data-pool="${pool}">
          <h3>${POOL_LABEL[pool]} <span class="aux">${sub}</span>
-           <span class="aux" id="n-${pool}"></span></h3>
+           <span class="aux" id="n-${pool}"></span>
+           <button class="btn danger" type="button" data-clear="${pool}" hidden
+                   title="이 칸의 사진을 모두 지웁니다">비우기</button></h3>
          <div class="dropzone" id="dz-${pool}">
            <div class="dz-empty" id="dz-${pool}-empty">
              <p class="dz-main">${pool === "ref" ? "지난 차수 사진을 여기에" : "오늘 찍은 사진을 여기에"}</p>
@@ -287,6 +289,8 @@ function fastDrawZones(){
     for(const b of box.querySelectorAll(".x"))
       b.onclick = e => { e.stopPropagation(); dropStaged(b.dataset.pid); };
     const n = el(`n-${pool}`); if(n) n.textContent = list.length ? `${list.length}장` : "";
+    const clr = document.querySelector(`[data-clear="${pool}"]`);
+    if(clr){ clr.hidden = !list.length; clr.onclick = () => clearStaged(pool); }
   }
   // 오늘 사진이 없으면 넘어갈 것이 없다 — 기준만으로는 만들 결과물이 없다.
   const go = el("btn-go"); if(go) go.disabled = !cur;

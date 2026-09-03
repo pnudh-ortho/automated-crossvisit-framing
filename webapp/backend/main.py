@@ -2855,6 +2855,53 @@ async def add_photos(sid: str, files: list[UploadFile] = File(...)):
             "photos": [_photo_json(s, p) for p in s.photos]}
 
 
+def _clear_photos(s: "Session") -> int:
+    """담아둔 사진과 **그에 딸린 상태**를 모두 비운다. 반환값은 지운 장수.
+
+    한 장씩 지우는 것과 다른 점이 여기다. 목록만 비우면 겉보기엔 깨끗한데 속은
+    아닌 세션이 남는다:
+      · 상자에 없는 사진의 열쇠가 남으면 그 뒤 **모든 응답이 404** 로 넘어진다
+      · 계산 기록이 남으면 새로 올린 사진이 '이미 했다' 로 **정합을 건너뛴다**
+      · 얼굴 자리에 유령 배정이 남는다
+
+    **기준영상은 모드에 따라 다르다.** 본편의 것은 이전 차수 슬라이드에서 복원한
+    것이라 사진과 무관하니 그대로 두고, Fastest Lap 의 것은 사람이 떨어뜨린
+    사진을 구운 것이라 함께 지운다.
+    """
+    with s.lock:
+        gone = s.photos
+        s.photos = []
+        s.bins, s.ref_bins = {}, {}
+        s.framed, s.face_framed = {}, {}
+        s.progress = {}
+        s.ref_src = {}
+        if s.fast:
+            s.references = {}
+        s.face_slots, s.face_editors, s.face_editors0 = {}, {}, {}
+        s.face_framing, s.face_frames = {}, {}
+        s.face_manual = False
+        # 초진일은 사진의 EXIF 에서 왔다 — 사진이 없으면 근거도 없다.
+        if s.visit == "A":
+            s.first_date = None
+    for p in gone:
+        p.path.unlink(missing_ok=True)
+    # 썸네일 등 파생 파일도 함께 — 남겨 두면 임시 폴더만 부푼다.
+    for q in s.tmp.glob("card_*"):
+        q.unlink(missing_ok=True)
+    return len(gone)
+
+
+@app.delete("/api/photos/{sid}")
+def drop_all_photos(sid: str):
+    """담아둔 사진을 통째로 비운다 — 잘못 넣었을 때 처음부터 다시 담기 위한 것.
+
+    **세션은 살려 둔다.** 고른 환자와 차수는 그대로 두고 사진만 비우는 것이 이
+    버튼의 뜻이다 — `⌂ 홈화면` 은 그 둘까지 버리고 목록으로 돌아간다.
+    """
+    s = get_session(sid)
+    return {"removed": _clear_photos(s), "photos": [], "review": _review_json(s)}
+
+
 @app.delete("/api/photos/{sid}/{pid}")
 def drop_photo(sid: str, pid: str):
     s = get_session(sid)
