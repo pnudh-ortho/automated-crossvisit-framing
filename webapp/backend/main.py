@@ -30,7 +30,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pptx.oxml.ns import qn
 from pydantic import BaseModel
@@ -1021,10 +1021,55 @@ async def _lifespan(_app: FastAPI):
     # 바꿔치기했다 되돌리는 사이에 돌면 진짜 설정을 건드린다. 느리기도 하다.
     if "pytest" not in sys.modules:
         threading.Thread(target=_repair_shortcut_icon, daemon=True).start()
+    _prune_ppt_choice()
     stop = threading.Event()
     threading.Thread(target=_sweeper_loop, args=(stop,), daemon=True).start()
     yield
     stop.set()
+
+
+def _prune_ppt_choice() -> None:
+    """기억해 둔 덱 선택 중 **폴더가 사라진 항목**을 지운다.
+
+    열쇠는 환자 폴더의 전체 경로다. 옮기거나 지운 폴더, 예전 수동 테스트의 임시
+    경로가 그대로 남아 표가 자라기만 했다. 옛 형식(폴더 이름만)은 등록된 저장
+    위치 어디에도 그 이름이 없을 때만 지운다.
+    """
+    try:
+        d = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:                                   # noqa: BLE001
+        return
+    choice = d.get("ppt_choice")
+    if not isinstance(choice, dict) or not choice:
+        return
+    roots = [Path(p) for p in [*(d.get("roots") or []), d.get("root") or ""] if p]
+    live_roots = [r for r in roots if r.is_dir()]
+    keep = {}
+    for k, v in choice.items():
+        p = Path(k)
+        if p.is_absolute():
+            # **닿는** 저장 위치 아래인데 폴더가 없을 때만 지운다. 안 꽂힌 외장 드라이브
+            # · 안 붙은 공유 폴더는 그 루트째 안 보이므로 여기 걸리지 않고 남는다.
+            # 어느 저장 위치 아래도 아닌 열쇠(옛 임시 경로)는 쓰일 길이 없어 지운다.
+            under = [r for r in roots if r == p.parent or r in p.parents]
+            if not under:
+                alive = False
+            elif any(r in live_roots for r in under):
+                alive = p.is_dir()
+            else:
+                alive = True            # 루트째 안 보인다 — 드라이브를 꽂으면 다시 쓰인다
+        else:
+            alive = any((r / k).is_dir() for r in live_roots) or not live_roots
+        if alive:
+            keep[k] = v
+    if len(keep) == len(choice):
+        return
+    d["ppt_choice"] = keep
+    try:
+        SETTINGS_FILE.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[설정] 사라진 폴더의 PPT 선택 {len(choice) - len(keep)}건을 정리했습니다.")
+    except OSError:
+        pass
 
 
 def _log_framer() -> None:
@@ -1551,6 +1596,20 @@ class Session:
         # 계측선을 끌어 옮긴 양 (cm). "슬라이드:도형이름" -> [dx, dy].
         # 선의 길이·방향은 그대로 두고 자리만 옮긴다.
         self.line_moves: dict[str, list[float]] = {}
+        # "추가 작업용" — **어느 슬라이드에도 들어가지 않는** 사진. 사람이 손으로
+        # 자르고 돌려 파일로만 저장한다. 상자(bins)와 따로 두는 이유: 상자는
+        # '자리'이고 대표 한 장이 슬라이드로 가는데, 여기는 자리가 없다.
+        self.extra: list[str] = []                        # photo_id, 저장 순서
+        # 사진별 편집기 값. 프레이밍 모델도 정합도 걸지 않는다 — 기본은 identity.
+        self.extra_editors: dict[str, EditorState] = {}
+        # 추가 작업용 사진별 창 모양 — "portrait"(3:4) | "landscape"(4:3). 없으면
+        # 라벨로 정한다(얼굴이면 세로). 검수의 비율 버튼이 여기 적는다.
+        self.extra_shape: dict[str, str] = {}
+        # 저장 검토 화면이 보여줄 세션 사실. 덱에서 읽어 세션을 열 때 채운다.
+        self.prev_visits: list[str] = []                  # 덱에 있던 차수 글자
+        self.ppt_slides: int | None = None                # 덱의 현재 장수(재진)
+        # 사람이 안 고쳤을 때 새 장이 들어갈 자리(n 번 장 뒤). 재진에서만 값이 있다.
+        self.insert_default: int | None = None
 
     @property
     def slots(self) -> dict[str, str]:
@@ -1724,9 +1783,38 @@ async def _no_store_api(request, call_next):
     return resp
 
 
+def _app_version() -> str:
+    """정적 파일 링크에 붙일 버전 꼬리표. 업데이트하면 값이 바뀌어 브라우저가
+    style.css · app.js 를 새로 받는다 — 옛 CSS 위에 새 HTML 이 얹히는 일을 막는다."""
+    try:
+        return str(json.loads((BACKEND_DIR.parent.parent / "version.json").read_text(encoding="utf-8")).get("app") or "0")
+    except Exception:                                   # noqa: BLE001
+        return "0"
+
+
+def _index_html(d: Path, prefix: str) -> HTMLResponse:
+    html = (d / "index.html").read_text(encoding="utf-8")
+    v = _app_version()
+    for f in ("style.css", "app.js", "fast.js"):
+        html = html.replace(f'{prefix}/{f}"', f'{prefix}/{f}?v={v}"')
+    return HTMLResponse(html, headers=NO_CACHE)
+
+
 @app.get("/")
 def index():
-    return FileResponse(FRONTEND_DIR / "index.html", headers=NO_CACHE)
+    return _index_html(FRONTEND_DIR, "/static")
+
+
+# 개편 전 화면. 프론트엔드를 통째로 얼려 두고 같은 API 위에 띄운다 — 새 화면이
+# 낯설 때 잠시 돌아갈 자리다. 버그 수정은 새 화면에만 들어가므로 한두 릴리스 뒤 뺀다.
+CLASSIC_DIR = FRONTEND_DIR.parent / "frontend_classic"
+
+
+@app.get("/classic")
+def classic_index():
+    if not (CLASSIC_DIR / "index.html").exists():
+        raise HTTPException(404, "기존 화면이 없습니다")
+    return _index_html(CLASSIC_DIR, "/classic/static")
 
 
 class _NoCacheStatic(StaticFiles):
@@ -1937,6 +2025,9 @@ def session_revisit(req: RevisitReq):
     # 차수 이력의 진실은 PPT 뿐이다 — 사진 파일명은 보지 않는다.
     letters = sorted({vs.visit for vs in visits if vs.visit}, key=N.letter_to_num)
     s.visit = N.next_visit_letter(letters)
+    s.prev_visits = letters
+    s.ppt_slides = len(prs.slides._sldIdLst)
+    s.insert_default = _revisit_insert_index(prs)
     SESSIONS[s.id] = s
     return {"session_id": s.id, "visit": s.visit, "prev_visits": letters,
             "ids": {"name": ids.name, "hospital_id": ids.hospital_id, "ortho_id": ids.ortho_id},
@@ -2098,6 +2189,36 @@ def _scan_patient(d: Path, deep: bool = True) -> dict | None:
                       if f.lower().endswith(DECK_EXT)][:5]),
         "updated": datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d"),
     }
+
+
+class OpenFileReq(BaseModel):
+    folder: str          # 환자 루트 기준 환자 폴더 이름
+    sub: str             # 그 안의 파일 상대 경로 (예: PPT)
+
+
+@app.post("/api/open-file")
+def open_file(req: OpenFileReq):
+    """환자 폴더 안의 파일을 기본 프로그램으로 연다 — 저장 검토의 'PPT 열기'.
+
+    확정 **뒤에만** 부른다(화면이 그렇게 막는다): PowerPoint 가 덱을 잡고 있으면
+    확정 저장이 그 파일에 쓰지 못한다. 열지 못하면 그 파일이 든 폴더로 물러선다.
+    """
+    root = ROOT.resolve()
+    pdir = (root / req.folder).resolve()
+    f = (pdir / req.sub).resolve()
+    if pdir != root and root not in pdir.parents:
+        raise HTTPException(400, "환자 폴더 밖은 열 수 없습니다")
+    if pdir not in f.parents or not f.is_file():
+        raise HTTPException(404, f"파일을 찾을 수 없습니다: {req.sub}")
+    try:
+        _os_open(f)
+        return {"opened": str(f), "fallback": False}
+    except (OSError, subprocess.SubprocessError):
+        try:
+            _os_reveal(f)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise HTTPException(500, f"열지 못했습니다: {e}")
+        return {"opened": str(f.parent), "fallback": True}
 
 
 @app.get("/api/patients")
@@ -2624,6 +2745,10 @@ def session_open(req: OpenReq):
         if ppt_letters:
             visits = sorted({*visits, *ppt_letters}, key=N.letter_to_num)
             s.visit = N.next_visit_letter(visits)
+        # 저장 검토가 보여줄 덱 사실 — 같은 스캔에서 온다. 새 장의 기본 자리는
+        # 확정이 쓰는 규칙(_revisit_insert_index) 그대로다.
+        s.ppt_slides = scan["slides"]
+        s.insert_default = _revisit_insert_index(prs, scan)
         # 재진 라벨은 이 덱의 표기를 따른다 — **직전 차수 슬라이드**의 지문이다.
         # 규칙을 여기서 다시 쓰지 않고 장부가 셈해 둔 것을 그대로 받는다: 예전에는
         # 여기서 "순서상 마지막 라벨"을 따로 골라, 장 순서가 차수와 어긋난 덱에서
@@ -2674,6 +2799,7 @@ def session_open(req: OpenReq):
         if w.lower() not in {x.lower() for x in Rd.VISIT_WORDS}:
             raise HTTPException(400, f"쓸 수 없는 표기입니다: {w}")
         s.visit_word = w
+    s.prev_visits = list(visits)
     SESSIONS[s.id] = s
 
     return {"session_id": s.id, "mode": s.mode, "visit": s.visit, "fast": s.fast,
@@ -2880,6 +3006,7 @@ def _clear_photos(s: "Session") -> int:
         s.face_slots, s.face_editors, s.face_editors0 = {}, {}, {}
         s.face_framing, s.face_frames = {}, {}
         s.face_manual = False
+        s.extra, s.extra_editors = [], {}
         # 초진일은 사진의 EXIF 에서 왔다 — 사진이 없으면 근거도 없다.
         if s.visit == "A":
             s.first_date = None
@@ -3167,6 +3294,13 @@ def _detach(s, pid) -> None:
     for cell, held in list(s.face_slots.items()):
         if held == pid:
             del s.face_slots[cell]
+    # 추가 작업용에서 나가면 거기서 잡은 구도도 버린다 — 그 창 기준 값이라
+    # 다른 자리에서는 뜻이 없다. (같은 곳 안에서 순서만 바꿀 때는 _put_extra 가
+    # 먼저 챙겨 뒀다가 되돌린다.)
+    if pid in s.extra:
+        s.extra.remove(pid)
+    s.extra_editors.pop(pid, None)
+    s.extra_shape.pop(pid, None)
     _photo(s, pid).slot = None
 
 
@@ -3185,10 +3319,16 @@ def _sync_flip(s, photo, flips: dict | None = None) -> None:
     프레이밍·화면). 그래서 Fastest Lap 의 다른 규칙도 이 한 곳만 갈라 놓으면
     되고, 공유하는 편집기·정합·저장 코드는 한 줄도 손대지 않는다.
     """
-    if s.fast:
-        # 사람이 ↕ 로 고른 사진은 분류가 바뀌어도 그 선택이 이긴다.
-        if photo.flip_user:
-            return
+    # 사람이 ↕ 로 고른 사진은 분류가 바뀌어도 그 선택이 이긴다 — 본편(/api/flip)
+    # 도 Fastest Lap(/api/fl/flip)도 같다.
+    if photo.flip_user:
+        return
+    if photo.slot == EXTRA_KEY:
+        # 추가 작업용은 자리 기본값이 없다 — 들어올 때의 상태(교합면으로 분류돼
+        # 뒤집혀 있었으면 뒤집힌 채)를 그대로 두고, 카드·크게 보기·검수의 ↕ 로
+        # 사람이 정한다. 거울로 찍은 부분 사진이 여기 오기도 하기 때문이다.
+        return
+    elif s.fast:
         flips = _flip_defaults() if flips is None else flips
         want = bool(flips.get(photo.pool, {}).get(_category_of(photo) or "", False))
     else:
@@ -3211,6 +3351,83 @@ def _put(s, photo, key, at=None) -> None:
     lst.insert(min(idx, len(lst)), photo.id)
     photo.slot = key
     _sync_flip(s, photo)
+
+
+# ── 추가 작업용 ───────────────────────────────────────────────────────────────
+# 슬라이드에 넣지 않는 사진을 손으로 잘라 파일로만 저장하는 자리. 상자 열쇠는
+# 'EXTRA' 지만 `bins` 에는 없다 — 자리(슬롯)가 아니라서 대표도, 정합도 없다.
+EXTRA_KEY = "EXTRA"
+# 편집기 배율의 허용 범위. 슬롯 편집기는 cover 하한만 걸지만, 여기는 레터박스를
+# 허용하므로 화면과 같은 눈금 범위로만 막는다.
+EXTRA_SCALE = (0.5, 2.0)
+
+
+def _extra_window(s: "Session", photo=None) -> WindowCm:
+    """추가 작업용의 편집 창.
+
+    구내 사진은 구내 정면 슬롯과 **같은 창**(4:3)이다 — 화면이 구내 편집 캔버스를
+    그대로 다시 쓴다. 세션의 창을 쓰는 이유는 재진에서 덱의 레이아웃으로 덮인
+    창이 화면에 내려가 있어, 굽는 쪽도 같은 창이어야 화면과 결과물이 같기 때문이다.
+
+    **얼굴로 분류된 사진**은 얼굴 창(3:4 세로, Fastest Lap 의 얼굴 검수와 같다)을
+    쓴다 — 가로 창에 세로 사진을 넣으면 위아래가 잘리거나 좌우가 비어 손질할 것이
+    없다. 사람이 검수의 비율 버튼으로 고른 모양(`s.extra_shape`)이 라벨보다 먼저다
+    — 얼굴이 오분류되거나 얼굴 상자에서 옮겨 온 사진을 위해서다. `photo` 를 안
+    주면 구내 창(기본값)이다.
+    """
+    if photo is not None and _extra_shape(s, photo) == "portrait":
+        return _FL.FACE_WINDOW
+    return s.slot_windows[Z_TOP_SLOT]
+
+
+def _extra_shape(s: "Session", photo) -> str:
+    """추가 작업용 사진의 창 모양 — 고른 것이 있으면 그것, 없으면 라벨(얼굴 → 세로)."""
+    got = s.extra_shape.get(photo.id)
+    if got in ("portrait", "landscape"):
+        return got
+    return "portrait" if photo.label in cfg.face.classes else "landscape"
+
+
+def _put_extra(s, photo, at=None) -> None:
+    """추가 작업용에 넣는다. `at` 은 그 목록 안의 자리(None 이면 맨 뒤)."""
+    old = s.extra.index(photo.id) if photo.id in s.extra else None
+    kept = s.extra_editors.get(photo.id)      # 같은 곳 안에서 순서만 바꾸는 경우
+    _detach(s, photo.id)
+    idx = len(s.extra) if at is None else max(0, min(int(at), len(s.extra) + 1))
+    if old is not None and old < idx:
+        idx -= 1                               # 빼내면서 뒤쪽이 한 칸 당겨졌다
+    s.extra.insert(min(idx, len(s.extra)), photo.id)
+    photo.slot = EXTRA_KEY
+    if kept is not None:
+        s.extra_editors[photo.id] = kept
+    # 반전은 들어올 때 상태 그대로 — `_sync_flip` 이 EXTRA 를 건드리지 않는다.
+    _sync_flip(s, photo)
+
+
+def _extra_editor(s: "Session", pid: str) -> EditorState:
+    return s.extra_editors.get(pid) or EditorState()
+
+
+def _editor_json(st: EditorState) -> dict:
+    return {"dx": round(st.dx_px, 2), "dy": round(st.dy_px, 2),
+            "scale": round(st.scale, 4), "angle": round(st.angle_deg, 3)}
+
+
+def _extra_json(s: "Session") -> dict:
+    """검수 JSON 의 추가 작업용 조각 — 순서 그대로, 편집기 값은 없으면 identity.
+
+    본편과 Fastest Lap 의 검수 응답이 **같은 열쇠**를 싣게 한 곳에 둔다 — 화면의
+    추가 작업용 트레이가 두 모드에서 같은 코드로 그려진다.
+    """
+    win = _extra_window(s)
+    wins = {pid: _extra_window(s, _photo(s, pid)) for pid in s.extra}
+    return {"extra": list(s.extra),
+            "extra_editors": {pid: _editor_json(_extra_editor(s, pid)) for pid in s.extra},
+            "extra_window": {"w": win.w, "h": win.h},            # 기본(구내) 창
+            # 사진마다의 창 — 얼굴로 분류됐거나 사람이 세로로 고른 사진은 3:4.
+            # 화면은 이것을 먼저 본다. 모양은 비율 버튼의 표시에 쓴다.
+            "extra_windows": {pid: {"w": w.w, "h": w.h} for pid, w in wins.items()},
+            "extra_shapes": {pid: _extra_shape(s, _photo(s, pid)) for pid in s.extra}}
 
 
 def _category_of(photo) -> str | None:
@@ -3259,11 +3476,44 @@ def assign(req: AssignReq2):
     """상자 사이 이동. at=0이면 대표(슬라이드에 들어갈 사진)로 올린다."""
     s = get_session(req.session_id)
     photo = _photo(s, req.photo_id)
-    if req.slot:
+    if req.slot == EXTRA_KEY:
+        _put_extra(s, photo, at=req.at)
+    elif req.slot:
         _put(s, photo, req.slot, at=req.at)
     else:
         _detach(s, photo.id)
     _resync_faces(s)
+    return {"review": _review_json(s), "photos": [_photo_json(s, p) for p in s.photos]}
+
+
+class FlipReq(BaseModel):
+    session_id: str
+    photo_id: str
+    flip_v: bool
+
+
+@app.post("/api/flip")
+def flip_photo(req: FlipReq):
+    """사진 한 장의 상하반전을 사람이 정한다 (본편). Fastest Lap 의 /api/fl/flip 과
+    같은 규약이다 — 사람이 고른 값은 자리가 바뀌어도 덮이지 않는다.
+
+    편집기 값은 "반전된 화면 기준"이라 함께 환산한다(`_sync_flip` 과 같다). 정합·
+    프레이밍 기록은 지운다 — 기준영상 쪽 방향이 달라졌으니 다음 `/api/register`
+    가 그 자리를 다시 돌아야 한다.
+    """
+    s = get_session(req.session_id)
+    photo = _photo(s, req.photo_id)
+    photo.flip_user = True
+    want = bool(req.flip_v)
+    if want != photo.flip_v:
+        photo.flip_v = want
+        photo.editor = flip_editor_v(photo.editor)
+        photo.editor0 = flip_editor_v(photo.editor0)
+        if photo.id in s.extra_editors:            # 추가 작업용의 구도는 세션 쪽에 산다
+            s.extra_editors[photo.id] = flip_editor_v(s.extra_editors[photo.id])
+        for slot, pid in list(s.framed.items()):
+            if pid == photo.id:
+                del s.framed[slot]
     return {"review": _review_json(s), "photos": [_photo_json(s, p) for p in s.photos]}
 
 
@@ -3357,6 +3607,10 @@ def _frame_face_cell(s: "Session", cell: str) -> str:
         return "cover"
     win = anchor.window
     st = framing_to_editor(res, win, photo.w, photo.h)
+    # 회전은 모델 값을 쓰지 않고 0 으로 시작한다 — 얼굴은 미세한 기울기 예측이
+    # 틀리면 사람이 바로 알아보고, 곧게 선 원본에서 시작해 필요할 때만 돌리는
+    # 편이 빠르다. 배율·이동은 그대로 받는다. initial-fit(되돌리기 자리)도 같다.
+    st = EditorState(st.dx_px, st.dy_px, st.scale, 0.0)
     bw, bh = cover_base_ext_cm(photo.w, photo.h, win)
     s.face_editors[cell] = s.face_editors0[cell] = apply_cover_clamp(st, win, bw, bh)
     return "model"
@@ -3611,6 +3865,59 @@ def adjust(req: AdjustReq):
             "clamped_scale": st.scale}
 
 
+class ExtraAdjustReq(BaseModel):
+    session_id: str
+    photo_id: str
+    dx: float
+    dy: float
+    scale: float
+    angle: float
+
+
+@app.post("/api/extra/adjust")
+def extra_adjust(req: ExtraAdjustReq):
+    """추가 작업용 사진 한 장의 구도를 저장한다.
+
+    창은 `_extra_window` (구내 정면 슬롯과 같다). 배율만 화면 눈금 범위로 막고
+    이동·회전은 그대로 받는다 — 여기는 슬라이드 자리가 아니라 cover 하한을 걸
+    이유가 없고, 빈 자리는 레터박스로 남긴다.
+    """
+    s = get_session(req.session_id)
+    if req.photo_id not in s.extra:
+        raise HTTPException(400, "추가 작업용에 있는 사진만 조정할 수 있습니다")
+    lo, hi = EXTRA_SCALE
+    st = EditorState(float(req.dx), float(req.dy),
+                     max(lo, min(hi, float(req.scale))), float(req.angle))
+    s.extra_editors[req.photo_id] = st
+    return {"ok": True, "editor": _editor_json(st)}
+
+
+class ExtraShapeReq(BaseModel):
+    session_id: str
+    photo_id: str
+    shape: str                 # "portrait" | "landscape"
+
+
+@app.post("/api/extra/shape")
+def extra_shape(req: ExtraShapeReq):
+    """추가 작업용 사진 한 장의 창 모양을 바꾼다 — 세로(3:4, 얼굴 창) ↔ 가로(4:3, 구내 창).
+
+    창이 바뀌면 지금까지의 이동·배율은 다른 창 기준의 값이라 뜻이 없다 — 조정값을
+    identity 로 되돌린다. 본편과 Fastest Lap 이 같은 세션 등록부를 쓰므로 둘 다 여기로 온다.
+    """
+    s = get_session(req.session_id)
+    if req.photo_id not in s.extra:
+        raise HTTPException(400, "추가 작업용에 있는 사진만 바꿀 수 있습니다")
+    if req.shape not in ("portrait", "landscape"):
+        raise HTTPException(400, "shape 는 portrait 또는 landscape 입니다")
+    with s.lock:
+        s.extra_shape[req.photo_id] = req.shape
+        s.extra_editors.pop(req.photo_id, None)
+    win = _extra_window(s, _photo(s, req.photo_id))
+    return {"ok": True, "shape": req.shape, "window": {"w": win.w, "h": win.h},
+            "editor": _editor_json(_extra_editor(s, req.photo_id)), **_extra_json(s)}
+
+
 class BrightReq(BaseModel):
     session_id: str
     photo_id: str
@@ -3731,27 +4038,49 @@ def _build_plan(s) -> dict:
         cls = _slot_to_class(slot)
         idx = index_by_class[cls]
         base = N.photo_filename(ids.ortho_id, s.visit, idx, cfg.naming.photo_pattern)
+        rep = _photo(s, members[0])
         slots.append({
             "slot": slot, "empty": False, "cls": cls, "index": idx,
-            "label": _photo(s, members[0]).label,
+            "label": rep.label,
             "file": ppre + base,
+            # 저장 검토가 "이 구도가 어디서 왔나" 를 함께 보이게 — 값은 사진의 것
+            # 그대로다(반전 화면 기준, _photo_json 과 같은 모양).
+            "editor": _editor_json(rep.editor),
+            "flip_v": rep.flip_v,
+            "ref_visit": rep.ref_visit,
+            "initial": _initial_of(rep),
             # 원본 사본. 추가 촬영본에는 없다 — 편집값이 없어 자를 것이 없고,
             # 그쪽은 지금도 원본 그대로 저장된다.
             "raw": (rpre + N.raw_filename(base, _photo(s, members[0]).path.name)
                     if raw else None),
             "extras": [
-                {"label": _photo(s, pid).label,
+                {"pid": pid, "label": _photo(s, pid).label,
                  "file": ppre + N.photo_extra_filename(ids.ortho_id, s.visit, idx, n,
                                                        cfg.naming.photo_extra_pattern)}
                 for n, pid in enumerate(members[1:], start=2)],
         })
     faces, fidx = [], cfg.face.start_index
+    # 케이스 덱의 어느 자리에 놓였는지 — 저장 검토가 "PPT 미삽입" 이라 거짓말하지
+    # 않게 한다. 자리가 없으면(재진·미배치) 정말로 슬라이드에 들어가지 않는다.
+    placed = {pid: cell for cell, pid in getattr(s, "face_slots", {}).items()}
     for pid in s.face:
         base = N.photo_filename(ids.ortho_id, s.visit, fidx, cfg.naming.photo_pattern)
-        faces.append({"label": _photo(s, pid).label, "file": ppre + base,
+        faces.append({"pid": pid, "label": _photo(s, pid).label, "file": ppre + base,
+                      "cell": placed.get(pid),
                       "raw": (rpre + N.raw_filename(base, _photo(s, pid).path.name)
                               if raw else None)})
         fidx += 1
+    # 추가 작업용 — 슬라이드에 안 들어가는 손질본. 차수 폴더 **안** `교정번호_차수/` 에 `_extra (n)` 이름으로
+    # 에, '환자 폴더에 바로' 면 폴더 없이 같은 이름으로. 원본 사본은 남기지 않는다
+    # (슬롯 사진의 원본은 설정을 따르지만, 여기는 손질 자체가 목적이라 잘라낸
+    # 결과만 기록이다).
+    extra_dir = "" if _photo_dir() == "flat" else N.visit_extra_dir(ids.ortho_id, s.visit)
+    epre = f"{extra_dir}/" if extra_dir else ""
+    extras = [{"pid": pid, "label": _photo(s, pid).label,
+               "file": epre + N.extra_filename(ids.ortho_id, s.visit, n),
+               "flip_v": _photo(s, pid).flip_v,
+               "editor": _editor_json(_extra_editor(s, pid))}
+              for n, pid in enumerate(s.extra, start=1)]
     return {
         "patient_dir": str(s.patient_dir),
         # 초진은 확정 저장 전까지 **환자 폴더 자체가 없다** — 폴더를 만드는 곳은
@@ -3769,8 +4098,43 @@ def _build_plan(s) -> dict:
         "ppt_exists": bool(s.ppt_path and Path(s.ppt_path).exists()),
         "slots": slots,
         "faces": faces,
+        "extras": extras,
+        "extra_dir": extra_dir,
         "missing": [slot for slot in cfg.ppt.slot_names if slot not in s.slots],
+        # 저장 검토가 "무엇을 근거로 어디에 끼우나" 를 함께 보이게 — 전부 읽기 전용.
+        "prev_visits": list(s.prev_visits),
+        "ref_visit": _session_ref_visit(s),
+        # 재진: 사람이 확인 줄에서 고친 자리, 아니면 세션을 열 때 센 기본 자리.
+        "insert_after": ((getattr(s, "insert_after", None)
+                          if getattr(s, "insert_after", None) is not None
+                          else s.insert_default) if s.mode == "revisit" else None),
+        "ppt_slides": s.ppt_slides if s.mode == "revisit" else None,
+        "label": _plan_label(s),
     }
+
+
+def _initial_of(photo: Photo) -> str:
+    """이 자리의 첫 구도가 어디서 왔나 — registered | model | cover | manual.
+
+    `photo.framing` 을 그대로 옮긴 것이다. None 은 모델 자체가 없어 아무것도 잡아
+    주지 않은 경우라 사람이 잡아야 한다는 뜻에서 'manual' 로 낸다.
+    """
+    return {"registration": "registered", "model": "model",
+            "cover": "cover"}.get(photo.framing or "", "manual")
+
+
+def _session_ref_visit(s: "Session") -> str | None:
+    """정합이 실제로 채택한 기준 차수. 슬롯마다 다를 수 있어 최빈값을 낸다."""
+    used = [p.ref_visit for p in (_photo(s, pid) for pid in s.slots.values()) if p.ref_visit]
+    return Counter(used).most_common(1)[0][0] if used else None
+
+
+def _plan_label(s: "Session") -> str:
+    """슬라이드에 적힐 차수 라벨 — 확정이 쓰는 것과 같은 재료로 같은 글."""
+    date_str = (_photo_date(s) or datetime.now()).strftime(cfg.ppt.info_date_format)
+    text = _render_label(date_str, s.visit, getattr(s, "label_fp", None),
+                         getattr(s, "visit_word", None))
+    return s.note_overrides.get(CD.NOTE_DATE) or text
 
 
 @app.get("/api/plan/{sid}")
@@ -4144,6 +4508,16 @@ def _compose_deck(s, pl_plan: dict, tx, date_str: str, ppt_name: str) -> None:
         if fe.get("raw"):
             tx.stage_file(photo.path, fe["raw"])
 
+    # 3b) 추가 작업용 — 슬라이드에는 안 들어가고 손질본만 파일로. 슬롯과 같은
+    #     길(_bake_window)로 굽고 반전도 사진의 값을 따른다. 굽기가 꺼진 설치본
+    #     (export_px_per_cm=0)에서는 원본이 그대로 간다 — 슬롯도 그렇다.
+    #     비어 있으면 아무것도 쌓지 않으므로 폴더도 생기지 않는다.
+    for n, ex in enumerate(pl_plan.get("extras", []), start=1):
+        photo = _photo(s, ex["pid"])
+        baked, _wh = _bake_window(photo, _extra_window(s, photo), _extra_editor(s, photo.id),
+                                  photo.flip_v, s.tmp / f"bake_extra_{n}.jpg")
+        tx.stage_file(baked or photo.path, ex["file"])
+
     # 4) PPT 저장 후 원자적 확정
     tx.stage_pptx(prs, ppt_name)
 
@@ -4186,6 +4560,8 @@ def commit(sid: str, allow_missing: bool = False):
             # 이름이 아니라 환자 폴더 기준 상대경로 — 원본은 raw/ 하위로 간다
             "files": [p.relative_to(s.patient_dir).as_posix() for p in moved],
             "slots": {k: _photo(s, v).label for k, v in s.slots.items()},
+            # 추가 작업용은 슬라이드에 없어 파일명으로만 추적된다 — 여기 남긴다
+            "extras": [e["file"] for e in pl_plan["extras"]],
         })
     except PermissionError as e:
         S.append_audit(LOG_FILE,
@@ -4207,8 +4583,8 @@ def commit(sid: str, allow_missing: bool = False):
     return result
 
 
-def _revisit_insert_index(prs) -> int:
-    """새 차수 슬라이드가 들어갈 자리.
+def _revisit_insert_index(prs, scan: dict | None = None) -> int:
+    """새 차수 슬라이드가 들어갈 자리. `scan` 을 주면 장부를 다시 세지 않는다.
 
     ① **차수 글자가 가장 큰 십자뷰 슬라이드 바로 다음.** 예전에는 날짜가 가장
        늦은 장을 골랐는데, 라벨 날짜는 손으로 적다 보니 오타가 난다 — J 가 K 보다
@@ -4218,7 +4594,7 @@ def _revisit_insert_index(prs) -> int:
        사진 5장)인 마지막 장 다음.
     ③ 그것도 없으면 문서 맨 뒤.
     """
-    scan = Rd.scan_ppt_visits(prs, cfg)
+    scan = scan if scan is not None else Rd.scan_ppt_visits(prs, cfg)
     if scan["visits"]:
         last = max(scan["visits"],
                    key=lambda v: (N.letter_to_num(v["visit"]), v["slide_no"]))
@@ -4365,6 +4741,8 @@ def _review_json(s):
             "face_editors": _face_editors_json(s),
             "face_editors0": _face_editors_json(s, s.face_editors0),
             "face_framing": dict(s.face_framing),
+            # 추가 작업용 — 순서 그대로. 편집기 값은 없으면 identity 로 내려간다.
+            **_extra_json(s),
             "missing": [sl for sl in cfg.ppt.slot_names if sl not in s.slots]}
 
 
@@ -4734,14 +5112,19 @@ def _find_ppt(entries: list[Path], base: Path, ids) -> Path | None:
     for p in entries:
         if p.suffix.lower() != ".pptx" or p.name.startswith("~$"):
             continue
-        try:
-            got = _parse_ppt_name(p.name)
-        except N.NamingError:
-            continue
-        if got.ortho_id != ids.ortho_id:
-            continue
         rel = p.relative_to(base).as_posix()
         key = N.nfc(rel)
+        # 이름 형식이 안 맞거나 교정번호가 다른 덱은 원래 후보가 아니다. 다만 사람이
+        # "폴더 번호가 맞음 — 이 덱을 이 환자 것으로 지정" 으로 **기억시킨** 덱은
+        # 예외다(`/api/folder/ppt` 는 그 폴더의 아무 .pptx 나 받는다). 예전에는
+        # 여기서 걸러져 버튼을 눌러도 아무 일이 없었다.
+        if key != remembered:
+            try:
+                got = _parse_ppt_name(p.name)
+            except N.NamingError:
+                continue
+            if got.ortho_id != ids.ortho_id:
+                continue
         rank = (0 if key == remembered else 1,      # ① 기억해 둔 것
                 len(Path(rel).parts) - 1,           # ② 얕을수록 먼저
                 0 if N.nfc(p.name) == gen else 1,   # ③ 생성 형식 이름
@@ -5071,6 +5454,8 @@ def weights_status():
 
 
 app.mount("/static", _NoCacheStatic(directory=str(FRONTEND_DIR)), name="static")
+if CLASSIC_DIR.is_dir():
+    app.mount("/classic/static", _NoCacheStatic(directory=str(CLASSIC_DIR)), name="classic-static")
 # 설명 그림 등 프로그램 폴더의 자산. 지금까지 `assets/` 는 바탕화면 바로가기의
 # 아이콘 경로로만 쓰였고 화면에는 나가지 않았다 — 설정 창의 안내 그림이 처음이다.
 app.mount("/assets", _NoCacheStatic(directory=str(PROGRAM_DIR / "assets")), name="assets")
@@ -5163,6 +5548,24 @@ def _kill_stale(port: int) -> bool:
     return False
 
 
+def _route_paths(router) -> list[str]:
+    """앱에 붙은 경로 전부 — 포함된 라우터 안까지.
+
+    이 FastAPI(0.141) 는 `include_router` 한 것을 `_IncludedRouter` 로 감싸 넣고
+    그 객체에는 `path` 가 없다(fastlap.py 끝 주석 참고). 겉만 훑으면 /api/fl/* 는
+    늘 '없다'가 되므로 `original_router` 를 따라 들어간다.
+    """
+    out: list[str] = []
+    for r in getattr(router, "routes", []):
+        p = getattr(r, "path", None)
+        if isinstance(p, str):
+            out.append(p)
+        inner = getattr(r, "original_router", None)
+        if inner is not None:
+            out.extend(_route_paths(inner))
+    return out
+
+
 def run():
     import threading
     import webbrowser
@@ -5194,7 +5597,21 @@ def run():
                 pass
             return
     _write_lock(port)
-    threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}/")).start()
+    # Fastest Lap 라우터가 **이 app** 에 붙었는지 기동 때 본다. `python main.py` 로
+    # 띄우면 이 파일이 `__main__` 인데, fastlap 의 `import main` 이 같은 파일을 한 번
+    # 더 읽어 다른 app 에 라우터를 붙인 적이 있다 — 뜬 서버에는 /api/fl/* 가 없었고
+    # (404) 아무도 기동 로그만으로는 알 수 없었다. 아래 `sys.modules` 묶기가 그
+    # 고침이고, 이 검사는 그것이 다시 풀렸을 때 조용히 지나가지 않게 하는 울타리다.
+    if not any(p.startswith("/api/fl/") for p in _route_paths(app)):
+        print("=" * 72)
+        print("[경고] Fastest Lap 라우트(/api/fl/*)가 서버에 붙지 않았습니다!")
+        print("       main 모듈이 두 번 읽혀 라우터가 다른 app 에 붙은 것입니다 —")
+        print("       Fastest Lap 화면이 전부 404 로 실패합니다. main.py 끝의")
+        print("       sys.modules 묶기와 fastlap.py 의 include_router 를 확인하세요.")
+        print("=" * 72)
+    # 자동화(기동 스모크 테스트)에서는 브라우저를 띄우지 않는다.
+    if not os.environ.get("CROCS_NO_BROWSER"):
+        threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{port}/")).start()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
 
 
@@ -5208,6 +5625,11 @@ def run():
 # 따라 상대가 반쯤 만들어진 상태일 수 있다 — 실제로 테스트가 `fastlap` 을 먼저
 # 임포트하면 여기서 아직 없는 `router` 를 찾아 터졌다. 라우터를 앱에 붙이는 일은
 # **fastlap 이 제 끝에서** 한다. 그때는 어느 방향이든 양쪽이 다 서 있다.
+# `python main.py` 로 띄우면 이 파일은 `__main__` 이고, fastlap 의 `import main as M` 은
+# **같은 파일을 두 번째로** 읽어 다른 모듈(다른 app 객체)을 만든다. 라우터가 그쪽에
+# 붙어 실제로 뜬 서버에는 /api/fl/* 가 없었다(404). 이름을 같은 모듈로 묶어 둔다.
+if __name__ == "__main__":
+    sys.modules.setdefault("main", sys.modules[__name__])
 import fastlap as _FL                                            # noqa: E402,F401
 
 

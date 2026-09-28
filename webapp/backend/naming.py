@@ -322,6 +322,23 @@ def visit_raw_dir(ortho_id: str, visit: str) -> str:
     return f"{ortho_id}_{visit}{RAW_SUFFIX}"
 
 
+# ── 추가 작업용 (_extra) ──────────────────────────────────────────────────────
+# 슬라이드에 넣지 않고 손으로 잘라 파일로만 남기는 사진. 그 차수의 완성본 폴더
+# `교정번호_차수/` **안에** `교정번호_차수_extra (n).jpg` 로 둔다 — 이름으로 구분한다.
+EXTRA_SUFFIX = "_extra"
+
+
+def visit_extra_dir(ortho_id: str, visit: str) -> str:
+    """추가 작업용 손질본이 들어가는 폴더 — 그 차수의 완성본 폴더('교정번호_차수')와
+    **같은 곳**이다. 파일 이름의 `_extra` 로 구분되므로 폴더를 따로 두지 않는다."""
+    return visit_dir(ortho_id, visit)
+
+
+def extra_filename(ortho_id: str, visit: str, n: int) -> str:
+    """추가 작업용 손질본 파일 이름 — '교정번호_차수_extra (n).jpg', n 은 1부터."""
+    return f"{ortho_id}_{visit}{EXTRA_SUFFIX} ({n}).jpg"
+
+
 def raw_filename(final_name: str, src_name: str) -> str:
     """잘린 사진 이름 → 짝이 되는 원본 사본의 파일 이름.
 

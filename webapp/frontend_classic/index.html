@@ -4,33 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CRoCs</title>
-<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="icon" type="image/png" href="/classic/static/favicon.png">
 <!-- 저장된 테마를 렌더 전에 적용 — 새로고침 때 흰 화면이 번쩍이지 않게 -->
 <script>try{document.documentElement.dataset.theme=localStorage.getItem("crocs-theme")||"light";}catch(e){}</script>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/classic/static/style.css">
 </head>
 <body>
+<!-- 기존 화면 — 개편 전 프론트엔드를 그대로 얼려 둔 것. API 는 같다. -->
+<div class="classicbar"><b>기존 화면</b><span>개편 전 화면입니다. 저장 결과는 새 화면과 같습니다.</span><a href="/">새 화면으로 돌아가기 →</a></div>
+<style>.classicbar{flex:none;display:flex;align-items:center;gap:12px;padding:6px 16px;background:#06252c;color:#fff;font-size:13px}.classicbar span{opacity:.8}.classicbar a{margin-left:auto;color:#fff;font-weight:600;text-decoration:none;border:1px solid rgba(255,255,255,.5);border-radius:6px;padding:3px 10px}</style>
 
 <!-- ══ 헤더 ══ -->
 <header class="head">
-  <span class="mark"><span class="logo-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>CRoCs<span class="full"> - <b>C</b>rop &amp; <b>Ro</b>tation &amp; <b>C</b>la<b>s</b>sification</span></span>
+  <span class="mark">CRoCs<span class="full"> - <b>C</b>rop &amp; <b>Ro</b>tation &amp; <b>C</b>la<b>s</b>sification</span></span>
+  <span class="sp"></span>
   <!-- 설명 영상 둘 — 버튼처럼 보이지만 새 탭으로 나가는 링크다.
        진행 방식이 둘이라 영상도 둘이다: 본편(PPT 까지) · Fastest Lap(사진만). -->
   <a class="btn howto" id="btn-howto" target="_blank" rel="noopener"
      href="https://drive.google.com/file/d/1yj7vNDRpuMNhYOqb7ddAmORKv4igaoe8/view?usp=sharing"
-     title="기능 설명 영상을 새 탭에서 엽니다"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5v15l13-7.5z"/></svg>기능 설명<span class="vfull"> 영상</span></a>
+     title="기능 설명 영상을 새 탭에서 엽니다">▶ 기능 설명<span class="vfull"> 영상</span></a>
   <a class="btn howto" id="btn-howto-fast" target="_blank" rel="noopener"
      href="https://drive.google.com/file/d/1LGhZfbNo-Nf_V7U6JpgOUOOM0T-EilZl/view?usp=sharing"
-     title="Fastest Lap 설명 영상을 새 탭에서 엽니다"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5v15l13-7.5z"/></svg>Fastest Lap<span class="vfull"> 영상</span></a>
+     title="Fastest Lap 설명 영상을 새 탭에서 엽니다">▶ Fastest Lap<span class="vfull"> 설명 영상</span></a>
   <span class="sp"></span>
-  <!-- 버전 상태 — 켤 때 확인한 결과가 늘 여기 보인다. 새 버전이 있으면 칩이 바뀐다. -->
-  <span class="hb ver" id="hdr-ver" hidden><i class="dot"></i><span class="lbl">최신 버전</span></span>
-  <button class="hb" id="btn-upd-check" title="새 버전이 있는지 지금 확인합니다"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg><span class="lbl">업데이트 확인</span></button>
-  <button class="hb" id="btn-fb" title="피드백 · 요청사항 · 아이디어 (새 탭)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"/></svg><span class="lbl">피드백</span></button>
-  <button class="hb" id="btn-log"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 9h8M8 13h8M8 17h5"/></svg><span class="lbl">업데이트 로그</span></button>
-  <button class="hb" id="btn-faq"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/></svg><span class="lbl">FAQ</span></button>
-  <a class="hb" id="btn-classic" href="/classic" title="개편 전 화면으로 잠시 돌아갑니다"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3zM3 10h18"/></svg><span class="lbl">기존 화면</span></a>
-  <button class="hb on" id="btn-set"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="lbl">설정</span></button>
+  <span class="pchip" id="pchip" hidden></span>
+  <button class="btn" id="btn-upd-check" title="새 버전이 있는지 지금 확인합니다">업데이트 확인</button>
+  <button class="btn" id="btn-fb">피드백/요청사항/아이디어</button>
+  <button class="btn" id="btn-log">업데이트 로그</button>
+  <button class="btn" id="btn-faq">F&amp;Q</button>
+  <button class="btn" id="btn-set">⚙ 설정</button>
 </header>
 
 <!-- ══ 첫 실행 — 저장 위치 확인 ══ -->
@@ -73,45 +75,43 @@
 <div class="main">
 
   <nav class="rail">
+    <span class="eyebrow">진행 단계</span>
     <div id="nav"></div>
-    <img class="rail-logo" src="/static/crocs-logo-2.jpg" alt="CRoCs">
+    <img class="rail-logo" src="/classic/static/crocs-logo-2.jpg" alt="">
   </nav>
 
   <section class="content">
 
     <div class="view on" data-view="setup">
+      <div class="toolbar">
+        <button class="btn" id="btn-home"
+                title="검색과 선택을 지우고 환자 목록으로 돌아갑니다">⌂ 홈화면</button>
+        <div class="rootbar">
+          <span class="eyebrow">저장 위치</span>
+          <select class="ident rootsel" id="root-sel" title="저장 위치 고르기"></select>
+          <button class="btn" id="btn-root" title="저장 위치 더하기">＋ 추가</button>
+        </div>
+        <input class="find" id="find" autocomplete="off"
+               placeholder="폴더 이름 검색">
+        <select class="sort" id="sort" title="정렬">
+          <option value="new">최신순</option>
+          <option value="old">오래된순</option>
+          <option value="az">이름 오름차순</option>
+          <option value="za">이름 내림차순</option>
+        </select>
+        <button class="btn" id="btn-refresh" title="새로고침">↻</button>
+        <button class="btn primary" id="btn-new-pt">＋ 새 환자</button>
+      </div>
       <div class="setup">
         <!-- 목록과 그 아래 예고 버튼. 버튼은 카드 밖에 둔다 — 목록을 다시 그릴 때
              카드 안은 통째로 갈아끼워지므로 안에 두면 매번 사라진다. -->
         <div class="pcol">
-          <div class="ltool">
-            <label class="find-wrap"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="find" id="find" autocomplete="off" placeholder="이름 · 번호 · 폴더 검색"></label>
-            <button class="btn primary" id="btn-new-pt">＋ 새 환자</button>
-          </div>
-          <!-- 두 줄 도구 — 왼쪽 홈화면이 두 줄을 차지하고, 윗줄은 저장 위치 + 추가,
-               아랫줄은 정렬 + 새로고침. 저장 위치 이름이 길어도 접히지 않는다. -->
-          <div class="tb2">
-            <button class="btn home" id="btn-home" title="검색과 선택을 지우고 환자 목록으로 돌아갑니다"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
-            <div class="tbrow">
-              <div class="rootbar" title="저장 위치"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><select class="ident rootsel" id="root-sel" title="저장 위치 고르기"></select></div>
-              <button class="btn" id="btn-root" title="저장 위치 더하기">＋</button>
-            </div>
-            <div class="tbrow">
-              <select class="sort" id="sort" title="정렬">
-                <option value="new">최신순</option>
-                <option value="old">오래된순</option>
-                <option value="az">폴더 이름 ↑</option>
-                <option value="za">폴더 이름 ↓</option>
-              </select>
-              <button class="btn" id="btn-refresh" title="새로고침"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg></button>
-            </div>
-          </div>
           <div class="card plist" id="plist"></div>
           <!-- 진행 방식 선택. 켜면 오른쪽 카드가 그 모습으로 다시 그려진다 —
                사진 넣는 칸이 좌우로 갈리고, 저장이 PPT 를 만들지 않는다. -->
           <button class="btn primary wide soon" type="button" id="btn-fast"
                   aria-pressed="false"
-                  title="PPT 없이 사진만 빠르게 저장합니다"><span class="soon-t"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Fastest Lap Mode</span><span class="soon-d">PPT 없이 사진만 저장</span></button>
+                  title="PPT 없이 사진만 빠르게 저장합니다"><span class="soon-t">⚡Fastest Lap Mode⚡</span><span class="soon-d">PPT 없이 사진만 저장</span></button>
         </div>
         <div class="card detail" id="detail"></div>
       </div>
@@ -119,24 +119,14 @@
 
     <div class="view" data-view="pre">
       <div class="card grow">
-        <div class="sec grow pre">
+        <div class="sec grow">
           <h3 class="hd"><span class="hd-l">자동 분류 결과 <span class="vbadge" id="pre-visit" hidden></span></span><span class="aux"><span id="pre-msg"></span><span id="pre-n"></span></span></h3>
-          <!-- 구내 다섯 자리 — 카드마다 사진이 세로로 두 장 보이고 더 있으면 안에서 스크롤한다.
-               맨 위 사진이 정합되어 PPT 에 들어간다. Fastest Lap 은 이 칸을 제 모양(pairs)으로 다시 그린다. -->
           <div class="bins" id="bins"></div>
-          <!-- 얼굴 · 추가 작업용 · 분류 안 됨. 얼굴 트레이에는 케이스 양식의 자리가 미리 그려진다. -->
-          <div class="trays" id="trays">
-            <div class="bin face" id="bin-face" data-slot="FACE"></div>
-            <div class="bin extra" id="bin-extra" data-slot="EXTRA"></div>
-            <div class="bin wide others" id="bin-others" data-slot=""></div>
-          </div>
-          <div class="foot">
-            <span class="stat" id="pre-stat">각 사진을 더블 클릭하면 확대됩니다</span>
-            <!-- 정합 진행 — 본편은 슬롯을 차례로 정합하며 여기 막대를 채운다.
-                 Fastest Lap 은 슬롯별 병렬이라 자리마다 어디까지 왔는지를 보여준다. -->
-            <div class="regprog" id="reg-progress" hidden></div>
-            <button class="btn primary lg" id="btn-toproc" disabled>검수 · 조정으로 →</button>
-          </div>
+          <div class="bin wide" id="bin-others" data-slot=""></div>
+          <button class="btn primary wide" id="btn-toproc" disabled>검수·조정으로 ▶</button>
+          <!-- Fastest Lap 의 정합은 슬롯별로 병렬이라 "지금 몇 번째"가 없다.
+               대신 자리마다 어디까지 왔는지를 함께 보여준다. -->
+          <div class="regprog" id="reg-progress" hidden></div>
         </div>
       </div>
     </div>
@@ -144,7 +134,7 @@
     <div class="view" data-view="proc">
       <div class="card grow">
         <div class="sec grow">
-          <h3 class="hd"><span class="hd-l"><span class="tabs" id="proc-tabs" role="tablist"><button type="button" role="tab" data-tab="io" aria-selected="true">구내 사진</button><button type="button" role="tab" data-tab="face" aria-selected="false">케이스 템플릿<small class="why">초진에서만</small></button><button type="button" role="tab" data-tab="extra" aria-selected="false">추가 작업용<small class="n" id="extra-n"></small></button></span><span class="vbadge" id="proc-visit" hidden></span><span class="vbadge modechip" id="proc-zoom" hidden></span><span class="vbadge modechip" id="proc-peek" data-tone="warn" hidden></span></span><div class="seg" id="seg"></div><div class="seg" id="face-seg" hidden></div></h3>
+          <h3 class="hd"><span class="hd-l"><span class="tabs" id="proc-tabs" role="tablist"><button type="button" role="tab" data-tab="io" aria-selected="true">IntraOral</button><button type="button" role="tab" data-tab="face" aria-selected="false">TEMPLATE</button></span><span class="vbadge" id="proc-visit" hidden></span><span class="vbadge modechip" id="proc-zoom" hidden></span><span class="vbadge modechip" id="proc-peek" data-tone="warn" hidden></span></span><div class="seg" id="seg"></div><div class="seg" id="face-seg" hidden></div></h3>
           <div class="pane work on" data-pane="io">
             <div class="board-wrap"><div class="board" id="board"></div></div>
             <div class="dock">
@@ -170,14 +160,12 @@
                      기준 차수가 없어도 쓰는 키다. Tab 줄만 기준이 있을 때 켠다
                      (app.js syncOverlayBar). -->
                 <div class="keyhint">
-                  <span class="row kh-tab" id="hint-peek" hidden><kbd>Tab</kbd>직전 차수</span>
-                  <span class="row"><kbd>Space</kbd>크게</span>
-                  <span class="row"><kbd>Shift</kbd>격자</span>
-                  <span class="row kh-slots"><kbd>1–5</kbd>슬롯</span>
-                  <button type="button" class="btn sm keys-more" id="btn-keys" title="단축키 전체 목록">단축키 도움말</button>
+                  <span class="row" id="hint-peek" hidden><kbd>Tab</kbd><span>직전 차수 대보기</span></span>
+                  <span class="row"><kbd>Space</kbd><span>크게 보기</span></span>
+                  <span class="row"><kbd>Shift</kbd><span>격자 보기</span></span>
                 </div>
                 <div class="knobs">
-                  <span>회전</span><input type="range" id="ed-angle" min="-180" max="180" step=".1" value="0"><span class="v"><input type="number" id="v-angle" min="-180" max="180" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="v-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="v-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
+                  <span>회전</span><input type="range" id="ed-angle" min="-10" max="10" step=".1" value="0"><span class="v"><input type="number" id="v-angle" min="-10" max="10" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="v-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="v-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
                   <span>배율</span><input type="range" id="ed-scale" min="50" max="200" value="100"><span class="v"><input type="number" id="v-scale" min="50" max="200" step="1" value="100"><i>%</i><span class="stepper"><button type="button" class="stepb" id="v-scale-dn" tabindex="-1" aria-label="배율 줄이기">◀</button><button type="button" class="stepb" id="v-scale-up" tabindex="-1" aria-label="배율 늘리기">▶</button></span></span>
                   <span>가로</span><input type="range" id="ed-tx" min="-200" max="200" value="0"><span class="v"><input type="number" id="v-tx" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="v-tx-dn" tabindex="-1" aria-label="가로 줄이기">◀</button><button type="button" class="stepb" id="v-tx-up" tabindex="-1" aria-label="가로 늘리기">▶</button></span></span>
                   <span>세로</span><input type="range" id="ed-ty" min="-200" max="200" value="0"><span class="v"><input type="number" id="v-ty" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="v-ty-dn" tabindex="-1" aria-label="세로 줄이기">◀</button><button type="button" class="stepb" id="v-ty-up" tabindex="-1" aria-label="세로 늘리기">▶</button></span></span>
@@ -191,20 +179,20 @@
                   <button class="btn" id="ed-reset-raw" title="조정을 모두 지우고 원본을 창에 그대로 맞춥니다 (회전 0° · 배율 100% · 이동 0)">raw로 초기화</button>
                   <button class="btn" id="ed-reset" title="자동으로 잡아 준 첫 구도로 되돌립니다 — 재진은 차수 간 정합, 초진은 프레이밍 예측">initial-fit으로 초기화</button>
                 </div>
-                <!-- 추가 작업용에서만: 창 비율 — 얼굴이면 세로(3:4)가 기본, 아니면 가로(4:3). 바꾸면 조정값은 초기화 -->
-                <div class="resets one" id="ed-shape-row" hidden>
-                  <button class="btn" id="ed-shape" title="이 사진의 창 비율을 바꿉니다 — 바꾸면 조정값은 초기화됩니다">비율 바꾸기</button>
-                </div>
+                <p class="tip">드래그 이동 · 휠 배율 · <b>Q/E</b> 회전 · <b>A/D</b> 배율 · <b>W/S</b> 밝기 · 방향키 이동<br>
+                  단축키 한 번 = 조절 바 한 칸(회전 0.1° · 배율 1% · 이동 1px · 밝기 1)<br><b>1~5</b> 슬롯 · 자동 저장</p>
               </div>
               <!-- 판 위의 노트 박스를 누르면 그 박스를 채우는 칸만 여기 뜬다 -->
               <div id="dock-note" hidden>
                 <p class="dsub" id="nt-sub"></p>
                 <div class="nfields" id="nt-fields"></div>
                 <button class="btn" id="nt-reset">이 박스를 자동 입력으로 되돌리기</button>
-                <p class="tip">박스에 직접 타이핑해서 고칠 수도 있습니다</p>
+                <p class="tip">칸을 채우면 왼쪽 박스에 바로 반영됩니다<br>
+                  박스에 <b>직접 타이핑</b>해서 통째로 고쳐 쓸 수도 있습니다</p>
                 <button class="btn" id="nt-back">사진 편집으로 ◀</button>
               </div>
-              <button class="btn primary wide" id="btn-tofin">저장 검토로 →</button>
+              <button class="btn primary wide" id="btn-tofin">저장 검토로 ▶</button>
+              <p class="tip" id="tofin-note"></p>
             </div>
           </div>
 
@@ -216,26 +204,27 @@
               <div id="face-dock-note" hidden>
                 <p class="dsub" id="fi-sub"></p>
                 <div class="nfields" id="fi-fields"></div>
-                <p class="tip">비워 두면 양식의 안내 문구가 그대로 남습니다</p>
+                <p class="tip">이름·병원 환자번호·교정과 환자번호는 이미 아는 값으로 채웁니다<br>
+                  비워 두면 그 줄은 양식의 안내 문구 그대로 남습니다</p>
               </div>
               <div id="face-dock-photo">
               <canvas id="face-canvas" width="508" height="700"></canvas>
               <div class="knobs">
-                <span>회전</span><input type="range" id="fed-angle" min="-180" max="180" step=".1" value="0"><span class="v"><input type="number" id="fv-angle" min="-180" max="180" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="fv-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="fv-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
+                <span>회전</span><input type="range" id="fed-angle" min="-10" max="10" step=".1" value="0"><span class="v"><input type="number" id="fv-angle" min="-10" max="10" step=".1" value="0.0"><i>°</i><span class="stepper"><button type="button" class="stepb" id="fv-angle-dn" tabindex="-1" aria-label="회전 줄이기">◀</button><button type="button" class="stepb" id="fv-angle-up" tabindex="-1" aria-label="회전 늘리기">▶</button></span></span>
                 <span>배율</span><input type="range" id="fed-scale" min="50" max="200" value="100"><span class="v"><input type="number" id="fv-scale" min="50" max="200" step="1" value="100"><i>%</i><span class="stepper"><button type="button" class="stepb" id="fv-scale-dn" tabindex="-1" aria-label="배율 줄이기">◀</button><button type="button" class="stepb" id="fv-scale-up" tabindex="-1" aria-label="배율 늘리기">▶</button></span></span>
                 <span>가로</span><input type="range" id="fed-tx" min="-200" max="200" value="0"><span class="v"><input type="number" id="fv-tx" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="fv-tx-dn" tabindex="-1" aria-label="가로 줄이기">◀</button><button type="button" class="stepb" id="fv-tx-up" tabindex="-1" aria-label="가로 늘리기">▶</button></span></span>
                 <span>세로</span><input type="range" id="fed-ty" min="-200" max="200" value="0"><span class="v"><input type="number" id="fv-ty" min="-200" max="200" step="1" value="0"><i>px</i><span class="stepper"><button type="button" class="stepb" id="fv-ty-dn" tabindex="-1" aria-label="세로 줄이기">◀</button><button type="button" class="stepb" id="fv-ty-up" tabindex="-1" aria-label="세로 늘리기">▶</button></span></span>
                 <span>밝기</span><input type="range" id="fed-bright" min="-50" max="50" value="0"><span class="v"><input type="number" id="fv-bright" min="-50" max="50" step="1" value="0"><i></i><span class="stepper"><button type="button" class="stepb" id="fv-bright-dn" tabindex="-1" aria-label="밝기 줄이기">◀</button><button type="button" class="stepb" id="fv-bright-up" tabindex="-1" aria-label="밝기 늘리기">▶</button></span></span>
               </div>
               <div class="resets">
-                <button class="btn ghost" id="fed-reset-raw" title="조정을 모두 지우고 원본을 창에 그대로 맞춥니다 (회전 0° · 배율 100% · 이동 0)">raw로 초기화</button>
-                <button class="btn ghost" id="fed-reset" title="프레이밍 모델이 잡아 준 첫 구도로 되돌립니다 (회전은 0°에서 시작)">initial-fit으로 초기화</button>
+                <button class="btn" id="fed-reset-raw" title="조정을 모두 지우고 원본을 창에 그대로 맞춥니다 (회전 0° · 배율 100% · 이동 0)">raw로 초기화</button>
+                <button class="btn" id="fed-reset" title="프레이밍 모델이 잡아 준 첫 구도로 되돌립니다">initial-fit으로 초기화</button>
               </div>
               <h3 class="sep">얼굴 사진<span class="aux" id="face-pool-n"></span>
                 <button type="button" class="minibtn" id="face-auto" title="촬영순 순서대로 자리를 다시 채웁니다">자동 배치</button></h3>
               <div class="pool" id="face-pool"></div>
               <div class="mirrornote" id="face-mirror"></div>
-              <p class="tip">자리를 누른 뒤 사진을 누르면 그 자리에 들어갑니다</p>
+              <p class="tip">자리를 누르면 오른쪽에서 조정합니다 · 드래그 이동 · 휠 배율<br><b>Q/E</b> 회전 · <b>A/D</b> 배율 · <b>W/S</b> 밝기 · <b>Shift</b> 격자 보기<br>사진을 누르면 켜진 자리에 들어갑니다</p>
               </div>
             </div>
           </div>
@@ -245,34 +234,35 @@
     </div>
 
     <div class="view" data-view="fin">
-      <div class="card grow"><div class="sec grow fin">
+      <div class="card grow"><div class="sec grow">
         <h3 class="hd"><span class="hd-l">저장 전 검토 <span class="vbadge" id="fin-visit" hidden></span></span></h3>
-        <!-- 요약 카드 + 썸네일 표. 내용은 서버의 계획(/api/plan)에서 그대로 온다. -->
         <div class="finwrap" id="fin-body">
           <div class="ph">검수·조정에서 <b>저장 검토로</b> 를 눌러 주세요</div>
         </div>
         <p class="err" id="fin-err"></p>
-        <!-- 왼쪽은 되돌아가기 · 미리보기, 오른쪽 끝이 확정. 되돌릴 수 없는 한 번의 클릭이라 따로 둔다. -->
+        <!-- 윗줄은 확인·되돌아가기, 아랫줄이 실제로 쓰는 동작이다 -->
         <div class="finact">
-          <div class="l">
-            <button class="btn" id="btn-back-proc" disabled>← 검수 · 조정으로</button>
-            <button class="btn" id="btn-openppt" disabled>PPT로 미리 보기 ↗</button>
-          </div>
-          <div class="r">
-            <small id="fin-tip-full">확정 뒤에는 되돌릴 수 없습니다.</small>
-            <small id="fin-tip-fast"><b>사진만</b> 기록됩니다. PPT는 만들지도 고치지도 않습니다.</small>
-            <button class="btn primary lg" id="btn-commit" disabled>확정 저장</button>
-          </div>
+          <button class="btn" id="btn-openppt" disabled>PPT에서 확인하기</button>
+          <button class="btn" id="btn-back-proc" disabled>◀ 검수·조정으로</button>
         </div>
-        <!-- 저장한 것을 보러 가는 자리. 확정 전에도 누를 수 있고(초진은 폴더가 아직 없어 꺼짐),
-             저장 뒤에는 홈화면이 주된 버튼이 된다 — 대개 다음 환자가 있다. -->
-        <div class="finafter" id="fin-after">
-          <span class="sp" id="fin-after-msg"></span>
+        <button class="btn primary wide" id="btn-commit" disabled>확정 저장</button>
+        <!-- 저장한 것을 보러 가는 자리들. 윗줄과 같은 finact 그리드라, 확정 저장을
+             가운데 두고 위아래가 한 덩어리로 읽힌다. 맨 오른쪽은 다음 환자로 —
+             저장이 끝나면 대개 그 다음이 있고, 그때 위로 되짚어 올라갈 이유가 없다. -->
+        <div class="finact fill">
           <button class="btn" id="btn-open-patient" disabled>환자 폴더 열기</button>
           <button class="btn" id="btn-open-photos" disabled>사진 폴더 열기</button>
-          <button class="btn" id="btn-open-pptdir" disabled>PPT 열기</button>
-          <button class="btn" id="btn-home-fin" title="검색과 선택을 지우고 환자 목록으로 돌아갑니다">⌂ 홈화면</button>
+          <button class="btn" id="btn-open-pptdir" disabled>PPT 폴더 열기</button>
+          <button class="btn" id="btn-home-fin"
+                  title="검색과 선택을 지우고 환자 목록으로 돌아갑니다">⌂ 홈화면</button>
         </div>
+        <p class="tip" id="fin-tip-full"><b>PPT에서 확인하기</b>는 저장될 그대로를 임시 파일로 열어 봅니다 —
+          환자 폴더에는 아무것도 쓰지 않습니다.<br>
+          확정하면 사진과 PPT가 한 번에 기록되고, 중간에 실패하면 전부 되돌아갑니다(원자적 저장).</p>
+        <p class="tip" id="fin-tip-fast">확정하면 <b>사진만</b> 기록되고, 중간에 실패하면
+          전부 되돌아갑니다(원자적 저장).<br>
+          <b>PPT는 만들지도 고치지도 않습니다</b> — 차수를 기록으로 남기려면 PowerPoint에서
+          슬라이드를 직접 추가하세요.</p>
       </div></div>
     </div>
 
@@ -302,34 +292,13 @@
 <dialog class="modal wide" id="dlg-doc">
   <h3 id="doc-title">—</h3>
   <div class="doclist" id="doc-list"></div>
-  <menu><button class="btn" id="doc-notice" hidden>안내문 다시 보기</button><button class="btn" id="doc-close">닫기</button></menu>
-</dialog>
-
-<!-- 업데이트 안내 — notice.json 의 version 마다 한 번만 뜬다(닫으면 그 브라우저에서는 다시 안 뜸).
-     다음 안내는 그 파일의 version 과 body 만 고치면 된다. -->
-<dialog class="modal notice" id="dlg-notice">
-  <h3 id="notice-title">업데이트 안내</h3>
-  <div class="notice-body" id="notice-body"></div>
-  <menu><button class="btn primary" id="notice-close" autofocus>확인</button></menu>
+  <menu><button class="btn" id="doc-close">닫기</button></menu>
 </dialog>
 
 <!-- 설정 — 저장 위치와 개인화를 한 곳에 -->
-<dialog class="modal wide set" id="dlg-set">
-  <button class="xbtn" id="set-close" title="닫기" aria-label="닫기">✕</button>
-  <nav class="setnav" id="setnav">
-    <h3>설정</h3>
-    <button type="button" class="on" data-page="root">저장 위치</button>
-    <button type="button" data-page="naming">이름 양식</button>
-    <button type="button" data-page="personal">개인화</button>
-    <button type="button" data-page="fast">Fastest Lap</button>
-    <button type="button" data-page="update">업데이트</button>
-    <button type="button" class="danger" data-page="uninstall">프로그램 삭제</button>
-  </nav>
-  <div class="setpages">
-  <section class="setpage on" data-page="root">
-    <h4>저장 위치</h4>
-    <p class="sub">환자 폴더와 이력 로그가 쌓이는 곳. 여러 곳을 등록해 두고 홈의 저장 위치에서 오갑니다.</p>
-    <div class="sec first">
+<dialog class="modal wide" id="dlg-set">
+  <h3>설정</h3>
+  <div class="sec">
     <h4>저장 위치</h4>
     <div class="rootbar">
       <select class="ident rootsel" id="set-root-sel"></select>
@@ -339,14 +308,9 @@
     </div>
     <div id="set-picker" hidden></div>
   </div>
-  
-  </section>
-  <section class="setpage" data-page="naming">
-    <h4>이름 양식</h4>
-    <p class="sub">폴더와 PPT 파일 이름을 어떻게 읽고 만들지. 사용법은 FAQ 를 참고해 주세요.</p>
-    <div class="sec">
-    <details class="fold" open>
-    <summary hidden>이름 양식</summary>
+  <div class="sec">
+    <details class="fold">
+    <summary>폴더·PPT 이름 양식 <small class="sub">— 사용법은 F&amp;Q 참고해주세요</small></summary>
     <div class="seg" id="pat-kind" style="margin:2px 0 8px">
       <button data-k="folder" aria-pressed="true">폴더</button>
       <button data-k="ppt" aria-pressed="false">PPT 파일</button>
@@ -364,14 +328,9 @@
     </div>
     </details>
   </div>
-  
-  </section>
-  <section class="setpage" data-page="personal">
-    <h4>개인화</h4>
-    <p class="sub">테마 · 표기 · 저장 방식. 바꾸면 바로 적용됩니다.</p>
-    <div class="sec">
-    <details class="fold" open>
-    <summary hidden>개인화</summary>
+  <div class="sec">
+    <details class="fold">
+    <summary>개인화 <small class="sub">— 테마 · 표기 · 저장 방식</small></summary>
     <div class="setrow">
       <span>테마</span>
       <div class="seg" id="set-theme">
@@ -428,13 +387,9 @@
     </div>
     </details>
   </div>
-  
-  </section>
-  <section class="setpage" data-page="fast">
-    <h4>Fastest Lap</h4>
-    <div class="sec">
-    <details class="fold" open>
-    <summary hidden>Fastest Lap</summary>
+  <div class="sec">
+    <details class="fold">
+    <summary>⚡Fastest Lap <small class="sub">— 상하반전 기본값 · 파일 이름</small></summary>
     <p class="sub">PPT 없이 사진만 저장하는 진행에서만 쓰이는 값입니다.</p>
 
     <h5 class="setsub">상하반전 기본값</h5>
@@ -479,29 +434,20 @@
     <p class="err" id="fl-preferr"></p>
     </details>
   </div>
-  
-  </section>
-  <section class="setpage" data-page="update">
-    <h4>업데이트</h4>
-    <p class="sub">켤 때와 "업데이트 확인"을 누를 때 새 버전을 봅니다. 환자 자료는 건드리지 않습니다.</p>
-    <div class="sec first">
-    <div class="row" style="align-items:flex-start;gap:14px">
+  <menu><button class="btn" id="set-close">닫기</button></menu>
+
+  <!-- ══ 유지관리 — 되돌리기 · 삭제 ══ -->
+  <hr>
+  <div class="row" style="align-items:flex-start;gap:14px">
     <div class="grow">
-      <b>버전</b>
+      <b>유지관리</b>
       <div class="hint" id="maint-info">확인 중...</div>
     </div>
     <button class="btn" id="btn-shortcut">바탕화면 바로가기</button>
     <button class="btn" id="btn-rollback" hidden>이전 버전으로</button>
+    <button class="btn danger" id="btn-uninstall">프로그램 삭제</button>
   </div>
-  
-    </div>
-  </section>
-  <section class="setpage" data-page="uninstall">
-    <h4>프로그램 삭제</h4>
-    <p class="sub">프로그램 폴더만 지웁니다. 환자 자료는 프로그램 밖에 있어 그대로 남습니다.</p>
-    <div class="sec first">
-      <button class="btn danger" id="btn-uninstall">프로그램 삭제…</button>
-      <div id="uninst" hidden style="margin-top:10px">
+  <div id="uninst" hidden style="margin-top:10px">
     <div class="hint" id="uninst-inv"></div>
     <div class="hint" style="margin-top:6px">환자 자료는 지우지 않습니다 — 위 경로에 그대로 남습니다.</div>
     <div id="uninst-tools-row" style="margin-top:6px" hidden></div>
@@ -510,54 +456,6 @@
       <button class="btn" id="btn-uninstall-cancel">취소</button>
     </div>
   </div>
-
-    </div>
-  </section>
-  </div>
-</dialog>
-
-<!-- 단축키 전체 목록 — 도크의 "단축키 ?" -->
-<dialog class="modal" id="dlg-keys">
-  <h3>단축키</h3>
-  <table class="keys-tbl">
-    <tr><td><kbd>1</kbd> … <kbd>5</kbd></td><td>슬롯 고르기 (정면 · 우측 · 좌측 · 상악 · 하악)</td></tr>
-    <tr><td><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></td><td>이동 1px</td></tr>
-    <tr><td><kbd>Q</kbd> <kbd>E</kbd></td><td>회전 0.1°</td></tr>
-    <tr><td><kbd>A</kbd> <kbd>D</kbd></td><td>배율 1%</td></tr>
-    <tr><td><kbd>W</kbd> <kbd>S</kbd></td><td>밝기 1</td></tr>
-    <tr><td><kbd>Space</kbd></td><td>크게 보기 (누를 때마다 켜고 끔)</td></tr>
-    <tr><td><kbd>Shift</kbd></td><td>격자 보기 (누를 때마다 켜고 끔)</td></tr>
-    <tr><td><kbd>Tab</kbd></td><td>직전 차수 대보기 (재진)</td></tr>
-    <tr><td>드래그 · 휠</td><td>이동 · 배율</td></tr>
-  </table>
-  <p class="sub">한 번 누르면 조절 바 한 칸만큼 움직입니다. 누르고 있으면 반복됩니다. 모든 조정은 자동 저장됩니다.</p>
-  <menu><button class="btn" id="keys-close">닫기</button></menu>
-</dialog>
-
-<!-- 크게 보기 — 자동 분류 · 검수에서 사진을 더블클릭하면 뜬다 (app.js openLightbox) -->
-<div class="lbx" id="lbx" hidden>
-  <div class="lbx-stage" id="lbx-stage"><img id="lbx-img" alt="" draggable="false"></div>
-  <div class="lbx-cap" id="lbx-cap"></div>
-  <div class="lbx-nav">
-    <button class="btn" id="lbx-prev" title="이전 사진 (←)">←</button>
-    <button class="btn" id="lbx-next" title="다음 사진 (→)">→</button>
-    <span class="sep"></span>
-    <button class="btn" id="lbx-out" title="축소 (−)">−</button>
-    <span class="lbx-zoom" id="lbx-zoom">100%</span>
-    <button class="btn" id="lbx-in" title="확대 (+)">＋</button>
-    <button class="btn" id="lbx-fit" title="화면에 맞춤 (0)">맞춤</button>
-    <span class="sep"></span>
-    <button class="btn" id="lbx-flip" title="상하반전 (F)">↕ 상하반전</button>
-    <button class="btn" id="lbx-close" title="닫기 (Esc)">닫기 Esc</button>
-  </div>
-</div>
-
-<!-- 앱 안 확인 창 — 브라우저 confirm/alert/prompt 대신 (app.js uiAsk) -->
-<dialog class="modal ask" id="dlg-ask">
-  <h3 id="ask-title">—</h3>
-  <div class="askbody" id="ask-body"></div>
-  <input id="ask-input" class="find" autocomplete="off" hidden>
-  <menu><button class="btn" id="ask-cancel">취소</button><button class="btn primary" id="ask-ok">계속</button></menu>
 </dialog>
 
 <!-- 재진 이력 — 차수가 늘어나도 상세 패널이 길어지지 않게 창으로 뺀다 -->
@@ -568,8 +466,8 @@
   <menu><button class="btn" id="hist-close">닫기</button></menu>
 </dialog>
 
-<script src="/static/app.js"></script>
-<script src="/static/fast.js"></script>
+<script src="/classic/static/app.js"></script>
+<script src="/classic/static/fast.js"></script>
 <!-- 밝기(감마) 필터가 눈금마다 하나씩 만들어져 들어온다 (app.js: brightFilter).
      캔버스가 `ctx.filter = "url(#bright…)"` 로 참조만 하므로 화면에는 아무것도 안 그린다. -->
 <svg id="bright-defs" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"></svg>

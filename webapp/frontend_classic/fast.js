@@ -21,11 +21,11 @@ function setFast(on){
   if(b) b.setAttribute("aria-pressed", String(FAST));
 }
 
-async function toggleFast(){
+function toggleFast(){
   // 모드는 세션에 박힌다 — 이미 잡아 둔 구도·기준영상이 그 규칙 위에서 계산된
   // 값이라, 진행 중에 갈아타면 화면과 서버가 서로 다른 것을 믿게 된다.
   if(SESSION){
-    if(!await uiConfirm("진행 중인 작업을 버리고 모드를 바꿀까요?\n담아둔 사진과 조정값이 사라집니다.", {ok: "모드 바꾸기", danger: true})) return;
+    if(!confirm("진행 중인 작업을 버리고 모드를 바꿀까요?")) return;
     resetSession();
   }
   setFast(!FAST);
@@ -45,8 +45,8 @@ function fastZonesHtml(){
          <div class="dropzone" id="dz-${pool}">
            <div class="dz-empty" id="dz-${pool}-empty">
              <p class="dz-main">${pool === "ref" ? "지난 차수 사진을 여기에" : "오늘 찍은 사진을 여기에"}</p>
-             ${pool === "ref" ? `<p class="dz-sub">초진일 경우에는 우측 박스에 사진을 넣어주세요</p>` : ""}
-             <p class="dz-sub">드래그<i>·</i><button id="pick-${pool}">찾아보기</button></p>
+             ${pool === "ref" ? `<p class="dz-sub">비워두면 정합 없이 진행합니다</p>` : ""}
+             <p class="dz-sub">DRAG<i>·</i><button id="pick-${pool}">BROWSE</button></p>
            </div>
            <div class="thumbs" id="thumbs-${pool}"></div>
            <input type="file" id="file-${pool}" multiple accept="image/*" hidden>
@@ -55,10 +55,10 @@ function fastZonesHtml(){
   return `
      <div class="sec">
        <h3>사진 추가 <span class="aux"><span id="stage-msg"></span><span id="staged-n"></span></span></h3>
-       <div class="dzrow fastrow">
-         <div class="upzones">${zone("ref", "")}${zone("cur", "")}</div>
-         <button class="btn primary lg" id="btn-go" disabled>자동 분류 시작 →</button>
-       </div>
+       <div class="upzones">${zone("ref", "(재진)")}${zone("cur", "")}</div>
+       <button class="btn primary wide" id="btn-go" disabled>자동 분류로 ▶</button>
+       <p class="tip">기준 사진은 넣는 즉시 분류·준비가 백그라운드로 돕니다 —
+         오른쪽을 채우고 넘어갈 때쯤이면 끝나 있습니다.</p>
      </div>`;
 }
 
@@ -81,7 +81,7 @@ function fastFolderHtml(){
                  title="폴더 선택 창을 엽니다 — 없는 폴더는 그 창에서 만들 수 있습니다">📁 찾아보기</button>
          <label class="flchk" title="끄면 접두어는 폴더 이름과 같습니다">
            <input type="checkbox" id="fl-pfx-on"${own ? " checked" : ""}> 사진 접두어 직접 입력</label>
-         <input id="fl-prefix" autocomplete="off" placeholder="e.g. 12345_A"
+         <input id="fl-prefix" autocomplete="off" placeholder="폴더 이름과 동일"
                 value="${esc(own ? prefix : "")}"${own ? "" : " disabled"}>
        </div>
        <!-- 폴더 선택 창이 안 뜨는 환경에서만 쓰는 앱 안 폴더 트리 -->
@@ -296,17 +296,16 @@ function fastDrawZones(){
   const go = el("btn-go"); if(go) go.disabled = !cur;
   setStep("setup", cur ? "done" : "",
           SESSION ? [SESSION.ids.name, SESSION.visit].filter(Boolean).join(" · ") : "");
-  setStep("pre", "", cur ? `${cur}장` : "");
+  setStep("pre", "", cur ? `${cur}장 대기` : "대기");
 }
 
 /* ── Pre: 짝맞춤 ─────────────────────────────────────────────────────────────
    화면이 가로로 기니 기준·현재를 위아래 두 줄로 깔고, 카테고리가 열이 되어
    위아래로 짝이 맞는다. 기준을 안 넣었으면 아래 줄 하나뿐이다. */
-function fastCard(p, isPrimary, slotted = false){
-  // slotted: 자리 머리글이 라벨을 이미 말하는 카드(짝맞춤 판) — 캡션은 신뢰도만
-  const low = p.confidence < 0.75, conf = Math.round((p.confidence || 0) * 100);
-  return `<figure class="ph-card${isPrimary ? " primary" : ""}${low && isPrimary ? " chk" : ""}" draggable="true"` +
-      ` data-pid="${p.id}" data-pool="${p.pool}" title="더블클릭하면 크게 봅니다">` +
+function fastCard(p, isPrimary){
+  const low = p.confidence < 0.75;
+  return `<figure class="ph-card${isPrimary ? " primary" : ""}" draggable="true"` +
+      ` data-pid="${p.id}" data-pool="${p.pool}">` +
     `<div class="pcimg">` +
       `<img src="${p.card || p.thumb}" alt="" draggable="false"` +
         `${p.flip_v ? ` class="fv"` : ""} loading="lazy">` +
@@ -317,53 +316,30 @@ function fastCard(p, isPrimary, slotted = false){
         ` draggable="false" title="이 사진을 위아래로 뒤집습니다">` +
         `↕ 상하반전${p.flip_v ? " 켜짐" : ""}</button>` +
     `</div>` +
-    `<figcaption${low ? ` class="low"` : ""}>${slotted ? `${conf}%${low ? " · 확인" : ""}` : `${p.label || "—"} ${conf}%`}</figcaption>` +
+    `<figcaption${low ? ` class="low"` : ""}>${p.label || "—"} ` +
+      `${Math.round((p.confidence || 0) * 100)}%</figcaption>` +
     `</figure>`;
 }
 
 function fastBinHtml(slot, label, pool, list){
   const face = slot === "FACE";
-  const [nm, hk] = SLOT_NM[slot] || [face ? "얼굴" : label, ""];
   return `<div class="bin${face ? " face" : ""}" data-slot="${slot}" data-pool="${pool}">` +
-    `<div class="bin-h"><b>${nm}<span class="code">${label}</span></b>` +
+    `<div class="bin-h">${label}` +
       (pool === "ref" ? ` <span class="poolmark">기준</span>` : "") +
-      `<span class="hr">${face && list.length > 1 ? `<button type="button" class="minibtn" id="face-sort" title="EXIF 촬영 시각 순서로 세웁니다">촬영순</button>` : ""}<span class="cnt">${list.length || ""}</span></span></div>` +
+      `<span class="hr"><span class="cnt">${list.length || ""}</span></span></div>` +
     `<div class="bin-body${face ? " grid3" : ""}">` +
-      (list.length ? list.map((p, i) => fastCard(p, i === 0, !face)).join("")
+      (list.length ? list.map((p, i) => fastCard(p, i === 0)).join("")
                    : `<p class="bin-empty">비어 있음</p>`) +
     `</div></div>`;
 }
 
 function fastOthersHtml(label, list, pool){
-  return `<div class="bin-h">${label} <span class="code">OTHERS</span>` +
+  return `<div class="bin-h">${label}` +
       (pool === "ref" ? ` <span class="poolmark">기준</span>` : "") +
-      `<span class="hr"><span class="cnt">${list.length || ""}</span></span></div>` +
+      `<span class="cnt">${list.length || ""}</span></div>` +
     `<div class="bin-body row">` +
       (list.length ? list.map(p => fastCard(p, false)).join("")
-                   : `<p class="bin-empty">${pool === "ref" ? "없음" : "없음 · 여기 놓인 사진은 저장되지 않습니다"}</p>`) +
-    `</div>`;
-}
-
-/* 얼굴 상자 — 두 판 공통. Fastest Lap 의 얼굴은 슬라이드 자리가 없으니 격자에 쌓기만 한다. */
-function fastFaceHtml(face){
-  const bf = el("bin-face"); if(!bf) return;
-  bf.hidden = false; bf.dataset.pool = "cur";
-  bf.innerHTML = `<div class="bin-h">얼굴 <span class="code">FACE</span><span class="hr">${face.length > 1 ? `<button type="button" class="minibtn" id="face-sort" title="EXIF 촬영 시각 순서로 세웁니다">촬영순</button>` : ""}<span class="cnt">${face.length || ""}</span></span></div>` +
-    `<div class="bin-body grid3">` + (face.length ? face.map(p => fastCard(p, false)).join("")
-      : `<p class="bin-empty">얼굴 사진을 여기에 · 한 장씩 조정해서 파일로 저장합니다</p>`) + `</div>`;
-}
-
-/* 추가 작업용 상자 — 본편과 같다. 여기 놓인 사진은 슬라이드(이 모드엔 없다)와 무관하게
-   검수에서 손으로 조정해 파일로만 저장된다. 오늘 풀의 사진만 들어온다. */
-function fastExtraHtml(){
-  const extra = (REVIEW.extra || []).map(pid => STAGED.find(p => p.id === pid)).filter(Boolean);
-  const bx = el("bin-extra"); if(!bx) return;
-  bx.hidden = false; bx.dataset.pool = "cur"; bx.dataset.slot = "EXTRA";
-  bx.innerHTML =
-    `<div class="bin-h">추가 작업용 <span class="code">EXTRA</span><span class="hr"><span class="cnt">${extra.length || ""}</span></span></div>` +
-    `<div class="bin-body row">` +
-      (extra.length ? extra.map(p => fastCard(p, false)).join("")
-                    : `<p class="bin-empty">조정해서 파일로만 저장할 사진<br>(예: 구내 부분 사진)</p>`) +
+                   : `<p class="bin-empty">비어 있음</p>`) +
     `</div>`;
 }
 
@@ -375,35 +351,19 @@ function fastDrawPairs(){
   const others = (R.others && R.others.cur) || [];
   const refOthers = (R.others && R.others.ref) || [];
 
-  const trays = el("trays"), bf = el("bin-face");
   if(!hasRef){
-    // 기준 사진이 없으면 **짝지을 것이 없다.** 그때는 본편과 같은 카드 판을 쓴다 —
-    // 구내 다섯 자리 한 줄(카드마다 두 장 + 스크롤), 아래에 얼굴 · 분류 안 됨.
-    el("bins").className = "bins slots";
-    el("bins").innerHTML = cols.map(b => {
-      const list = cur[b.key] || [], [nm, hk] = SLOT_NM[b.key] || [b.label, ""], top = list[0];
-      return `<div class="bin slot${top && top.confidence < .75 ? " chk" : ""}" data-slot="${b.key}" data-pool="cur">` +
-        `<div class="bin-h"><b>${nm}<span class="code">${b.label}</span></b><span class="hr"><span class="hk">${hk}</span></span></div>` +
-        `<div class="bin-body col">` +
-          (list.length ? list.map((p, i) => fastCard(p, i === 0)).join("") +
-                         (list.length === 1 ? `<p class="bin-empty emp"></p>` : "")
-                       : `<p class="bin-empty">비어 있음</p>`) +
-        `</div>` +
-        `<div class="sf">` + (top ? `<span class="c${top.confidence < .75 ? " low" : ""}">${Math.round((top.confidence || 0) * 100)}%${top.confidence < .75 ? " · 확인" : ""}</span>` : `<span class="c low">빈 자리</span>`) +
-          `<span>${list.length ? list.length + "장" : ""}</span></div></div>`;
-    }).join("");
-    if(trays) trays.className = "trays";
-    fastExtraHtml();
-    fastFaceHtml(face);
-    el("bin-others").className = "bin wide others";
+    // 기준 사진이 없으면 **짝지을 것이 없다.** 그때는 본편과 같은 판을 그대로
+    // 쓴다 — 한 줄짜리 격자를 카드 높이만큼 늘리면 상자만 커지고 사진은 그대로라
+    // 빈 공간만 남는다. 얼굴도 본편처럼 두 칸을 차지하며 같은 줄에 선다.
+    el("bins").className = "bins";
+    // **BINS 순서 그대로** 돈다 — 본편은 FACE 가 맨 앞(두 칸)이고 그 뒤로 다섯
+    // 자리가 온다. 여기서 순서를 바꾸면 "같은 판"이 아니게 된다.
+    el("bins").innerHTML =
+      BINS.map(b => fastBinHtml(b.key, b.label, "cur", cur[b.key] || [])).join("");
+    el("bin-others").className = "bin wide";
     el("bin-others").dataset.pool = "cur";
-    el("bin-others").innerHTML = fastOthersHtml("분류 안 됨", others, "cur");
+    el("bin-others").innerHTML = fastOthersHtml("OTHERS", others, "cur");
   }else{
-    // 아래 상자 셋은 기준 없음 판·본편과 같은 구조로 가로 1/3 씩 — 얼굴 · 추가 작업용 · 분류 안 됨.
-    // 기준 풀의 분류 안 된 사진은 분류 안 됨 상자 안에 "기준" 구역으로 같이 보인다.
-    if(trays) trays.className = "trays fast";
-    fastExtraHtml();
-    fastFaceHtml(face);
     // 위 기준 가로줄 · 점선 · 아래 오늘 가로줄. 카테고리가 열이 되어 위아래로
     // 짝이 맞는다.
     const row = bins =>
@@ -417,11 +377,17 @@ function fastDrawPairs(){
     el("bins").className = "pairs";
     el("bins").innerHTML = row(ref) + link + row(cur);
 
-    el("bin-others").className = "bin wide others";
-    el("bin-others").dataset.pool = "any";     // 오늘·기준 어느 풀의 사진도 여기로 되돌릴 수 있다
+    // 얼굴과 OTHERS 는 짝을 맞출 것이 아니라 아래에 가로로 쌓는다.
+    el("bin-others").className = "binstack";
+    el("bin-others").removeAttribute("data-pool");
     el("bin-others").innerHTML =
-        fastOthersHtml("분류 안 됨", others, "cur")
-      + (refOthers.length ? fastOthersHtml("분류 안 됨", refOthers, "ref") : "");
+        fastBinHtml("FACE", "FACE", "cur", face)
+      + `<div class="bin" data-slot="" data-pool="cur">`
+        + fastOthersHtml("OTHERS", others, "cur") + `</div>`
+      + (refOthers.length
+          ? `<div class="bin" data-slot="" data-pool="ref">`
+            + fastOthersHtml("OTHERS", refOthers, "ref") + `</div>`
+          : "");
   }
 
   // 다섯 자리를 다 채우지 않아도 넘어간다 — 사진이 빠지는 날이 있고, 확정 저장도
@@ -430,7 +396,7 @@ function fastDrawPairs(){
   const missing = cols.filter(b => !(cur[b.key] || []).length);
   const filled = cols.length - missing.length;
   el("pre-n").textContent = `${STAGED.filter(p => p.pool === "cur").length}장`
-    + (missing.length ? ` · 빈 자리 ${missing.length}` : "");
+    + (missing.length ? ` · 빈 슬롯 ${missing.length}` : "");
   // 얼굴만 찍은 날도 있다 — 구내가 하나도 없어도 저장할 것이 있으면 넘어간다.
   const any = filled || face.length;
   const go = el("btn-toproc");
@@ -440,8 +406,6 @@ function fastDrawPairs(){
                        + ". 이대로 진행할 수 있고, 저장할 때 한 번 더 묻습니다."
     : "";
   fastBindDnD();
-  bindLightbox();        // 더블클릭 크게 보기 — 본편 drawBins 와 같다
-  { const sb = el("face-sort"); if(sb) sb.onclick = e => { e.stopPropagation(); sortFace(); }; }
 }
 
 function fastBindDnD(){
@@ -457,7 +421,7 @@ function fastBindDnD(){
       e.preventDefault(); bin.classList.remove("over");
       // 풀을 건너뛰는 이동은 받지 않는다 — 기준 사진을 오늘 상자에 넣으면
       // 서버는 제 풀의 상자에 넣으므로 화면과 결과가 어긋난다.
-      if(bin.dataset.pool !== "any" && e.dataTransfer.getData("pool") !== bin.dataset.pool) return;
+      if(e.dataTransfer.getData("pool") !== bin.dataset.pool) return;
       const pid = e.dataTransfer.getData("pid");
       if(pid) assign(pid, bin.dataset.slot || null, dropIndex(bin, e));
     };
@@ -481,32 +445,20 @@ async function fastFlip(pid){
 
 /* 정합은 슬롯별로 **병렬**이라 한 번만 부른다. 도는 동안 진행은 폴링해서 보인다 —
    본편처럼 자리를 하나씩 부르면 병렬로 만든 이득이 사라진다. */
-/* 정합 진행 — 본편과 같은 막대·자리 칩. 다섯 자리를 동시에 돌리므로 "지금 어느
-   자리" 대신 도는 자리 전부에 ● 가 붙고, 끝난 자리부터 ✓ 로 바뀐다. */
+const PROG_TEXT = {wait: "대기", run: "정합 중", reg: "정합됨",
+                   frame: "프레이밍", fallback: "프레이밍(정합 실패)"};
+
 async function fastRegister(){
   const b = el("btn-toproc"), label = b.textContent;
   b.disabled = true;
-  const box = el("reg-progress"), stat = el("pre-stat");
-  const hasRef = !!(REVIEW && REVIEW.has_ref);
-  const head = hasRef ? "기준 사진에 정합하는 중" : "구도를 잡는 중";
-  const sub = hasRef ? "같은 치아가 같은 자리에 오도록 맞춥니다" : "프레이밍 모델로 잘라 맞춥니다";
-  const DONE = new Set(["reg", "frame", "fallback"]);
+  const box = el("reg-progress");
   const paint = prog => {
     if(!box) return;
-    const todo = BINS.filter(x => x.key !== "FACE" && prog[x.key]);
-    if(!todo.length){ box.hidden = true; return; }
-    const done = todo.filter(x => DONE.has(prog[x.key]));
-    box.hidden = false;
-    box.innerHTML = `<div class="l"><span><b>${head}</b> · ${sub}</span>` +
-      `<span>${done.length} / ${todo.length}</span></div>` +
-      `<div class="bar"><i style="width:${Math.round(done.length / todo.length * 100)}%"></i></div>` +
-      `<div class="pips">` + todo.map(x => {
-        const st = prog[x.key], ok = DONE.has(st), run = st === "run";
-        return `<span class="pip${ok ? " ok" : run ? " run" : ""}">${ok ? "✓ " : run ? "● " : ""}${slotNm(x.key)}` +
-               `${st === "fallback" ? " · 정합 실패, 프레이밍" : ""}</span>`;
-      }).join("") + `</div>`;
+    const rows = BINS.filter(x => x.key !== "FACE" && prog[x.key])
+      .map(x => `<span class="pg" data-st="${prog[x.key]}">${x.label}` +
+                `<i>${PROG_TEXT[prog[x.key]] || prog[x.key]}</i></span>`).join("");
+    box.innerHTML = rows; box.hidden = !rows;
   };
-  if(stat) stat.hidden = true;
   const timer = setInterval(async () => {
     try{ paint((await api(`/api/fl/register/${SESSION.session_id}/status`)).progress); }
     catch(e){ /* 폴링 실패는 조용히 넘긴다 — 본 작업은 따로 돌고 있다 */ }
@@ -521,15 +473,13 @@ async function fastRegister(){
   }finally{
     clearInterval(timer);
     b.disabled = false; b.textContent = label;
-    if(box) box.hidden = true;
-    if(stat) stat.hidden = false;
+    if(box) setTimeout(() => { box.hidden = true; }, 1200);
   }
   // 기준영상은 **정합을 돌 때** 구워진다(`_ref_bake`). 본편은 세션을 열 때
   // 덱에서 복원해 두므로 분류 시점에 받아 둔 목록으로 충분하지만, 여기서는 그때
   // 아직 비어 있다 — 다시 받지 않으면 겹쳐보기와 대보기가 "기준이 없다" 고 한다.
   await loadRefList();
   showView("proc");
-  syncTabs();            // 추가 작업용 상자에 사진이 있으면 그 탭이 열린다 (본편과 같다)
   drawBoard();
 }
 
@@ -544,18 +494,15 @@ async function fastLoadPlan(){
   // 환자를 고르지 않고 진행하면 '환자 폴더' 라는 말이 성립하지 않는다.
   const pf = el("btn-open-patient");
   if(pf) pf.textContent = picked ? "환자 폴더 열기" : "저장 폴더 열기";
-  err.textContent = ""; btn.disabled = true; btn.textContent = "확정 저장"; syncFinButtons(false);
+  err.textContent = ""; btn.disabled = true; syncFinButtons(false);
   if(!SESSION){ body.innerHTML = `<div class="ph">세션이 없습니다</div>`; return; }
   body.innerHTML = `<div class="ph">불러오는 중…</div>`;
   try{
     const q = [...FAST_OVERWRITE].join("|");
     const p = await api(`/api/fl/plan/${SESSION.session_id}`
                         + (q ? `?overwrite=${encodeURIComponent(q)}` : ""));
-    const R = REVIEW || {}, hasRef = !!R.has_ref;
-    const rows = p.files.map(f => {
-      const work = f.kind === "extra_work";
-      const nm = work ? `추가 작업용 ${(REVIEW.extra || []).indexOf(f.pid) + 1}` : f.slot === "FACE" ? "얼굴" : slotNm(f.slot);
-      const ph = STAGED.find(x => x.id === f.pid) || null;
+    const items = p.files.map(f => {
+      const nm = f.slot === "FACE" ? "얼굴" : slotNm(f.slot);
       const seg = f.exists
         ? `<span class="finseg seg">` +
           `<button type="button" data-base="${esc(f.base)}" data-act="number"` +
@@ -563,25 +510,18 @@ async function fastLoadPlan(){
           `<button type="button" data-base="${esc(f.base)}" data-act="overwrite"` +
             `${f.action === "overwrite" ? ` class="on"` : ""}>덮어쓰기</button></span>`
         : "";
-      const note = f.exists ? `<span class="wn">이미 있음</span> ${seg}`
-                 : work ? editorNote(f.editor, !!f.flip_v, "manual") + " · 손으로 조정 · 파일로만 저장"
-                 : f.extra ? "추가 촬영본 · 원본 그대로"
-                 : ph ? editorNote(ph.editor, ph.flip_v, ph.framing === "registration" ? "registered" : ph.framing === "model" ? "model" : "manual") : esc(f.label || "");
-      return planRow(ph ? ph.card || ph.thumb : null, f.extra ? "추가 촬영본" : nm, f.file, note, f.extra ? "sub" : f.exists ? "miss" : "");
+      return `<li${f.extra ? ` class="sub"` : ""}>` +
+        `<span class="k">${f.extra ? "추가" : nm}</span><code>${esc(f.file)}</code>` +
+        `<span class="aux${f.exists ? " warn" : ""}">` +
+          `${f.exists ? "이미 있음" : esc(f.label || "")}</span>${seg}</li>`;
     });
-    const dirs = [...new Set(p.files.map(f => dirPart(f.file)).filter(Boolean))];
-    body.innerHTML = `<div class="finsum">
-      <dl>
-        <dt>${picked ? "환자" : "저장"}</dt><dd><b>${esc(picked ? picked.name : (SESSION.folder || ""))}</b>${picked ? ` · ${esc(picked.ortho_id || "")}` : ""}</dd>
-        <dt>차수</dt><dd>${p.visit ? `<b>${esc(p.visit)}</b> · 사진만 저장` : "차수 없음 · 사진만 저장"}</dd>
-        <dt>정합</dt><dd>${hasRef ? "기준 사진에 정합" : "기준 사진 없음 · 프레이밍 모델로 구도를 잡았습니다"}</dd>
-      </dl>
-      <dl>
-        <dt>PPT</dt><dd><span class="pos" style="margin-left:0;color:var(--warn);background:var(--warn-soft)">만들지 않음</span> <span class="aux">차수를 기록으로 남기려면 PowerPoint 에서 직접 추가하세요</span></dd>
-        <dt>사진</dt><dd>${dirs.length ? dirs.map(d => `<code>${esc(d)}/</code>`).join(" ") : "저장 폴더 바로 아래"} ${p.files.length}장</dd>
-        <dt>저장 위치</dt><dd><code>${esc(p.patient_dir)}</code>${p.patient_dir_exists ? "" : ` <span class="aux">확정할 때 만들어집니다</span>`}</dd>
-      </dl>
-    </div><div class="fintab">${rows.join("")}</div>`;
+    body.innerHTML =
+        `<div class="finsec"><span class="eyebrow">저장 위치</span>`
+      + `<code>${esc(p.patient_dir)}</code></div>`
+      + `<div class="finsec"><span class="eyebrow">프레젠테이션</span>`
+      + `<span class="aux warn">만들지 않습니다 — 차수 ${esc(p.visit)} 는 `
+      + `PowerPoint 에서 직접 추가하세요</span></div>`
+      + `<ul class="finlist">${items.join("")}</ul>`;
     for(const b of body.querySelectorAll(".finseg button"))
       b.onclick = () => {
         if(b.dataset.act === "overwrite") FAST_OVERWRITE.add(b.dataset.base);
@@ -589,18 +529,16 @@ async function fastLoadPlan(){
         fastLoadPlan();
       };
     if(p.missing.length)
-      err.textContent = `빈 자리 ${p.missing.length}곳 — ${p.missing.map(slotNm).join(", ")}. 채우고 오거나, 이대로 확정할 수 있습니다.`;
+      err.textContent = `빈 슬롯 ${p.missing.length}곳 — ${p.missing.map(slotNm).join(", ")}. `
+                      + `채우고 오거나, 이대로 확정할 수 있습니다.`;
     btn.disabled = false;
-    btn.textContent = p.missing.length ? `빈 자리 ${p.missing.length}곳 두고 확정` : "확정 저장";
     syncFinButtons(true);
     const first = p.files[0];
     FINDIRS = {folder: (picked && picked.folder) || "",
-               photos: first ? dirPart(first.file) : "", ppt: "", pptfile: "", committed: false,
+               photos: first ? dirPart(first.file) : "", ppt: "",
                exists: !!p.patient_dir_exists};
     FL_DIR = {dir: p.patient_dir, exists: !!p.patient_dir_exists};
     syncFinDirButtons();
-    const m = el("fin-after-msg"); if(m) m.textContent = p.patient_dir_exists ? "" : "확정 저장 뒤에 폴더가 생깁니다";
-    el("btn-home-fin").classList.remove("primary");
   }catch(e){
     body.innerHTML = `<div class="ph">불러오지 못했습니다</div>`;
     err.textContent = e.message;
@@ -649,18 +587,20 @@ async function fastCommit(){
       // 빈 슬롯은 막지 않는다 — 사진이 없는 날도 있다. 대신 반드시 되묻는다.
       if(e.status === 409 && e.data?.error === "missing_slots"){
         const nm = (e.data.missing || []).map(slotNm).join(", ");
-        if(!await uiConfirm(`빈 자리가 있습니다 — ${nm}\n이 칸은 비워 둔 채 사진을 기록합니다.`, {ok: "이대로 확정", danger: true})){
+        if(!confirm(`빈 슬롯이 있습니다 — ${nm}\n\n이대로 저장할까요?`)){
           btn.textContent = "확정 저장"; btn.disabled = false; return;
         }
         r = await api(`/api/fl/commit/${SESSION.session_id}?allow_missing=true`, payload);
       }else throw e;
     }
     el("fin-body").innerHTML =
-        `<div class="findone">${ICON.check}<b>사진 ${(r.files || []).length}장을 기록했습니다</b> · <code>${esc(r.patient_dir)}</code>` +
-        (r.visit ? ` · 차수 ${esc(r.visit)} 를 기록으로 남기려면 PowerPoint 에서 슬라이드를 추가하세요` : "") + `</div>`
-      + `<div class="fintab">${(r.files || []).map(f => `<div class="fr"><span class="ico ok">${ICON.check}</span><b>사진</b><code>${esc(f)}</code><span class="r okc">✓ 저장됨</span></div>`).join("")}</div>`;
-    el("btn-home-fin").classList.add("primary");
-    { const m = el("fin-after-msg"); if(m) m.textContent = "방금 저장한 것을 보러 갑니다"; }
+        `<div class="finsec"><span class="eyebrow">저장 완료</span>`
+      + `<code>${esc(r.patient_dir)}</code></div>`
+      + `<ul class="finlist">${(r.files || []).map(f => `<li><code>${esc(f)}</code></li>`).join("")}</ul>`
+      + (r.visit
+          ? `<p class="tip">사진만 저장했습니다. 차수 <b>${esc(r.visit)}</b> 를 기록으로 `
+            + `남기려면 PowerPoint 에서 슬라이드를 추가하세요.</p>`
+          : `<p class="tip">사진만 저장했습니다.</p>`);
     el("fin-visit").hidden = false;
     el("fin-visit").dataset.tone = "done";
     el("fin-visit").textContent = r.visit ? `차수 ${r.visit} 사진 저장됨` : "사진 저장됨";

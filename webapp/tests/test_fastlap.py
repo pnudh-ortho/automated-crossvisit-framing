@@ -227,7 +227,7 @@ def test_라우터가_한_벌만_붙는다():
     import importlib
 
     paths = client.get("/openapi.json").json()["paths"]
-    fl = sorted(p for p in paths if p.startswith("/api/fl"))
+    fl = sorted(p for p in paths if p.startswith("/api/fl/"))   # 본편의 /api/flip 은 제외
     # 개수가 아니라 **목록**을 적어 둔다 — 경로가 늘 때 숫자만 고치면 무엇이
     # 늘었는지 아무도 안 본다. 여기 한 줄이 이 모드의 API 전부다.
     assert fl == [
@@ -241,7 +241,7 @@ def test_라우터가_한_벌만_붙는다():
     ], fl
     importlib.reload(FL)
     again = sorted(p for p in client.get("/openapi.json").json()["paths"]
-                   if p.startswith("/api/fl"))
+                   if p.startswith("/api/fl/"))
     assert again == fl, "재임포트가 라우트를 겹쳐 쌓았다"
 
 

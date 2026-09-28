@@ -5,22 +5,11 @@ let SESSION = null;
    화면을 그리는 쪽은 fast.js 에 있고, 여기에는 갈림길만 둔다 — 그래야 본편
    코드가 그대로 남아 fastest_lap 브랜치로 cherry-pick 이 계속 흐른다. */
 let FAST = false;
-/* 인라인 SVG 아이콘 — 이모지는 OS 마다 다르게 보여 쓰지 않는다 */
-const ICON = {
-  folder: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
-  deck: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16"/></svg>',
-  warn: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>',
-  bolt: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
-  photo: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="16" cy="9" r="1.5"/></svg>',
-  file: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4"/></svg>',
-  check: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>',
-  zoom: '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>',
-};
 const STEPS = [
   {v:"setup", n:1, nm:"환자 · 사진", code:"Setup & Upload",      st:"",     state:""},
-  {v:"pre",   n:2, nm:"자동 분류",   code:"Pre-processing (AI)", st:"", state:""},
-  {v:"proc",  n:3, nm:"검수·조정",   code:"Process (User)",      st:"", state:""},
-  {v:"fin",   n:4, nm:"저장",       code:"Finalize & Save",     st:"", state:""},
+  {v:"pre",   n:2, nm:"자동 분류",   code:"Pre-processing (AI)", st:"대기", state:""},
+  {v:"proc",  n:3, nm:"검수·조정",   code:"Process (User)",      st:"대기", state:""},
+  {v:"fin",   n:4, nm:"저장",       code:"Finalize & Save",     st:"대기", state:""},
 ];
 
 /* 사이드바 — 한글이 먼저 읽히고, 라틴 용어가 아래에 남는다 */
@@ -51,14 +40,8 @@ const SLOTS = [
    (본편의 얼굴은 케이스 덱의 슬라이드 자리에 매달려 별도 편집기 FED 가 맡는다.) */
 const FACE_KEY = "FACE:";
 const isFaceKey = k => typeof k === "string" && k.startsWith(FACE_KEY);
-/* 추가 작업용 — 슬라이드에 넣지 않고 조정해서 파일로만 저장하는 사진. 얼굴처럼
-   **사진 자체**가 대상이라 열쇠가 `EXTRA:<사진id>` 로 오고 구내 편집기를 그대로 쓴다. */
-const EXTRA_KEY = "EXTRA:";
-const isExtraKey = k => typeof k === "string" && k.startsWith(EXTRA_KEY);
 const primaryOf = key => isFaceKey(key)
   ? (STAGED.find(p => p.id === key.slice(FACE_KEY.length)) || null)
-  : isExtraKey(key)
-  ? (STAGED.find(p => p.id === key.slice(EXTRA_KEY.length)) || null)
   : (REVIEW && REVIEW.bins && REVIEW.bins[key] || [])[0] || null;
 
 const imgCache = new Map();
@@ -138,11 +121,6 @@ function drawComposite(c, W, H, img, st, border, flipV, bright){
    에디터에서 맞춘 그림이 슬라이드에서도 그대로 나온다. */
 function slotWindow(key){
   if(isFaceKey(key)) return (SESSION && SESSION.face_window) || null;
-  if(isExtraKey(key)){    // 사진마다의 창(얼굴이면 3:4)이 먼저, 없으면 구내 창
-    const pid = key.slice(EXTRA_KEY.length);
-    return (REVIEW && REVIEW.extra_windows && REVIEW.extra_windows[pid])
-        || (REVIEW && REVIEW.extra_window) || slotWindow("SLOT_FRONT");
-  }
   return (SESSION && SESSION.windows && SESSION.windows[key])
       || (HEALTH && HEALTH.windows && HEALTH.windows[key]) || null;
 }
@@ -305,12 +283,10 @@ function toggleZoom(){
     host.appendChild(cv);
     cv.classList.add("zoom");
     boardEl.hidden = true;
-    el("ed-fit").hidden = true;        // 빈 칸이 도크에 남지 않게
   }else{
-    el("ed-fit").hidden = false;
     el("ed-fit").appendChild(cv);      // 제자리 = 캔버스를 감싸는 칸 안
     cv.classList.remove("zoom");
-    boardEl.hidden = TAB === "extra";  // 추가 작업용에는 십자뷰 판이 없다 — 접어도 무대는 비워 둔다
+    boardEl.hidden = false;
     ZOOM.face = false;                 // 사람이 껐다 — 얼굴 때문이었다는 표시도 내린다
   }
   drawPeekBadge();
@@ -392,11 +368,9 @@ function redrawBoardSlots(){
 
 async function pick(key){
   const p = primaryOf(key); if(!p) return;
-  const face = isFaceKey(key), extra = isExtraKey(key);
-  const meta = (face || extra) ? null : SLOTS.find(x => x.key === key);
+  const face = isFaceKey(key);
+  const meta = face ? null : SLOTS.find(x => x.key === key);
   ED.slot = key;
-  // 추가 작업용의 구도는 사진이 아니라 세션의 extra_editors 에 산다 — 프레이밍 없이 원본에서 시작
-  if(extra){ const z = (REVIEW && REVIEW.extra_editors || {})[p.id]; p.editor = z ? {...z} : {dx:0, dy:0, scale:1, angle:0}; p.editor0 = {dx:0, dy:0, scale:1, angle:0}; }
   ED.dx = p.editor.dx; ED.dy = p.editor.dy; ED.scale = p.editor.scale; ED.angle = p.editor.angle;
   ED.flip_v = !!p.flip_v;
   ED.bright = +p.brightness || 0;
@@ -411,16 +385,14 @@ async function pick(key){
   // 얼굴은 십자뷰 판에 자리가 없다 — **판 자리를 그대로 무대로 쓴다.** 캔버스를
   // 그리로 옮기는 길은 이미 있다(크게 보기). 3:4 세로 사진이 가운데 서고 남는
   // 좌우는 십자뷰 슬라이드와 같은 색으로 채운다.
-  if((face || extra) && !ZOOM.on){ ZOOM.face = true; toggleZoom(); }
-  else if(!face && !extra && ZOOM.on && ZOOM.face){ ZOOM.face = false; toggleZoom(); }
+  if(face && !ZOOM.on){ ZOOM.face = true; toggleZoom(); }
+  else if(!face && ZOOM.on && ZOOM.face){ ZOOM.face = false; toggleZoom(); }
   for(const host of [el("ed-fit"), zoomHost()])
-    if(host) host.style.background = (face || extra) ? LETTERBOX : "";
+    if(host) host.style.background = face ? LETTERBOX : "";
   showPhotoDock();   // 노트 서식을 보던 중이면 사진 편집기로 돌아온다
-  syncShapeBtn(extra ? p.id : null);
-  el("dock-title").firstChild.textContent = extra
-    ? `추가 ${extraOf().indexOf(p.id) + 1} · ${p.label || "—"} · 원본 · 정합 없음`
-    : `${meta ? `${meta.nm} · 슬롯 ${meta.hk} · ` : faceLabel(key) + " · "}${p.label || "—"} ` +
-      `${Math.round((p.confidence || 0) * 100)}%`;
+  el("dock-title").firstChild.textContent =
+    `${meta ? meta.nm : faceLabel(key)} · ${p.label || "—"} ` +
+    `${Math.round((p.confidence || 0) * 100)}%`;
   syncKnobs(); renderEditor();
   await syncOverlayBar(); renderEditor();   // 기준영상이 늦게 오면 한 번 더 그린다
 }
@@ -514,7 +486,7 @@ async function syncOverlayBar(){
   const want = (list.includes(OV.visit) && OV.slot === ED.slot) ? OV.visit
              : list[list.length - 1];
   sel.innerHTML = list.map(v =>
-    `<option value="${v}"${v === want ? " selected" : ""}>${v === REF_LABEL ? "기준 사진" : `${v} 차수`}</option>`).join("");
+    `<option value="${v}"${v === want ? " selected" : ""}>${v} 차수</option>`).join("");
   if(OV.slot !== ED.slot || OV.visit !== want || !OV.img){
     OV.slot = ED.slot; OV.visit = want; OV.img = null;
     // 대보기(Tab)도 이 그림을 쓴다 — 자리를 옮겨도 대보기가 꺼지지 않게 함께 받는다
@@ -690,16 +662,13 @@ function saveEdit(){
   ED.timer = setTimeout(async () => {
     try{
       // 얼굴은 자리가 없으므로 사진으로 보낸다. 나머지는 같은 값이다.
-      const face = isFaceKey(ED.slot), extra = isExtraKey(ED.slot);
+      const face = isFaceKey(ED.slot);
       const geo = {dx: ED.dx, dy: ED.dy, scale: ED.scale, angle: ED.angle};
-      const r = await api(face ? "/api/fl/adjust" : extra ? "/api/extra/adjust" : "/api/adjust", {method:"POST",
+      const r = await api(face ? "/api/fl/adjust" : "/api/adjust", {method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify(face
           ? {session_id: SESSION.session_id, photo_id: ED.slot.slice(FACE_KEY.length), ...geo}
-          : extra
-          ? {session_id: SESSION.session_id, photo_id: ED.slot.slice(EXTRA_KEY.length), ...geo}
           : {session_id: SESSION.session_id, slot: ED.slot, ...geo})});
-      if(extra && REVIEW){ (REVIEW.extra_editors = REVIEW.extra_editors || {})[ED.slot.slice(EXTRA_KEY.length)] = r.editor || geo; }
       // 서버가 cover 조건으로 배율을 되돌릴 수 있다 — 창에 빈틈이 생기지 않게
       if(r.clamped_scale && Math.abs(r.clamped_scale - ED.scale) > 1e-6){
         ED.scale = r.clamped_scale;
@@ -721,13 +690,13 @@ function bindEditor(){
   // 값 칸과 ◀ ▶ 는 **조절 바와 같은 눈금**을 쓴다(회전 0.1° · 배율 1% · 이동 1px).
   // 배율만 칸의 단위가 % 라, 읽고 쓸 때 100 을 곱하고 나눈다.
   const onSlot = () => !!ED.slot;
-  bindNum("v-angle", -180, 180, .1, () => ED.angle, v => ED.angle = v,
+  bindNum("v-angle", -10, 10, .1, () => ED.angle, v => ED.angle = v,
           afterEdit, syncKnobs, onSlot);
   bindNum("v-scale", 50, 200, 1, () => ED.scale * 100, v => ED.scale = v / 100,
           afterEdit, syncKnobs, onSlot);
-  bindNum("v-tx", -9999, 9999, 1, () => ED.dx, v => ED.dx = v,
+  bindNum("v-tx", -200, 200, 1, () => ED.dx, v => ED.dx = v,
           afterEdit, syncKnobs, onSlot);
-  bindNum("v-ty", -9999, 9999, 1, () => ED.dy, v => ED.dy = v,
+  bindNum("v-ty", -200, 200, 1, () => ED.dy, v => ED.dy = v,
           afterEdit, syncKnobs, onSlot);
   bindNum("v-bright", -50, 50, 1, () => ED.bright, v => ED.bright = v,
           afterBright, syncKnobs, onSlot);
@@ -918,14 +887,7 @@ addEventListener("keydown", e => {
   // Space — 지금 조정 중인 사진을 판 자리에 크게. 가로채지 않으면 포커스가 남은
   // 버튼이 눌리거나 화면이 스크롤된다(브라우저 기본 동작).
   if(code === "Space" && !face){
-    e.preventDefault();
-    if(!e.repeat) toggleZoom();
-    return;
-  }
-  if(!face && TAB === "extra" && (code.startsWith("Digit") || code.startsWith("Numpad"))){
-    const pid = extraOf()[+code.slice(-1) - 1];
-    if(pid){ pick(EXTRA_KEY + pid); e.preventDefault(); }
-    return;
+    e.preventDefault(); toggleZoom(); return;
   }
   if(!face && (code.startsWith("Digit") || code.startsWith("Numpad"))){
     const s = SLOTS.find(x => x.hk === +code.slice(-1));
@@ -944,18 +906,16 @@ addEventListener("keydown", e => {
   // 되돌리기"가 안 되고, 같은 화면의 두 도구가 서로 다른 자를 들게 된다.
   // 크게 옮길 일은 드래그와 휠이 맡는다(눌러 두면 키가 자동 반복된다).
   const mv = 1, rot = .1, sc = .01, br = 1;
-  const R = id => { const n = el((face ? "f" : "") + id); return n ? [+n.min, +n.max] : [-1e9, 1e9]; };
   // 밝기는 사진에 붙는 값이라 저장 통로가 구도와 다르다(/api/brightness). 어느
   // 쪽을 눌렀는지 갈라 둬야 뒤에서 맞는 곳으로 보낸다.
   let hit = true, bright = false;
   switch(code){
-    // 범위는 슬라이더가 정한다 — 키와 슬라이더가 다른 자를 들면 안 된다
-    case "ArrowLeft":  E.dx = clamp(E.dx - mv, ...R("ed-tx")); break;
-    case "ArrowRight": E.dx = clamp(E.dx + mv, ...R("ed-tx")); break;
-    case "ArrowUp":    E.dy = clamp(E.dy - mv, ...R("ed-ty")); break;
-    case "ArrowDown":  E.dy = clamp(E.dy + mv, ...R("ed-ty")); break;
-    case "KeyQ": E.angle = clamp(E.angle - rot, ...R("ed-angle")); break;
-    case "KeyE": E.angle = clamp(E.angle + rot, ...R("ed-angle")); break;
+    case "ArrowLeft":  E.dx = clamp(E.dx - mv, -200, 200); break;
+    case "ArrowRight": E.dx = clamp(E.dx + mv, -200, 200); break;
+    case "ArrowUp":    E.dy = clamp(E.dy - mv, -200, 200); break;
+    case "ArrowDown":  E.dy = clamp(E.dy + mv, -200, 200); break;
+    case "KeyQ": E.angle = clamp(E.angle - rot, -10, 10); break;
+    case "KeyE": E.angle = clamp(E.angle + rot, -10, 10); break;
     case "KeyA": E.scale = clamp(E.scale - sc, .5, 2); break;
     case "KeyD": E.scale = clamp(E.scale + sc, .5, 2); break;
     // 밝기 — A/D(배율) · Q/E(회전)와 같은 손자리에 위아래로 놓았다. 위가 밝게다.
@@ -1001,226 +961,55 @@ function preMsg(text, kind){
   n.textContent = text || ""; n.dataset.kind = kind || "";
 }
 
-const othersOf = () => STAGED.filter(p => !p.slot && !extraOf().includes(p.id));
-const extraOf = () => (REVIEW && REVIEW.extra) || [];
-const REF_LABEL = "기준";
-
-/* 추가 작업용의 창 비율 버튼 — 지금 모양의 **반대**를 글자로 보인다(누르면 그리 바뀐다).
-   얼굴 라벨이면 세로가 기본. 바꾸면 서버가 조정값을 초기화하므로 다시 pick 해 그린다. */
-function syncShapeBtn(pid){
-  const row = el("ed-shape-row"), b = el("ed-shape"); if(!row || !b) return;
-  row.hidden = !pid;
-  if(!pid) return;
-  const shape = (REVIEW && REVIEW.extra_shapes || {})[pid] || "landscape";
-  b.textContent = shape === "portrait" ? "가로(4:3) 창으로" : "세로(3:4) 창으로";
-  b.dataset.next = shape === "portrait" ? "landscape" : "portrait";
-  b.onclick = async () => {
-    try{
-      const r = await api("/api/extra/shape", {method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({session_id: SESSION.session_id, photo_id: pid, shape: b.dataset.next})});
-      if(REVIEW){ for(const k of ["extra", "extra_editors", "extra_window", "extra_windows", "extra_shapes"]) if(k in r) REVIEW[k] = r[k]; }
-      pick(EXTRA_KEY + pid);                 // 새 창 크기로 캔버스를 다시 세운다
-    }catch(e){ uiAlert(e.message || "비율을 바꾸지 못했습니다"); }
-  };
-}   // Fastest Lap 이 기준 사진에 정합했을 때 ref_visit 에 넣는 글자 (fastlap.py REF_KEY)
-const photoOf = pid => STAGED.find(p => p.id === pid);
-/* 구내 자리 이름 — 우리말과 코드를 같이. 검수 화면의 1~5 번호와 이어진다. */
-const SLOT_NM = {SLOT_FRONT: ["정면", 1], SLOT_LEFT: ["우측", 2], SLOT_RIGHT: ["좌측", 3],
-                 SLOT_UPPER: ["상악", 4], SLOT_LOWER: ["하악", 5]};
+const othersOf = () => STAGED.filter(p => !p.slot);
 
 function photoCard(p, isPrimary, binKey){   // binKey는 PPT 배지 표시에만 쓰인다
   const low = p.confidence < 0.75;
-  return `<figure class="ph-card${isPrimary ? " primary" : ""}${low && isPrimary ? " chk" : ""}" draggable="true" data-pid="${p.id}" title="더블클릭하면 크게 봅니다">` +
-    `<div class="pcimg">` +
-      `<img src="${p.card || p.thumb}" alt="" draggable="false"${p.flip_v ? ` class="fv"` : ""} loading="lazy">` +
-      (isPrimary && binKey && binKey !== "FACE" && binKey !== "EXTRA" ? `<span class="tagp">PPT</span>` : "") +
-      `<button type="button" class="flipbar${p.flip_v ? " on" : ""}" data-flip="${p.id}" draggable="false" title="이 사진을 위아래로 뒤집습니다">↕ 상하반전${p.flip_v ? " 켜짐" : ""}</button>` +
-    `</div>` +
+  return `<figure class="ph-card${isPrimary ? " primary" : ""}" draggable="true" data-pid="${p.id}">` +
+    `<img src="${p.card || p.thumb}" alt="" draggable="false"${p.flip_v ? ` class="fv"` : ""} loading="lazy">` +
+    (isPrimary && binKey !== "FACE" ? `<span class="tagp">PPT</span>` : "") +
     `<figcaption${low ? ` class="low"` : ""}>${p.label || "—"} ${Math.round((p.confidence || 0) * 100)}%</figcaption>` +
     `</figure>`;
 }
 
-/* 상하반전 — 교합면은 거울로 찍어 뒤집어 본다. 분류가 정한 기본값을 사진마다 고칠 수 있다. */
-async function flipPhoto(pid, on){
-  try{
-    // Fastest Lap 은 제 길로 — 기준 사진의 정합 캐시까지 같이 무효화한다
-    const r = await api(FAST ? "/api/fl/flip" : "/api/flip", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(FAST ? {session_id: SESSION.session_id, photo_id: pid, on}
-                                : {session_id: SESSION.session_id, photo_id: pid, flip_v: on})});
-    REVIEW = r.review; STAGED = r.photos;
-    drawBins();
-  }catch(e){ preMsg(e.status === 404 ? "상하반전은 서버 업데이트 뒤에 쓸 수 있습니다" : e.message, "err"); }
-}
-
-/* 얼굴 트레이 — 초진이면 케이스 양식의 자리(정면뷰 좌·우 …)를 점선으로 미리 그린다.
-   자리마다 놓인 사진이 있으면 그 사진을, 없으면 이름만. 자리에 안 든 얼굴은 그 아래. */
-function faceTrayHtml(list){
-  const cells = (CASE && CASE.enabled && SESSION && SESSION.mode === "first") ? faceCells() : [];
-  const slots = (REVIEW && REVIEW.face_slots) || {};
-  const placed = new Set(Object.values(slots));
-  const head = `<div class="bin-h">얼굴 <span class="code">FACE</span><span class="hr">` +
-    (cells.length ? `<span class="cnt">${cells.filter(c => slots[c.cell]).length} / ${cells.length}</span>` : "") +
-    `<button type="button" class="minibtn" id="face-sort" title="EXIF 촬영 시각 순서로 세웁니다">촬영순</button>` +
-    `<span class="cnt">${list.length || ""}</span></span></div>`;
-  if(!cells.length){
-    return head + `<div class="bin-body grid3">` +
-      (list.length ? list.map(p => photoCard(p, false, "FACE")).join("")
-        : `<p class="bin-empty">${SESSION && SESSION.mode === "first" ? "얼굴 사진을 여기에" : "얼굴 사진 없음 · 재진에는 슬라이드에 넣지 않고 파일로만 저장합니다"}</p>`) +
-      `</div>`;
-  }
-  const rest = list.filter(p => !placed.has(p.id));
-  return head + `<div class="fslots">` + cells.map(c => {
-    const pid = slots[c.cell], p = pid && photoOf(pid);
-    return `<div class="fslot${p ? " has" : ""}" data-cell="${c.cell}" title="${slideName(c)} · ${posName(c.pos)}">` +
-      (p ? `<img src="${p.card || p.thumb}" alt="" draggable="false">` : "") +
-      `<span>${esc(slideName(c))}</span><small>${esc(posName(c.pos))}</small></div>`;
-  }).join("") + `</div>` +
-  (rest.length ? `<div class="bin-body grid3 rest">${rest.map(p => photoCard(p, false, "FACE")).join("")}</div>` : "");
-}
-
 function drawBins(){
   if(!REVIEW) return;
-  // Fastest Lap 은 제 판(fast.js)을 그린다 — 얼굴 · 추가 작업용 · 분류 안 됨 상자도 거기서 채운다
   if(FAST) return fastDrawPairs();
   // fast 화면은 이 두 칸의 클래스를 제 것으로 갈아끼운다 — 본편으로 돌아오면
   // 되돌려 놓아야 격자가 그쪽 모양으로 남지 않는다.
-  el("bins").className = "bins slots";
-  el("bin-others").className = "bin wide others";
-  el("bin-others").removeAttribute("data-pool");
-  { const t = el("trays"), bf = el("bin-face"); if(t) t.className = "trays"; if(bf) bf.hidden = false; }
+  el("bins").className = "bins";
+  el("bin-others").className = "bin wide";
   const box = el("bins");
-  box.innerHTML = BINS.filter(b => b.key !== "FACE").map(b => {
+  box.innerHTML = BINS.map(b => {
     const list = (REVIEW.bins && REVIEW.bins[b.key]) || [];
-    const [nm, hk] = SLOT_NM[b.key] || [b.label, ""];
-    const top = list[0];
-    const conf = top ? Math.round((top.confidence || 0) * 100) : 0;
-    return `<div class="bin slot${top && top.confidence < .75 ? " chk" : ""}" data-slot="${b.key}">` +
-      `<div class="bin-h"><b>${nm}<span class="code">${b.label}</span></b><span class="hr">` +
-        `<span class="hk">${hk}</span></span></div>` +
-      `<div class="bin-body col">` +
-        (list.length ? list.map((p, i) => photoCard(p, i === 0, b.key)).join("") +
-                       (list.length === 1 ? `<p class="bin-empty emp"></p>` : "")
+    /* FACE는 장수가 많고 사람이 자리를 직접 고르는 상자다. 두 칸 폭에 3열로
+       깔아서 여러 장을 한눈에 훑을 수 있게 한다(다른 상자는 종전대로 1열). */
+    const face = b.key === "FACE";
+    return `<div class="bin${face ? " face" : ""}" data-slot="${b.key}">` +
+      `<div class="bin-h">${b.label}<span class="hr">` +
+        (face ? `<button type="button" class="minibtn" id="face-sort"` +
+                ` title="EXIF 촬영 시각 순서로 세웁니다">촬영순</button>` : "") +
+        `<span class="cnt">${list.length || ""}</span></span></div>` +
+      `<div class="bin-body${face ? " grid3" : ""}">` +
+        (list.length ? list.map((p, i) => photoCard(p, i === 0, b.key)).join("")
                      : `<p class="bin-empty">비어 있음</p>`) +
-      `</div>` +
-      `<div class="sf">` + (top ? `<span class="c${top.confidence < .75 ? " low" : ""}">${conf}%${top.confidence < .75 ? " · 확인" : ""}</span>` : `<span class="c low">빈 자리</span>`) +
-        `<span>${list.length ? list.length + "장" : ""}</span></div>` +
-    `</div>`;
+      `</div></div>`;
   }).join("");
-  const bindFlips = () => {
-    for(const b of document.querySelectorAll("#bins [data-flip], #trays [data-flip]"))
-      b.onclick = e => { e.stopPropagation(); const p = photoOf(b.dataset.flip); if(p) flipPhoto(p.id, !p.flip_v); };
-  };
-
-  const faces = (REVIEW.bins && REVIEW.bins.FACE) || [];
-  el("bin-face").innerHTML = faceTrayHtml(faces);
   const sortBtn = el("face-sort");
   if(sortBtn) sortBtn.onclick = sortFace;
 
-  const extra = extraOf().map(photoOf).filter(Boolean);
-  el("bin-extra").innerHTML =
-    `<div class="bin-h">추가 작업용 <span class="code">EXTRA</span><span class="hr"><span class="cnt">${extra.length || ""}</span></span></div>` +
-    `<div class="bin-body row">` +
-      (extra.length ? extra.map(p => photoCard(p, false, "EXTRA")).join("")
-                    : `<p class="bin-empty">슬라이드에는 넣지 않고 조정해서 파일로만 저장할 사진<br>(예: 구내 부분 사진)</p>`) +
-    `</div>`;
-
   const others = othersOf();
   el("bin-others").innerHTML =
-    `<div class="bin-h">분류 안 됨 <span class="code">OTHERS</span><span class="hr"><span class="cnt">${others.length || ""}</span></span></div>` +
+    `<div class="bin-h">OTHERS<span class="cnt">${others.length || ""}</span></div>` +
     `<div class="bin-body row">` +
       (others.length ? others.map(p => photoCard(p, false, null)).join("")
-                     : `<p class="bin-empty">없음 · 여기 놓인 사진은 저장되지 않습니다</p>`) +
+                     : `<p class="bin-empty">비어 있음</p>`) +
     `</div>`;
-  bindFlips();
 
   const missing = BINS.filter(b => b.key !== "FACE" && !((REVIEW.bins[b.key] || []).length));
-  el("pre-n").textContent = `${STAGED.length}장` + (missing.length ? ` · 빈 자리 ${missing.length}` : "");
+  el("pre-n").textContent = `${STAGED.length}장` + (missing.length ? ` · 빈 슬롯 ${missing.length}` : "");
   el("btn-toproc").disabled = missing.length > 0;
   bindBinDnD();
-  bindLightbox();
-  syncTabs();
-}
-
-/* ── 크게 보기 ────────────────────────────────────────────────────────────────
-   사진 카드를 더블클릭하면 화면 전체로 본다. ← → 로 담은 사진을 차례로 넘기고,
-   + − 와 휠로 확대, 드래그로 이동, F 로 상하반전, Esc 로 닫는다. */
-const LBX = {list: [], i: 0, zoom: 1, dx: 0, dy: 0};
-function lbxPhotoList(){
-  // 자동 분류 화면의 순서대로 — 구내 다섯 자리 → 얼굴 → 추가 작업용 → 분류 안 됨
-  const seen = new Set(), out = [];
-  const push = p => { if(p && !seen.has(p.id)){ seen.add(p.id); out.push(p); } };
-  for(const b of BINS.filter(x => x.key !== "FACE")) for(const p of ((REVIEW && REVIEW.bins && REVIEW.bins[b.key]) || [])) push(p);
-  for(const p of ((REVIEW && REVIEW.bins && REVIEW.bins.FACE) || [])) push(p);
-  for(const pid of extraOf()) push(photoOf(pid));
-  for(const p of STAGED) push(p);
-  return out;
-}
-function lbxWhere(p){
-  for(const b of BINS){
-    const list = (REVIEW && REVIEW.bins && REVIEW.bins[b.key]) || [];
-    const i = list.findIndex(x => x.id === p.id);
-    if(i >= 0) return `${(SLOT_NM[b.key] || [b.label])[0]} · ${b.label}${i > 0 ? ` · 추가 촬영본 ${i}` : ""}`;
-  }
-  if(extraOf().includes(p.id)) return "추가 작업용";
-  return "분류 안 됨";
-}
-function lbxRender(){
-  const p = LBX.list[LBX.i]; if(!p) return;
-  const img = el("lbx-img");
-  img.src = p.thumb;                       // w 없이 = 원본 크기
-  img.style.transform = `translate(${LBX.dx}px, ${LBX.dy}px) scale(${LBX.zoom})${p.flip_v ? " scaleY(-1)" : ""}`;
-  el("lbx-zoom").textContent = Math.round(LBX.zoom * 100) + "%";
-  el("lbx-cap").innerHTML = `<b>${esc(lbxWhere(p))}</b> · <code>${esc(p.name || p.file || "")}</code>` +
-    ` · ${esc(p.label || "—")} ${Math.round((p.confidence || 0) * 100)}% · ${LBX.i + 1} / ${LBX.list.length}`;
-  const fb = el("lbx-flip"); fb.classList.toggle("on", !!p.flip_v);
-}
-function openLightbox(pid){
-  LBX.list = lbxPhotoList();
-  LBX.i = Math.max(0, LBX.list.findIndex(p => p.id === pid));
-  LBX.zoom = 1; LBX.dx = 0; LBX.dy = 0;
-  el("lbx").hidden = false;
-  lbxRender();
-}
-function closeLightbox(){ el("lbx").hidden = true; }
-function lbxStep(d){
-  if(!LBX.list.length) return;
-  LBX.i = (LBX.i + d + LBX.list.length) % LBX.list.length;
-  LBX.zoom = 1; LBX.dx = 0; LBX.dy = 0; lbxRender();
-}
-function lbxZoom(f){ LBX.zoom = Math.min(8, Math.max(.25, LBX.zoom * f)); lbxRender(); }
-function bindLightbox(){
-  for(const f of document.querySelectorAll(".ph-card, .fslot.has"))
-    f.ondblclick = e => { e.preventDefault(); openLightbox(f.dataset.pid || ((REVIEW.face_slots || {})[f.dataset.cell])); };
-}
-{
-  const L = el("lbx");
-  if(L){
-    el("lbx-close").onclick = closeLightbox;
-    el("lbx-prev").onclick = () => lbxStep(-1);
-    el("lbx-next").onclick = () => lbxStep(1);
-    el("lbx-in").onclick = () => lbxZoom(1.25);
-    el("lbx-out").onclick = () => lbxZoom(.8);
-    el("lbx-fit").onclick = () => { LBX.zoom = 1; LBX.dx = 0; LBX.dy = 0; lbxRender(); };
-    el("lbx-flip").onclick = () => { const p = LBX.list[LBX.i]; if(p) flipPhoto(p.id, !p.flip_v).then(() => { LBX.list = lbxPhotoList(); lbxRender(); }); };
-    L.onclick = e => { if(e.target === L || e.target.id === "lbx-stage") closeLightbox(); };
-    L.addEventListener("wheel", e => { e.preventDefault(); lbxZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15); }, {passive: false});
-    let drag = null;
-    el("lbx-img").onpointerdown = e => { drag = {x: e.clientX - LBX.dx, y: e.clientY - LBX.dy}; e.target.setPointerCapture(e.pointerId); };
-    el("lbx-img").onpointermove = e => { if(drag){ LBX.dx = e.clientX - drag.x; LBX.dy = e.clientY - drag.y; lbxRender(); } };
-    el("lbx-img").onpointerup = () => { drag = null; };
-    addEventListener("keydown", e => {
-      if(L.hidden) return;
-      if(e.key === "Escape"){ closeLightbox(); e.preventDefault(); }
-      else if(e.key === "ArrowLeft") lbxStep(-1);
-      else if(e.key === "ArrowRight") lbxStep(1);
-      else if(e.key === "+" || e.key === "=") lbxZoom(1.25);
-      else if(e.key === "-") lbxZoom(.8);
-      else if(e.key === "0"){ LBX.zoom = 1; LBX.dx = 0; LBX.dy = 0; lbxRender(); }
-      else if(e.key === "f" || e.key === "F") el("lbx-flip").click();
-      else return;
-      e.stopPropagation();
-    }, true);
-  }
 }
 
 /* 떨어뜨린 위치가 순서를 정한다 — 위쪽에 놓으면 대표가 된다.
@@ -1254,14 +1043,7 @@ function bindBinDnD(){
     bin.ondrop = e => {
       e.preventDefault(); bin.classList.remove("over");
       const pid = e.dataTransfer.getData("pid");
-      if(!pid) return;
-      // 얼굴 자리에 바로 놓으면 그 자리로 — FACE 상자에 넣은 뒤 자리를 배정한다
-      const cell = e.target.closest && e.target.closest(".fslot");
-      if(cell && bin.dataset.slot === "FACE"){
-        assign(pid, "FACE", null).then(() => assignFace(cell.dataset.cell, pid)).then(() => drawBins());
-        return;
-      }
-      assign(pid, bin.dataset.slot || null, dropIndex(bin, e));
+      if(pid) assign(pid, bin.dataset.slot || null, dropIndex(bin, e));
     };
   }
 }
@@ -1381,42 +1163,9 @@ function onSessionExpired(){
   if(!SESSION) return;              // 이미 정리됨 — 알림을 두 번 띄우지 않는다
   resetSession();
   showView("setup");
-  banner("warn", `<b>장시간 사용하지 않아 세션이 종료되었습니다</b>
-     <span class="grow">올렸던 사진은 저장되지 않았습니다. 환자를 다시 골라 시작해 주세요.</span>
-     <button class="btn" onclick="this.closest('.banner').hidden=true">닫기</button>`);
+  alert("장시간 사용하지 않아 세션이 종료되었습니다.\n\n" +
+        "업로드했던 사진은 저장되지 않았습니다. 환자를 다시 선택해 시작해 주세요.");
 }
-
-/* ── 앱 안 확인 창 ──────────────────────────────────────────────────────────
-   브라우저의 confirm/alert/prompt 는 테마도 스타일도 없고, 크롬은 몇 번 반복되면
-   "이 페이지의 추가 대화상자 차단" 을 띄워 그 뒤의 확인을 전부 자동 취소한다 —
-   되돌릴 수 없는 결정을 묻는 자리에 쓸 수 없다. 하나의 <dialog> 로 셋을 대신한다.
-   함수 선언 — 위쪽 핸들러가 먼저 참조한다. */
-function uiAsk(kind, msg, opt){
-  opt = opt || {};
-  const d = el("dlg-ask"); if(!d) return Promise.resolve(kind === "confirm" ? confirm(msg) : kind === "prompt" ? prompt(msg, opt.value) : (alert(msg), undefined));
-  const lines = String(msg).split("\n");
-  el("ask-title").textContent = opt.title || lines[0];
-  el("ask-body").innerHTML = lines.slice(opt.title ? 0 : 1).filter(Boolean).map(l => `<p>${esc(l)}</p>`).join("");
-  const inp = el("ask-input"); inp.hidden = kind !== "prompt"; inp.value = opt.value || "";
-  const ok = el("ask-ok"), cancel = el("ask-cancel");
-  ok.textContent = opt.ok || (kind === "alert" ? "확인" : "계속");
-  ok.classList.toggle("danger", !!opt.danger);
-  ok.classList.toggle("primary", !opt.danger);
-  cancel.hidden = kind === "alert";
-  cancel.textContent = opt.cancel || "취소";
-  return new Promise(resolve => {
-    const done = v => { d.close(); resolve(v); };
-    ok.onclick = () => done(kind === "prompt" ? inp.value : true);
-    cancel.onclick = () => done(kind === "prompt" ? null : false);
-    d.oncancel = e => { e.preventDefault(); done(kind === "prompt" ? null : kind !== "alert" ? false : undefined); };
-    inp.onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); done(inp.value); } };
-    d.showModal();
-    if(kind === "prompt") inp.focus(); else ok.focus();
-  });
-}
-const uiConfirm = (msg, opt) => uiAsk("confirm", msg, opt);
-const uiAlert   = (msg, opt) => uiAsk("alert", msg, opt);
-const uiPrompt  = (msg, value) => uiAsk("prompt", msg, {value});
 /* 함수 선언으로 둔다 — 최상위 핸들러 등록이 이 줄보다 위에서도 el()을 쓴다.
    const 화살표면 TDZ 때문에 스크립트 전체가 멈춘다. */
 function el(id){ return document.getElementById(id); }
@@ -1472,7 +1221,7 @@ async function drawRootPicker(path, host, onPick, labels){
   }
 
   el("pk-new").onclick = async () => {
-    const name = (await uiPrompt("새 폴더 이름") || "").trim();
+    const name = (prompt("새 폴더 이름") || "").trim();
     if(!name) return;
     try{
       const res = await api("/api/fs/mkdir", {method:"POST",
@@ -1534,17 +1283,6 @@ function setRootLabel(path){
 }
 
 /* ── 설정 창 ─────────────────────────────────────────────────────────────── */
-/* 설정 창의 왼쪽 목차 — 한 페이지씩 보인다. 항목의 id 는 예전 그대로다. */
-function showSetPage(name){
-  for(const b of document.querySelectorAll("#setnav button"))
-    b.classList.toggle("on", b.dataset.page === name);
-  for(const p of document.querySelectorAll("#dlg-set .setpage"))
-    p.classList.toggle("on", p.dataset.page === name);
-  const box = document.querySelector("#dlg-set .setpages"); if(box) box.scrollTop = 0;
-}
-for(const b of document.querySelectorAll("#setnav button"))
-  b.onclick = () => showSetPage(b.dataset.page);
-
 function openSettings(){
   syncThemeSeg();
   fastSyncPrefs();     // Fastest Lap 항목 — 창을 열 때마다 서버 값으로 맞춘다
@@ -1574,21 +1312,21 @@ async function loadMaint(){
 el("btn-shortcut").onclick = async () => {
   const r = await api("/api/shortcut", {method:"POST"})
     .catch(e => ({ok: false, detail: e.message}));
-  uiAlert(r.ok ? `바로가기를 만들었습니다\n${r.desktop}\\CRoCs.lnk`
-               : (r.detail || "만들지 못했습니다"));
+  alert(r.ok ? `바로가기를 만들었습니다: ${r.desktop}\\CRoCs.lnk`
+             : (r.detail || "만들지 못했습니다"));
 };
 
 el("btn-rollback").onclick = async () => {
-  if(!await uiConfirm("직전 버전으로 되돌립니다\n업데이트가 깨졌을 때 쓰는 길입니다. 되돌린 뒤 다시 시작합니다.", {ok: "되돌리기", danger: true})) return;
+  if(!confirm("직전 버전으로 되돌립니다. 계속할까요?")) return;
   const r = await api("/api/update/rollback", {method:"POST"}).catch(() => null);
-  if(!r || !r.ok){ uiAlert((r && r.detail) || "되돌리지 못했습니다"); return; }
-  if(await uiConfirm(`${r.to} 로 되돌렸습니다\n지금 다시 시작할까요?`, {ok: "다시 시작"}))
+  if(!r || !r.ok){ alert((r && r.detail) || "되돌리지 못했습니다"); return; }
+  if(confirm(`${r.to} 로 되돌렸습니다. 지금 다시 시작할까요?`))
     await api("/api/update/restart", {method:"POST"}).catch(() => {});
 };
 
 el("btn-uninstall").onclick = async () => {
   const v = await api("/api/uninstall/inventory").catch(() => null);
-  if(!v){ uiAlert("정보를 읽지 못했습니다"); return; }
+  if(!v){ alert("정보를 읽지 못했습니다"); return; }
   el("uninst-inv").innerHTML =
     `지워짐 — 프로그램 <b>${v.program_dir}</b> (${MB(v.program_bytes)}, 모델 ${MB(v.weights_bytes)} 포함)<br>` +
     `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;바탕화면 바로가기<br>` +
@@ -1617,15 +1355,15 @@ el("btn-uninstall-go").onclick = async () => {
   const names = [...document.querySelectorAll(".uninst-tool:checked")]
                   .map(x => x.parentElement.textContent.split(" 도 제거")[0].trim());
   const body = {drop_tools: tools};
-  if(!await uiConfirm("프로그램을 지웁니다\n환자 자료는 남습니다." +
+  if(!confirm("프로그램을 지웁니다. 환자 자료는 남습니다." +
               (tools.length ? `\n${names.join(" · ")} 도 제거합니다 — 다른 프로그램이 ` +
                               "쓰고 있다면 그쪽이 동작하지 않게 됩니다." : "") +
-              "\n이 작업은 되돌릴 수 없습니다.", {ok: "프로그램 삭제", danger: true})) return;
+              "\n\n계속할까요?")) return;
   const r = await api("/api/uninstall/prepare",
                       {method:"POST", headers:{"Content-Type":"application/json"},
                        body: JSON.stringify(body)}).catch(() => null);
-  if(!r || !r.ok){ uiAlert((r && r.detail) || "실패했습니다"); return; }
-  await uiAlert(r.detail + "\n앱이 곧 종료됩니다.");
+  if(!r || !r.ok){ alert((r && r.detail) || "실패했습니다"); return; }
+  alert(r.detail + "\n\n앱이 곧 종료됩니다.");
 };
 /* 개인화 — 결과물 표기·저장 구성이라 설치본 공용(settings.json)이다. */
 const setPref = body =>
@@ -1683,7 +1421,7 @@ for(const b of el("set-label").children) b.onclick = async () => {
 /* 직전 차수 슬라이드의 도형을 새 슬라이드로 가져올지 — 확정할 때 적용된다 */
 for(const b of el("set-shapes").children) b.onclick = async () => {
   if(b.dataset.c === "all" &&
-     !await uiConfirm("직전 차수 슬라이드의 도형을 전부 가져옵니다\n선·화살표·텍스트 박스를 글 내용까지 " +
+     !confirm("직전 차수 슬라이드의 선·화살표·텍스트 박스를 글 내용까지 " +
               "그대로 가져옵니다.\n\n지난 차수 내용을 이어서 고쳐 쓰는 방식이라, " +
               "그 차수에만 해당하는 주석도 따라옵니다. 확정 전에 검수 화면에서 " +
               "확인해 주세요.")) return;
@@ -1703,7 +1441,7 @@ for(const b of el("set-photodir").children) b.onclick = async () => {
    지워진다). 되돌릴 수 없는 선택이라 켤 때가 아니라 **끌 때** 한 번 확인한다. */
 for(const b of el("set-rawdir").children) b.onclick = async () => {
   if(b.dataset.d === "none" &&
-     !await uiConfirm("원본을 저장하지 않습니다\n" +
+     !confirm("원본을 저장하지 않습니다.\n\n" +
               "앞으로 배정되는 사진은 잘린 상태로만 남고, 잘라낸 영역은 " +
               "되돌릴 수 없습니다. 계속할까요?")) return;
   await setPref({raw_dir: b.dataset.d});
@@ -1719,10 +1457,11 @@ function syncThemeSeg(){
 /* 저장 위치가 바뀌면 열려 있던 세션은 옛 경로를 가리킨다 — 서버도 함께 버린다 */
 function resetSession(){
   SESSION = null;
+  el("pchip").hidden = true; el("pchip").innerHTML = "";
   STAGED = []; REVIEW = null; ED.slot = null;
   boardEl.innerHTML = ""; segEl.innerHTML = "";
   setStep("setup", "", "");
-  ["pre","proc","fin"].forEach(v => setStep(v, "", ""));
+  ["pre","proc","fin"].forEach(v => setStep(v, "", "대기"));
   picked = null;
   FINDIRS = null;           // 확정 저장만 예외 — 거기서 다시 채워 넣는다
   syncFinButtons();
@@ -1751,8 +1490,6 @@ async function openPatient(folder){
     }catch(e){ /* 못 읽어도 환자는 연다 — 차수 칸만 빈 채로 */ }
   }
   picked = PATIENTS[i];
-  const row = el("plist").querySelector(`.prow[data-folder="${CSS.escape(folder)}"]`);
-  if(row) row.innerHTML = rowHtml(picked);
   drawList();
   drawDetail();
   syncFinDirButtons();      // 환자 폴더는 계획 없이도 열 수 있다
@@ -1792,7 +1529,7 @@ function sortRows(rows){
 
 function drawList(){
   const terms = el("find").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = p => `${p.folder} ${p.name || ""} ${p.ortho_id || ""} ${p.hospital_id || ""}`.toLowerCase();
+  const hay = p => p.folder.toLowerCase();
   const rows = sortRows(PATIENTS.filter(p => terms.every(t => hay(p).includes(t))));
   const box = el("plist"); box.innerHTML = "";
   if(!rows.length){
@@ -1803,15 +1540,16 @@ function drawList(){
     const b = document.createElement("button");
     b.className = "prow";
     b.setAttribute("aria-pressed", picked?.folder === p.folder);
-    b.dataset.folder = p.folder;
-    b.innerHTML = rowHtml(p);
-    b.onclick = async () => {
+    b.innerHTML =
+      `<span class="f_name">${esc(p.folder)}</span>` +
+      `<span class="hist">${visitLine(p)}</span>`;
+    b.onclick = () => {
       if(STAGED.length && picked && picked.folder !== p.folder &&
-         !await uiConfirm(`담아둔 사진 ${STAGED.length}장이 사라집니다\n다른 환자로 넘어갈까요?`, {ok: "넘어가기", danger: true})) return;
+         !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다. 다른 환자로 넘어갈까요?`)) return;
       if(picked && picked.folder !== p.folder) resetSession();
       // 읽는 데 한 박자 걸릴 수 있다(공유 폴더면 더). 누른 줄에서 바로 알린다.
       if(p.pending) b.querySelector(".hist").innerHTML =
-        `<span class="none">읽는 중…</span>`;
+        `<span class="none">차수 읽는 중…</span>`;
       openPatient(p.folder);
     };
     box.appendChild(b);
@@ -1833,28 +1571,16 @@ function drawList(){
 /* 차수 이력 한 줄: 첫 차수와 마지막 차수만, 각자의 날짜와 함께.
    그 사이는 …으로 접는다 — 목록에서 알아야 할 건 "언제 시작해서 언제까지"다. */
 function visitLine(p){
-  // 아직 덱을 열지 않은 줄은 **아무 말도 하지 않는다** — "기록 없음" 은 확인된
-  // 사실이고 아직 안 본 것과 섞이면 안 된다. 읽히면 그 자리에 이력이 생긴다.
-  if(p.pending) return "";
+  // 아직 덱을 열지 않은 줄. "기록 없음"과 섞이면 안 된다 — 하나는 확인된 사실이고
+  // 다른 하나는 아직 안 본 것이다.
+  if(p.pending)
+    return `<span class="none" title="환자를 누르면 PPT에서 차수를 읽습니다">차수 …</span>`;
   const v = p.visits, dt = p.visit_dates || {};
-  const warn = (v.length && !p.ppt) ? ` <span class="wn">· PPT 없음</span>` : "";
-  const d = L => (dt[L] || "—").replace(/^20/, "");
-  if(!v.length) return `<span class="none">기록 없음 · 초진</span>` + warn;
-  const one = L => `<b>${L}</b> ${d(L)}`;
-  if(v.length === 1) return one(v[0]) + " · 1회" + warn;
-  return `${one(v[0])}<span class="ar">→</span>${one(v[v.length - 1])} · ${v.length}회` + warn;
-}
-/* 다음 차수 칩 — 읽은 뒤에만. 초진(A)은 회색으로 구분한다. */
-function nextChip(p){
-  if(p.pending || !p.next_visit) return "";
-  const first = !(p.visits || []).length;
-  return `<span class="nx${first ? " first" : ""}">${p.next_visit}<small>${first ? "초진" : "다음"}</small></span>`;
-}
-function rowHtml(p){
-  const nm = p.name ? `${esc(p.name)}<span>${esc(p.ortho_id || "")}</span>` : esc(p.folder);
-  return `<span class="nm">${nm}</span>${nextChip(p)}` +
-    `<span class="hist">${visitLine(p)}</span>` +
-    (p.name ? `<span class="fd" title="폴더 이름">${esc(p.folder)}</span>` : "");
+  const warn = (v.length && !p.ppt) ? ` <span class="flag">⚠ PPT 없음</span>` : "";
+  if(!v.length) return `<span class="none">기록 없음</span>` + warn;
+  const one = L => `<b>${L}</b> ${dt[L] || "—"}`;
+  if(v.length === 1) return one(v[0]) + warn;
+  return `${one(v[0])}<span class="mid"> … </span>${one(v[v.length - 1])}` + warn;
 }
 
 function drawDetail(){
@@ -1869,47 +1595,30 @@ function drawDetail(){
   const n = RULES.slots || 5;
   const first = shotName(p.ortho_id, V, 1), last = shotName(p.ortho_id, V, n);
   const lost = (p.visits.length || (p.ppt_diag || []).length) && !p.ppt;
-  const prev = p.visits.length ? p.visits[p.visits.length - 1] : "";
-  const ex = p.label_excluded || [];
-  const warn = ex.length ? `십자뷰 없는 라벨 슬라이드 ${ex.length}장(${ex.map(x => x.slide_no).join(", ")})은 차수에서 뺐습니다`
-             : p.label_fallback ? "십자뷰를 인식하지 못해 라벨 글자만으로 차수를 세었습니다 — 차수와 위치를 확인해 주세요" : "";
-  const planL1 = FAST ? `${V} · 사진만 저장 · PPT는 만들지도 고치지도 않습니다`
-    : p.ppt ? "재진 · 기존 PPT에 슬라이드 1장 추가"
-    : p.visits.length ? "PPT를 새로 만들어 기록 · 정합 기준 없음"
-    : "초진 · PPT를 새로 만듭니다";
-  const planL2 = FAST ? `사진 <code>${esc(first)}</code> … <code>${esc(last)}</code> · 기준 사진을 넣으면 그 사진에 정합합니다`
-    : p.ppt ? `<code>${esc(p.ppt)}</code>${p.suggest_after ? ` · ${p.suggest_after}번 슬라이드 뒤` : ""}${prev ? ` · 기준 직전 차수 ${prev}` : ""} · 사진 <code>${esc(first)}</code> … <code>${esc(last)}</code>`
-    : p.visits.length ? `사진 폴더 ${p.visits.join(" · ")}는 있지만 PPT가 없어 ${V}부터 새 덱에 기록합니다 · 사진 <code>${esc(first)}</code> … <code>${esc(last)}</code>`
-    : `케이스 양식으로 새 PPT 생성 · 사진 <code>${esc(first)}</code> … <code>${esc(last)}</code>`;
 
   d.innerHTML =
-    `<div class="sec hero">
-       <div class="idline">
-         <span class="who">${esc(p.name)}</span>
-         <span class="no">${[p.hospital_id, p.ortho_id].filter(Boolean).join(" · ")}</span>
-         <span class="f_name" title="환자 폴더 이름">${esc(p.folder)}</span>
-         <span class="rt">
-           <button class="btn sm ghost" type="button" id="btn-open-here" title="탐색기에서 환자 폴더를 엽니다">${ICON.folder}폴더 열기</button>
-         </span>
-       </div>
-       <div class="rec">
-         <div class="rech"><b>내원</b><span class="cnt">${p.visits.length ? p.visits.length + "회" : "없음"}</span>
-           ${FAST ? "" : `<span class="lbl">PPT 선택</span><span class="deck" id="deck-pick"><span class="deckname">${p.ppt ? esc(p.ppt) : "없음"}</span></span>`}
-           ${warn ? `<span class="wn">${ICON.warn}${warn}</span>` : ""}
+    `<div class="sec idsec">
+       <div class="idmain">
+         <div class="idline">
+           <span class="who">${esc(p.name)}</span>
+           <span class="no">${[p.hospital_id, p.ortho_id].filter(Boolean).join(" · ")}</span>
+           <span class="f_name" title="환자 폴더 이름">${esc(p.folder)}</span>
          </div>
-         ${p.visits.length ? `<div class="recb"><div class="track" id="track"></div>` : `<div class="recb"><p class="tl-none">${p.ppt ? "덱에서 차수를 읽지 못했습니다" : "기록 없음 · 초진"}</p>`}
-           <div class="pvs${p.ppt ? "" : " none"}" id="pv-slides">
-             <div class="pv face" title="얼굴 슬라이드"${p.ppt ? " hidden" : ""}>${p.ppt ? "" : `<span class="pvph">얼굴 슬라이드<small>초진 저장 뒤 여기에 보입니다</small></span>`}</div>
-             <div class="pv" title="십자뷰 슬라이드"${p.ppt ? " hidden" : ""}>${p.ppt ? `<div class="pvgrid"></div>` : `<span class="pvph">십자뷰 슬라이드<small>초진 저장 뒤 여기에 보입니다</small></span>`}</div>
-           </div>
+         ${timeline(p)}
+         <div class="plan">
+         <span class="vbig">${V}</span>${FAST
+             ? "사진만 저장 — PPT는 만들지도 고치지도 않습니다"
+             : p.ppt ? "재진 — 기존 PPT에 슬라이드 1장 추가"
+             : p.visits.length ? "PPT를 새로 만들어 기록" : "초진 — PPT를 새로 만듭니다"}<br>
+         사진 <span class="ident">${esc(first)}</span><span class="mid"> … </span><span class="ident">${esc(last)}</span>
          </div>
+         ${lost ? pptLostNote(p) : ""}
        </div>
-       <div class="plan${FAST ? " fast" : !p.ppt && p.visits.length ? " warn" : ""}">
-         <span class="l1">${planL1}</span>
-         ${FAST ? `<span class="l2">${planL2}</span>` : ""}
-         ${visitConfirm(p, V)}
-       </div>
-       ${lost ? pptLostNote(p) : ""}
+       ${!FAST && p.ppt ? `<div class="slides" id="pv-slides">
+         <div class="pv face" title="Face" hidden></div>
+         <div class="pv" title="Intraoral" hidden><div class="pvgrid"></div></div>
+       </div>` : ""}
+       ${visitConfirm(p, V)}
      </div>
 
      ${FAST ? fastZonesHtml() : `
@@ -1918,28 +1627,26 @@ function drawDetail(){
          <button class="btn danger" type="button" id="btn-clear" hidden
                  title="담아둔 사진을 통째로 비웁니다 — 고른 환자와 차수는 그대로 둡니다">모두 지우기</button>
          <span id="staged-n"></span></span></h3>
-       <div class="dzrow">
-         <div class="dropzone" id="dz">
-           <div class="dz-empty" id="dz-empty">
-             <svg class="dz-mark" viewBox="0 0 34 34" aria-hidden="true">
-               <rect x="12.4" y="0"    width="9.2" height="9.2" rx="2"/>
-               <rect x="0"    y="12.4" width="9.2" height="9.2" rx="2"/>
-               <rect x="12.4" y="12.4" width="9.2" height="9.2" rx="2"/>
-               <rect x="24.8" y="12.4" width="9.2" height="9.2" rx="2"/>
-               <rect x="12.4" y="24.8" width="9.2" height="9.2" rx="2"/>
-             </svg>
-             <p class="dz-main">사진을 여기에 놓으세요</p>
-             <p class="dz-sub">드래그<i>·</i>Ctrl+V<i>·</i><button id="btn-pick">찾아보기</button></p>
-           </div>
-           <div class="thumbs" id="thumbs"></div>
-           <input type="file" id="file-input" multiple accept="image/*" hidden>
+       <div class="dropzone" id="dz">
+         <div class="dz-empty" id="dz-empty">
+           <svg class="dz-mark" viewBox="0 0 34 34" aria-hidden="true">
+             <rect x="12.4" y="0"    width="9.2" height="9.2" rx="2"/>
+             <rect x="0"    y="12.4" width="9.2" height="9.2" rx="2"/>
+             <rect x="12.4" y="12.4" width="9.2" height="9.2" rx="2"/>
+             <rect x="24.8" y="12.4" width="9.2" height="9.2" rx="2"/>
+             <rect x="12.4" y="24.8" width="9.2" height="9.2" rx="2"/>
+           </svg>
+           <p class="dz-main">사진을 여기에 놓으세요</p>
+           <p class="dz-sub">DRAG<i>·</i>CTRL+V<i>·</i><button id="btn-pick">BROWSE</button></p>
          </div>
-         <button class="btn primary lg" id="btn-go" disabled>자동 분류 시작 →</button>
+         <div class="thumbs" id="thumbs"></div>
+         <input type="file" id="file-input" multiple accept="image/*" hidden>
        </div>
+       <button class="btn primary wide" id="btn-go" disabled>자동 분류로 ▶</button>
      </div>`}
 
      <div class="sec sec-folder">
-       <h3>폴더 내용</h3>
+       <h3>폴더 내용 <span class="aux ident">${esc(p.folder)}</span></h3>
        <div class="flist" id="flist"><p class="empty">읽는 중…</p></div>
      </div>`;
 
@@ -1948,87 +1655,39 @@ function drawDetail(){
   bindVisitConfirm(p);
   bindOrthoFix(p);
   drawStaged();
-  drawTrack(p, V);
-  const hb = el("btn-hist"); if(hb) hb.onclick = openHist;
-  const ob = el("btn-open-here"); if(ob) ob.onclick = () => openPatientDir(p.folder);
-}
-
-/* S자 타임라인 — 같은 폭의 칸이 왼쪽에서 오른쪽으로 흐르다 줄 끝에서 반원으로
-   돌아 내려와 반대로 이어진다. 오늘 차수가 굵은 점. 칸 수는 폭에서 정한다. */
-function drawTrack(p, V){
-  const box = el("track"); if(!box) return;
-  const dt = p.visit_dates || {}, sl = {};
-  for(const v of (p.visit_slides || [])) (sl[v.visit] = sl[v.visit] || []).push(v.slide_no);
-  const items = p.visits.map(L => ({L, d: (dt[L] || "—").replace(/^20/, ""), s: sl[L], cur: false}));
-  items.push({L: V, d: "오늘", cur: true});
-  // clientWidth 는 좌우 padding(32+32)을 포함한다 — 칸 수는 안쪽 폭으로 센다.
-  // 반원(28px)은 마지막 점 밖으로 나가지만 그 padding 안에 든다.
-  const w = Math.max(160, (box.clientWidth || box.parentElement.clientWidth || 600) - 64);
-  let colw = 58, per = Math.max(3, Math.floor(w / colw)), rows = Math.ceil(items.length / per);
-  if(rows > 3){ colw = 44; per = Math.max(3, Math.floor(w / colw)); rows = Math.ceil(items.length / per); box.classList.add("compact"); }
-  else box.classList.remove("compact");
-  per = Math.ceil(items.length / rows);        // 줄마다 고르게 — 마지막 줄에 하나만 남지 않게
-  box.innerHTML = "";
-  for(let r = 0; r < rows; r++){
-    const row = document.createElement("div"); row.className = "trow" + (r % 2 ? " rev" : "");
-    row.style.width = (per * colw) + "px";
-    const chunk = items.slice(r * per, (r + 1) * per);
-    chunk.forEach((it, i) => {
-      const dot = document.createElement("span");
-      const first = i === 0, last = i === chunk.length - 1;
-      dot.className = "dt" + (it.cur ? " nx" : "") +
-        (r % 2 === 0 ? (first ? " lend" : "") + (last ? " rend" : "") : (first ? " rend" : "") + (last ? " lend" : "")) +
-        (last && r < rows - 1 ? " turn" : "") + (first && r > 0 ? " tstart" : "");
-      dot.innerHTML = `<b>${esc(it.L)}</b><i></i><small>${esc(it.d)}</small>`;
-      if(it.s) dot.title = `${it.L} · ${dt[it.L] || ""} · 슬라이드 ${it.s.join(", ")}`;
-      row.appendChild(dot);
-    });
-    box.appendChild(row);
-  }
-}
-addEventListener("resize", () => { if(picked && el("track")) drawTrack(picked, picked.next_visit); });
-
-/* 이어붙일 덱 고르기 — 폴더 내용을 읽은 뒤 채운다. 덱이 하나면 이름만, 둘 이상이면
-   고를 수 있다. 사진을 담은 뒤에는 잠근다(세션이 그 덱 위에서 계산된 값이라). */
-function drawDeckPick(d){
-  const host = el("deck-pick"); if(!host || !d) return;
-  const decks = d.items.filter(i => i.kind === "ppt");
-  const locked = STAGED.length > 0;
-  if(decks.length <= 1){
-    host.innerHTML = `${ICON.deck}<span class="deckname">${decks.length ? esc(decks[0].name) : "없음 · 확정할 때 새로 만듭니다"}</span>`;
-    host.classList.toggle("none", !decks.length);
-    return;
-  }
-  host.classList.remove("none");
-  host.innerHTML = `${ICON.deck}<select id="deck-sel" ${locked ? "disabled" : ""} title="${locked ? "사진을 담은 뒤에는 바꿀 수 없습니다" : "이어붙일 PPT"}">` +
-    (d.ppt ? "" : `<option value="" selected>고르지 않음 · 새로 만듦</option>`) +
-    decks.map(x => `<option value="${esc(x.name)}"${x.selected ? " selected" : ""}>${esc(x.name)}</option>`).join("") +
-    `</select><span class="cnt">${decks.length}개 중</span>` +
-    (locked ? `<span class="lk">사진을 담은 뒤에는 바꿀 수 없습니다</span>` : "");
-  const sel = el("deck-sel");
-  if(sel) sel.onchange = () => { if(sel.value) pickPpt(picked.folder, sel.value); };
-}
-
-async function openPatientDir(folder){
-  try{ await api("/api/open-dir", {method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({folder, sub: ""})}); }
-  catch(e){ uiAlert(e.message || "폴더를 열지 못했습니다"); }
 }
 
 /* ── 차수 확인 줄 — 자동분류 전에 사람이 한 번 보는 곳 ─────────────────────
    값이 맞으면 그냥 진행(클릭 추가 없음), 고치면 그 값으로 세션이 열린다.
    서버가 확정 때 한 번 더 검증한다. */
 function visitConfirm(p, V){
-  return `<span class="ed">
-    <label>이번 차수 <input id="v-letter" class="in" maxlength="2" value="${V}" autocomplete="off"></label>
-    ${!FAST && p.ppt && p.suggest_after ? `<label>새 슬라이드는
-      <input id="v-pos" class="in" type="number" min="0" max="${p.ppt_slides || 999}"
-             value="${p.suggest_after}">번 뒤</label>
-      <span class="vc-aux">(전체 ${p.ppt_slides || "?"}장)</span>` : ""}
+  // 같은 차수가 여러 장일 수 있다 — 글이 많아 슬라이드를 복제해 쓰는 관행.
+  // 한 줄로 묶고 슬라이드 번호만 모아 적는다 (차수가 두 번 보이면 버그로 읽힌다).
+  const by = new Map();
+  for(const v of (p.visit_slides || [])){
+    const cur = by.get(v.visit);
+    if(cur) cur.slides.push(v.slide_no);
+    else by.set(v.visit, {date: v.date, slides: [v.slide_no]});
+  }
+  const known = [...by].map(([L, v]) =>
+    `<b>${L}</b> ${v.date || "—"} <i>s${v.slides.join(",")}</i>`).join(" · ");
+  const ex = p.label_excluded || [];
+  return `<div class="vconfirm">
+    <div class="vc-known">인식된 차수&nbsp; ${known || "없음"}</div>
+    ${ex.length ? `<div class="vc-warn">⚠ 십자뷰 없는 라벨 슬라이드 ${ex.length}장` +
+      `(슬라이드 ${ex.map(x => x.slide_no).join(", ")}) — 차수에서 제외했습니다</div>` : ""}
+    ${p.label_fallback ? `<div class="vc-warn">⚠ 십자뷰를 인식하지 못해 라벨만으로 차수를 세었습니다</div>` : ""}
     ${visitWordPick(p, V)}
+    <label>이번 차수 <input id="v-letter" maxlength="2" value="${V}" autocomplete="off"></label>
+    ${!FAST && p.ppt && p.suggest_after ? `<label>새 슬라이드는
+      <input id="v-pos" type="number" min="0" max="${p.ppt_slides || 999}"
+             value="${p.suggest_after}">번 뒤에
+      <span class="vc-aux">(전체 ${p.ppt_slides || "?"}장)</span></label>` : ""}
     <span class="vc-err" id="vc-err"></span>
-  </span>
-  ${p.ppt ? `<span class="pw">${ICON.warn}PowerPoint에서 이 PPT를 닫아 주세요</span>` : ""}`;
+    ${p.ppt ? `<div class="vc-note">이 환자 PPT가 <b>PowerPoint에서 열려 있으면</b>
+      ${FAST ? "차수와 레이아웃을 읽지 못할 수 있습니다 — 이 진행은 PPT 를 고치지 않습니다"
+             : "읽고 저장하지 못합니다 — 진행 전에 닫아 주세요"}</div>` : ""}
+  </div>`;
 }
 
 function bindVisitConfirm(p){
@@ -2039,7 +1698,6 @@ function bindVisitConfirm(p){
     const msg = !/^[A-Z]{1,2}$/.test(v) ? "차수는 영문 대문자 1~2글자입니다"
               : (p.visits || []).includes(v) ? `${v} 는 이미 있는 차수입니다` : "";
     el("vc-err").textContent = msg;
-    L.classList.toggle("err", !!msg);
   };
   L.oninput = check;
   check();
@@ -2134,7 +1792,7 @@ function orthoFixNote(p, diag){
 /* 폴더 이름 고치기 — 고친 뒤 그 이름으로 다시 읽는다. 탐색기에서 하면 창을
    오가야 하고, 사본이 생기면 어느 쪽을 고쳤는지 잃는다. */
 async function renameFolder(folder, suggest){
-  const name = (await uiPrompt("새 폴더 이름", suggest) || "").trim();
+  const name = (prompt("새 폴더 이름", suggest) || "").trim();
   if(!name || name === folder) return;
   try{
     const r = await api("/api/folder/rename", {method:"POST",
@@ -2142,7 +1800,7 @@ async function renameFolder(folder, suggest){
       body: JSON.stringify({folder, name})});
     await loadPatients();
     await openPatient(r.folder);
-  }catch(e){ uiAlert(e.message || "이름을 바꾸지 못했습니다"); }
+  }catch(e){ alert(e.message || "이름을 바꾸지 못했습니다"); }
 }
 
 /* 상세 카드 안에서만 찾는다 — 함수 선언으로 둔다(`el` 과 같은 이유: 최상위
@@ -2215,25 +1873,16 @@ const shotName = (ortho, visit, i) => (RULES.photo_pattern || "{ortho_id}_{visit
    차수 십자 5장 + 얼굴 2장을 복원해 준다. PPT를 읽지 못하면 미리보기는 없다 —
    폴더의 사진 파일을 직접 읽는 일은 하지 않는다. */
 async function fillSlidePreviews(folder){
-  // 내원 카드의 오른쪽 절반은 얼굴 · 십자뷰 미리보기다. 덱이 없으면(초진) 그린
-  // 쪽에서 자리 표시 타일을 먼저 두었고, 덱이 있으면 여기서 채운다. Fastest Lap 도
-  // 같은 카드를 쓰므로 같이 받는다 — 요청은 비동기라 진행을 막지 않고, 서버는
-  // 덱 mtime 캐시로 한 번만 연다.
-  const box = el("pv-slides"); if(!box || box.classList.contains("none")) return;
-  let d = null;
-  try{ d = await api("/api/ppt_preview?folder=" + encodeURIComponent(folder)); }
-  catch(e){ d = null; }
-  if(el("pv-slides") !== box) return;          // 그 사이 다른 환자를 골랐다
-  if(!(d && pvRender(box, d))) pvNone(box);
-}
-
-/* 덱은 있는데 보여줄 것이 없다 — 잠겨 있거나, 십자뷰 · 얼굴 슬라이드가 없는 덱.
-   빈 칸으로 두면 "왜 안 나오지?" 만 남으니 자리 표시 타일로 말한다. */
-function pvNone(box){
-  box.classList.add("none");
-  const fb = box.querySelector(".pv.face"), cb = box.querySelector(".pv:not(.face)");
-  if(fb && fb.hidden){ fb.innerHTML = `<span class="pvph">얼굴 슬라이드<small>덱에서 찾지 못했습니다</small></span>`; fb.hidden = false; }
-  if(cb && cb.hidden){ cb.innerHTML = `<span class="pvph">십자뷰 슬라이드<small>덱에서 찾지 못했습니다</small></span>`; cb.hidden = false; }
+  // Fastest Lap 은 이 요청을 보내지 않는다. `/api/ppt_preview` 는 **덱을 열어**
+  // 사진 일곱 장을 복원하는데, 이 모드가 덜어내려는 것이 바로 그 시간이다.
+  // 게다가 여기서 되살린 그림은 이 모드에서 아무 데도 쓰이지 않는다 — 정합
+  // 기준은 사람이 떨어뜨린 사진에서 온다.
+  if(FAST) return;
+  const box = el("pv-slides"); if(!box) return;
+  try{
+    const d = await api("/api/ppt_preview?folder=" + encodeURIComponent(folder));
+    pvRender(box, d);
+  }catch(e){ /* PPT 를 못 읽으면 미리보기 생략 */ }
 }
 
 function pvRender(box, d){
@@ -2264,7 +1913,7 @@ async function loadFolder(folder){
   try{
     const d = await api("/api/folder?folder=" + encodeURIComponent(folder));
     FOLDER = d;
-    drawDeckPick(d);
+    const hb = el("btn-hist"); if(hb) hb.onclick = openHist;
     fillSlidePreviews(folder);
     if(!d.items.length){ box.innerHTML = `<p class="empty">폴더가 비어 있습니다</p>`; return; }
     // 구형 .ppt 는 그 줄에만 표시한다 — 무엇을 해야 하는지는 위 안내가 말한다
@@ -2299,8 +1948,8 @@ async function loadFolder(folder){
    차수 이력·정합 기준이 모두 이 파일에서 나오므로 목록과 상세를 다시 그린다. */
 async function pickPpt(folder, name){
   if(STAGED.length){
-    uiAlert("사진을 담은 뒤에는 PPT 를 바꿀 수 없습니다\n" +
-            "담아둔 사진을 비우거나 확정한 뒤에 골라 주세요.");
+    alert("사진을 담은 뒤에는 PPT 를 바꿀 수 없습니다.\n" +
+          "담아둔 사진을 비우거나 확정한 뒤에 골라 주세요.");
     return;
   }
   try{
@@ -2309,7 +1958,7 @@ async function pickPpt(folder, name){
       body: JSON.stringify({folder, ppt: name})});
     await loadPatients();
     await openPatient(folder);            // 다른 덱이니 차수도 그 덱 것으로
-  }catch(e){ uiAlert(`바꾸지 못했습니다\n${e.message}`); }
+  }catch(e){ alert(`바꾸지 못했습니다: ${e.message}`); }
 }
 
 const fmtSize = n => n < 1024 ? `${n} B`
@@ -2345,7 +1994,7 @@ async function clearStaged(pool){
   const list = pool ? STAGED.filter(p => p.pool === pool) : STAGED;
   if(!list.length) return;
   const what = pool === "ref" ? "정합용 기준 사진 " : pool === "cur" ? "오늘 사진 " : "담아둔 사진 ";
-  if(!await uiConfirm(`${what}${list.length}장을 모두 지웁니다\n다시 넣으려면 파일을 다시 골라야 합니다.`, {ok: "모두 지우기", danger: true})) return;
+  if(!confirm(`${what}${list.length}장을 모두 지웁니다.\n\n계속할까요?`)) return;
   stageMsg("지우는 중…", "busy");
   try{
     const r = await api(FAST
@@ -2413,13 +2062,12 @@ function drawStaged(){
   for(const b of box.querySelectorAll(".x"))
     b.onclick = e => { e.stopPropagation(); dropStaged(b.dataset.pid); };
   const n = el("staged-n"); if(n) n.textContent = STAGED.length ? `${STAGED.length}장` : "";
-  if(FOLDER && picked && FOLDER.folder === picked.folder) drawDeckPick(FOLDER);   // 아직 앞 환자 것이면 안 그린다
   const clr = el("btn-clear"); if(clr) clr.hidden = !STAGED.length;
   // 버튼은 항상 자리를 지킨다 — 사진이 들어와도 아래 요소가 움직이지 않게
   const go = el("btn-go"); if(go) go.disabled = !STAGED.length;
   setStep("setup", STAGED.length ? "done" : "",
           SESSION ? `${SESSION.ids.name} · ${SESSION.visit}` : "");
-  setStep("pre", "", STAGED.length ? `${STAGED.length}장` : "");
+  setStep("pre", "", STAGED.length ? `${STAGED.length}장 대기` : "대기");
 }
 
 /* 새 환자 — 모달. 취소하면 보던 목록이 그대로 남는다. */
@@ -2490,13 +2138,18 @@ function startSession(r){
   setFast(!!r.fast);
   // 세션이 만들어진 뒤에는 차수·위치를 못 바꾼다 — 세션이 이미 그 값으로 산다
   for(const id of ["v-letter", "v-pos"]){ const n = el(id); if(n) n.disabled = true; }
-  // 헤더의 환자 칩은 두지 않는다 — 환자·차수는 사이드바 1단계와 화면 머리글이 말한다
+  el("pchip").innerHTML =
+    `<span class="nm">${esc(r.ids.name)}</span>` +
+    `<span class="id">${[r.ids.hospital_id, r.ids.ortho_id].filter(Boolean).join(" · ")}</span>` +
+    (r.visit ? `<span class="visit" title="차수 ${r.visit}">${r.visit}</span>` : "");
+  el("pchip").hidden = false;
+
   STAGED = []; REVIEW = null; ED.slot = null;
   syncFinButtons();
   setStep("setup", "", `${r.ids.name} · ${r.visit}`);
-  setStep("pre",  "", r.ppt_exists ? `이전 ${r.prev_visits.join(",")}` : "");
-  setStep("proc", "", "");
-  setStep("fin",  "", "");
+  setStep("pre",  "", r.ppt_exists ? `이전 ${r.prev_visits.join(",")}` : "대기");
+  setStep("proc", "", "대기");
+  setStep("fin",  "", "대기");
   NOTES = null; NOTE_DIRTY.clear();
   renderVisitBadges();
   syncTabs();
@@ -2517,25 +2170,22 @@ function visitInfo(){
   const v = SESSION.visit, prev = SESSION.prev_visits || [];
   // 환자 없이 여는 진행에는 차수가 없다. 그대로 두면 빈 글자로 "재진  · 기준 없음"
   // 이 뜬다 — 기준 사진을 제대로 주고 정합이 됐을 때도 그렇게 보인다.
-  // 분류가 끝났으면 실제로 쓰인 기준. Fastest Lap 은 차수 대신 "기준"(REF_LABEL)이 온다.
-  const used = REVIEW ? [...new Set(Object.values(REVIEW.slots || {})
-                 .filter(p => p && p.ref_visit).map(p => p.ref_visit))] : [];
-  const byRef = used.includes(REF_LABEL);
   if(!v){
-    return {text: "사진만 저장", basis: used.length ? "기준 사진에 정합" : "",
-            tone: used.length ? "revisit" : "first"};
+    const used = REVIEW && Object.values(REVIEW.slots || {}).some(p => p && p.ref_visit);
+    return {text: "사진만 저장", basis: used ? "기준 사진으로 정합" : "",
+            tone: used ? "revisit" : "first"};
   }
   const first = v === "A";
   let basis = "", tone = first ? "first" : "revisit";
 
   if(!first){
-    if(byRef){
-      basis = "기준 사진에 정합"; tone = "revisit";
-    }else if(SESSION.mode !== "revisit"){
+    if(SESSION.mode !== "revisit"){
       // 사진은 있는데 PPT가 없다 — 정합할 기준 자체가 없다.
       basis = "기준 없음"; tone = "warn";
     }else{
-      // 아직 정합 전이면 예상 기준을 보여 준다.
+      // 분류가 끝났으면 실제로 쓰인 기준을, 아직이면 예상 기준을 보여 준다.
+      const used = REVIEW ? [...new Set(Object.values(REVIEW.slots || {})
+                     .filter(p => p && p.ref_visit).map(p => p.ref_visit))] : [];
       const pick = used.length ? used
                  : [prev.length && `직전(${prev[prev.length-1]})`,
                     prev.includes("A") && prev[prev.length-1] !== "A" && "초진(A)"].filter(Boolean);
@@ -2992,14 +2642,7 @@ async function pickFace(key){
 }
 
 function renderFaceEditor(){
-  const cv = el("face-canvas"), c = cellOf(FED.cell); if(!cv) return;
-  if(!c){
-    // 사진 자리가 없는 장(표지 · 계측선만 있는 장) — 직전 자리의 사진이 남지 않게 비운다
-    const ctx = cv.getContext("2d");
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.fillStyle = LETTERBOX; ctx.fillRect(0, 0, cv.width, cv.height);
-    return;
-  }
+  const cv = el("face-canvas"), c = cellOf(FED.cell); if(!cv || !c) return;
   // 자리 비율을 CSS 에 실어 둔다. object-fit 으로 끼워 맞추면 그려진 그림이
   // 요소 폭보다 좁아져서 드래그 환산(cv.width / cv.clientWidth)이 어긋난다.
   cv.style.aspectRatio = `${c.w}/${c.h}`;
@@ -3115,13 +2758,13 @@ function bindFaceEditor(){
   el("fed-bright").oninput = () => {
     if(has()){ FED.bright = +el("fed-bright").value; afterFaceBright(); }
   };
-  bindNum("fv-angle", -180, 180, .1, () => FED.angle, v => FED.angle = v,
+  bindNum("fv-angle", -10, 10, .1, () => FED.angle, v => FED.angle = v,
           afterFaceEdit, syncFaceKnobs, has);
   bindNum("fv-scale", 50, 200, 1, () => FED.scale * 100, v => FED.scale = v / 100,
           afterFaceEdit, syncFaceKnobs, has);
-  bindNum("fv-tx", -9999, 9999, 1, () => FED.dx, v => FED.dx = v,
+  bindNum("fv-tx", -200, 200, 1, () => FED.dx, v => FED.dx = v,
           afterFaceEdit, syncFaceKnobs, has);
-  bindNum("fv-ty", -9999, 9999, 1, () => FED.dy, v => FED.dy = v,
+  bindNum("fv-ty", -200, 200, 1, () => FED.dy, v => FED.dy = v,
           afterFaceEdit, syncFaceKnobs, has);
   bindNum("fv-bright", -50, 50, 1, () => FED.bright, v => FED.bright = v,
           afterFaceBright, syncFaceKnobs, has);
@@ -3638,51 +3281,18 @@ function faceTabOpen(){
   if(FAST) return false;
   return !!(CASE && CASE.enabled && SESSION && SESSION.mode === "first");
 }
-const extraTabOpen = () => extraOf().length > 0;
-/* 추가 작업용 — 구내 판(pane io)을 그대로 쓰되 판 대신 캔버스가 자리를 차지하고,
-   선택기에는 사진마다 칸이 하나씩 붙는다(Fastest Lap 의 얼굴과 같은 구조). */
-function drawExtraSeg(){
-  segEl.innerHTML = "";
-  extraOf().forEach((pid, i) => {
-    const g = document.createElement("button");
-    g.textContent = `추가 ${i + 1}`; g.dataset.key = EXTRA_KEY + pid;
-    g.onclick = () => pick(g.dataset.key);
-    segEl.appendChild(g);
-  });
-}
 function showTab(name){
   if(name === "face" && !faceTabOpen()) name = "io";
-  if(name === "extra" && !extraTabOpen()) name = "io";
   TAB = name;
   document.querySelectorAll("#proc-tabs button").forEach(b =>
     b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   document.querySelectorAll('.view[data-view="proc"] .pane').forEach(p =>
-    p.classList.toggle("on", p.dataset.pane === (name === "extra" ? "io" : name)));
-  // 헤더 선택기: 슬롯은 십자뷰, 슬라이드는 FACE, 추가 작업용은 사진마다
-  segEl.hidden = name === "face";
+    p.classList.toggle("on", p.dataset.pane === name));
+  // 헤더 선택기: 슬롯은 십자뷰, 슬라이드는 FACE에서만 쓴다
+  segEl.hidden = name !== "io";
   const fseg = el("face-seg"); if(fseg) fseg.hidden = name !== "face";
-  const ovb = el("ov-bar"), kh = document.querySelector("#dock-photo .keyhint");
-  if(name === "extra"){
-    drawExtraSeg();
-    if(ovb) ovb.hidden = true;
-    if(kh) kh.hidden = false;          // Space · Shift 는 여기서도 쓴다 (Tab · 1–5 는 뜻이 없어 CSS 로 접는다)
-    document.body.classList.add("tab-extra");
-    const first = EXTRA_KEY + extraOf()[0];
-    pick(isExtraKey(ED.slot) && primaryOf(ED.slot) ? ED.slot : first);
-    return;
-  }
-  if(kh) kh.hidden = false;
-  document.body.classList.remove("tab-extra");
   // FACE 탭으로 가면 판 자리가 그쪽 것이 된다 — 캔버스를 먼저 제자리로 돌린다
   if(name !== "io") exitZoom();
-  if(name === "io" && isExtraKey(ED.slot)){
-    // 추가 작업용에서 돌아왔다 — 크게 보기를 접고 선택기와 판을 슬롯 것으로 되돌린다
-    ZOOM.face = false; exitZoom();
-    ED.slot = null;
-    drawBoard();
-    drawNoteOverlay(); drawPeekBadge();
-    return;
-  }
   // 숨어 있던 판은 그 사이 격자를 못 그렸다(숨은 캔버스는 크기를 모른다).
   // 탭이 열리는 지금 다시 그린다 — 안 그러면 격자가 얇게 박힌 채로 보인다.
   if(name === "io"){ if(ED.slot) renderEditor(); redrawBoardSlots(); }
@@ -3699,10 +3309,6 @@ function syncTabs(){
   gate("face", faceTabOpen(),
        faceTabOpen() ? "케이스 슬라이드에 얼굴 사진 배치"
                      : "초진에서 케이스 덱을 만들 때만 쓸 수 있습니다");
-  gate("extra", extraTabOpen(),
-       extraTabOpen() ? "슬라이드에 넣지 않고 조정해서 파일로만 저장하는 사진"
-                      : "자동 분류에서 추가 작업용 상자에 사진을 넣으면 열립니다");
-  const xn = el("extra-n"); if(xn) xn.textContent = extraOf().length || "";
   // 노트는 세션이 열리자마자 받아 둔다 — 자동분류를 마치고 검수·조정에 들어온
   // 순간부터 십자뷰 판 위에 텍스트 박스가 얹혀 있어야 하기 때문이다.
   // fast 모드는 덱을 안 만드니 적을 곳이 없다 — 받지 않는다.
@@ -3734,8 +3340,6 @@ addEventListener("keydown", e => {
 });
 
 el("btn-new-pt").onclick = openNewDialog;
-{ const kb = el("btn-keys"), kd = el("dlg-keys");
-  if(kb && kd){ kb.onclick = () => kd.showModal(); el("keys-close").onclick = () => kd.close(); } }
 el("new-cancel").onclick = () => dlg().close();
 el("hist-close").onclick = () => el("dlg-hist").close();
 el("new-ok").onclick = () => openSession(newIds(), "new-err");
@@ -3765,7 +3369,7 @@ async function selectRoot(path){
   const now = (ROOTS.find(r => r.current) || {}).path || "";
   if(!path || path === now) return;
   if(STAGED.length &&
-     !await uiConfirm(`담아둔 사진 ${STAGED.length}장이 사라집니다\n저장 위치를 바꿀까요?`, {ok: "바꾸기", danger: true})){
+     !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다.\n저장 위치를 바꿀까요?`)){
     drawRoots();                       // 고른 것을 되돌린다
     return;
   }
@@ -3775,7 +3379,7 @@ async function selectRoot(path){
       body: JSON.stringify({path})});
     await showRoot(r.root, r.roots);
   }catch(e){
-    uiAlert("그 위치로 바꾸지 못했습니다\n" + (e.message || e));
+    alert("그 위치로 바꾸지 못했습니다: " + (e.message || e));
     drawRoots();
   }
 }
@@ -3786,14 +3390,14 @@ for(const id of ["root-sel", "set-root-sel"])
 el("set-forget").onclick = async () => {
   const path = el("set-root-sel").value;
   if(!path) return;
-  if(!await uiConfirm("저장 위치를 목록에서 뺍니다\n폴더와 그 안의 자료는 그대로 남습니다.\n" + path, {ok: "빼기"}))
+  if(!confirm("목록에서만 뺍니다 — 폴더와 그 안의 자료는 그대로 남습니다.\n\n" + path))
     return;
   try{
     const r = await api("/api/root/forget", {method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({path})});
     drawRoots(r.roots);
-  }catch(e){ uiAlert(String(e.message || e)); }
+  }catch(e){ alert(e.message || e); }
 };
 
 /* 저장 위치 더하기 — 폴더를 고르고, 고른 그 위치로 바로 옮겨 간다.
@@ -3812,17 +3416,17 @@ async function addRoot(){
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({path: got})});
     await showRoot(r.root, r.roots);
-  }catch(e){ uiAlert("그 위치를 쓸 수 없습니다\n" + (e.message || e)); }
+  }catch(e){ alert("그 위치를 쓸 수 없습니다: " + (e.message || e)); }
 }
 el("btn-root").onclick = addRoot;
 el("btn-set").onclick = openSettings;
 /* 업데이트 확인 — 예전에는 켤 때 딱 한 번만 봤다. 켜 둔 채로 며칠 쓰는 사람은
    새 버전이 나온 걸 알 길이 없어서, 확인하려고 프로그램을 다시 켜야 했다. */
 el("btn-upd-check").onclick = async () => {
-  const b = el("btn-upd-check"), l = b.querySelector(".lbl") || b, t = l.textContent;
-  b.disabled = true; l.textContent = "확인 중…";
+  const b = el("btn-upd-check"), t = b.textContent;
+  b.disabled = true; b.textContent = "확인 중…";
   try{ await checkUpdate(true); }
-  finally{ b.disabled = false; l.textContent = t; }
+  finally{ b.disabled = false; b.textContent = t; }
 };
 // 피드백 — 구글 폼을 새 탭으로. 앱 상태와 무관하니 언제든 눌러도 안전하다.
 el("btn-fb").onclick = () =>
@@ -4061,8 +3665,8 @@ async function patLoad(){
     // 직접 입력 블록 — 모든 이름에 그대로 들어가는 글자라 생성(★)에도 쓴다.
     const bt = document.createElement("button");
     bt.textContent = "+ 글자 입력";
-    bt.onclick = async () => {
-      const v = (await uiPrompt("이름에 넣을 글자 (예: 교정, -final)") || "").trim();
+    bt.onclick = () => {
+      const v = (prompt("이름에 넣을 글자 (예: 교정, -final)") || "").trim();
       if(!v) return;
       if(/[{}\\/:*?"<>|]/.test(v)){
         el("pat-msg").textContent = '\\ / : * ? " < > | { } 는 글자에 못 씁니다';
@@ -4087,8 +3691,8 @@ async function patLoad(){
     for(const [c, nm] of [["d", "숫자"], ["c", "문자"]]){
       const b = document.createElement("button");
       b.textContent = `+ ${nm} n~m자리`;
-      b.onclick = async () => {
-        const r = (await uiPrompt(`${nm} 자릿수 범위 (예: 1-3)`, "1-3") || "").trim();
+      b.onclick = () => {
+        const r = (prompt(`${nm} 자릿수 범위 (예: 1-3)`, "1-3") || "").trim();
         if(/^\d+-\d+$/.test(r)) addR(c + r);
       };
       pal.appendChild(b);
@@ -4110,8 +3714,8 @@ el("btn-set").addEventListener("click", patLoad);
    내용은 정적 JSON([{title, date?, body}])이라 항목 추가에 코드 수정이 없다.
    토글은 <details> — 접기/펼치기·키보드 접근이 공짜다. */
 const DOCS = {
-  log: {title: "업데이트 로그", src: "/static/changelog.json"},
-  faq: {title: "FAQ", src: "/static/faq.json"},
+  log: {title: "업데이트 로그", src: "/classic/static/changelog.json"},
+  faq: {title: "F&Q", src: "/classic/static/faq.json"},
 };
 
 /* 본문의 **아주 작은** 마크다운만 그린다 — `` `코드` `` 와 `**굵게**`.
@@ -4210,34 +3814,9 @@ async function openDoc(kind){
   if(!items.length) box.textContent = "아직 항목이 없습니다";
 }
 
-el("btn-log").onclick = () => { openDoc("log"); el("doc-notice").hidden = false; };
-el("btn-faq").onclick = () => { openDoc("faq"); el("doc-notice").hidden = true; };
+el("btn-log").onclick = () => openDoc("log");
+el("btn-faq").onclick = () => openDoc("faq");
 el("doc-close").onclick = () => el("dlg-doc").close();
-el("doc-notice").onclick = () => { el("dlg-doc").close(); showNotice(true); };
-
-/* ── 업데이트 안내 — 버전마다 한 번 ──────────────────────────────────────────
-   내용은 notice.json({version, title, body}). 닫으면 그 version 을 localStorage 에
-   적어 두고 같은 버전에는 다시 띄우지 않는다. 업데이트 로그 창의 "안내문 다시
-   보기"로는 언제든 다시 볼 수 있다. version 이 비어 있으면 아무것도 안 띄운다. */
-const NOTICE_SEEN = "crocs-notice-seen";
-async function showNotice(force = false){
-  const dlg = el("dlg-notice"); if(!dlg) return;
-  let n = null;
-  try{ n = await (await fetch(`/static/notice.json?v=${Date.now()}`)).json(); }catch(e){ return; }
-  if(!n || !n.version || !n.body) return;
-  let seen = null; try{ seen = localStorage.getItem(NOTICE_SEEN); }catch(e){}
-  if(!force && seen === n.version) return;
-  el("notice-title").textContent = n.title || "업데이트 안내";
-  const bd = el("notice-body"); bd.innerHTML = "";
-  inlineMd(n.body, bd);
-  el("notice-close").onclick = () => {
-    try{ localStorage.setItem(NOTICE_SEEN, n.version); }catch(e){}
-    dlg.close();
-  };
-  dlg.onclose = () => { try{ localStorage.setItem(NOTICE_SEEN, n.version); }catch(e){} };   // Esc 로 닫아도 본 것으로 친다
-  if(!dlg.open) dlg.showModal();
-}
-setTimeout(() => showNotice(false), 700);
 
 // ── 알림 배너 ───────────────────────────────────────────────────────────────
 // 가중치가 없으면 무엇을 어디서 받는지, 새 버전이 있으면 무엇이 바뀌는지 알린다.
@@ -4265,23 +3844,8 @@ async function checkWeights(){
 
 /* 확인이 실패하면 **사유를 보여준다.** 예전에는 조용히 돌아섰다 — 사용자 눈에는
    '최신입니다'와 똑같아서, 업데이트 통로가 끊긴 걸 아무도 몰랐다. */
-/* 헤더의 버전 칩 — 켤 때 확인한 결과가 늘 보인다. 새 버전이면 누르면 설정의
-   업데이트 페이지로 간다. */
-function setVerChip(u){
-  const c = el("hdr-ver"); if(!c) return;
-  const l = c.querySelector(".lbl");
-  c.hidden = false; c.classList.remove("new"); c.onclick = null;
-  if(!u || !u.ok){ l.textContent = "버전 확인 불가"; c.style.color = "var(--ink3)"; return; }
-  c.style.color = "";
-  if(!u.has_update){ l.textContent = u.app_from ? `최신 버전 ${u.app_from}` : "최신 버전"; return; }
-  l.textContent = u.app_to && u.app_to !== u.app_from ? `새 버전 ${u.app_to}` : "새 버전 있음";
-  c.classList.add("new");
-  c.onclick = () => { openSettings(); showSetPage("update"); };
-}
-
 async function checkUpdate(manual){
   const u = await api("/api/update/check").catch(() => null);
-  setVerChip(u);
   if(!u || !u.ok){
     const why = (u && u.reason) || "서버가 응답하지 않습니다";
     // 켤 때는 개발용 설치본을 조용히 넘긴다. 눌러서 확인했으면 사유를 말해 준다 —
@@ -4312,9 +3876,9 @@ async function checkUpdate(manual){
   const b = el("btn-upd");
   if(b) b.onclick = () => doUpdate(false);
   const bf = el("btn-upd-force");
-  if(bf) bf.onclick = async () => {
-    if(await uiConfirm("직접 수정한 파일을 백업 폴더로 옮깁니다\n원본으로 되돌린 뒤 " +
-               "업데이트합니다.", {ok: "백업 후 업데이트"})) doUpdate(true);
+  if(bf) bf.onclick = () => {
+    if(confirm("직접 수정한 파일을 백업 폴더로 옮기고 원본으로 되돌린 뒤 " +
+               "업데이트합니다. 계속할까요?")) doUpdate(true);
   };
   // 배너 자체도 누르면 업데이트 — 버튼이 작아서 지나치기 쉽다. 차단 사유가
   // 있을 때는 달지 않는다 (누를 수 있는 것처럼 보이면 안 된다).
@@ -4418,14 +3982,14 @@ el("first-change").onclick = async () => {
 
 el("first-ok").onclick = async () => {
   const p = el("first-path").value.trim();
-  if(!p){ uiAlert("저장할 폴더를 골라주세요"); return; }
+  if(!p){ alert("저장할 폴더를 골라주세요"); return; }
   try{
     const r = await api("/api/root", {method:"POST",
       headers:{"Content-Type":"application/json"}, body: JSON.stringify({path:p})});
     if(HEALTH) HEALTH.root = r.root;
     el("dlg-first").close();
     loadPatients();
-  }catch(e){ uiAlert("그 위치를 쓸 수 없습니다\n" + (e.message || e)); }
+  }catch(e){ alert("그 위치를 쓸 수 없습니다: " + (e.message || e)); }
 };
 
 el("set-change").onclick = addRoot;
@@ -4449,47 +4013,25 @@ el("btn-toproc").onclick = async () => {
   const b = el("btn-toproc"), label = b.textContent;
   const todo = SLOTS.map(s => s.key).filter(k => primaryOf(k));
   b.disabled = true;
-  // 진행 막대 — 슬롯을 차례로 정합하며 채운다. 남은 시간은 지금까지 걸린 평균으로.
-  const prog = el("reg-progress"), stat = el("pre-stat");
-  const info = visitInfo(), basis = info && info.basis ? info.basis : "";
-  const t0 = performance.now(), done = [];
-  const draw = (i, cur) => {
-    if(!prog) return;
-    const avg = done.length ? (performance.now() - t0) / done.length : 0;
-    const left = avg ? Math.max(1, Math.round(avg * (todo.length - done.length) / 1000)) : null;
-    prog.hidden = false;
-    prog.innerHTML = `<div class="l"><span><b>${basis ? basis + "에 정합하는 중" : "정합하는 중"}</b> · 같은 치아가 같은 자리에 오도록 맞춥니다</span>` +
-      `<span>${done.length} / ${todo.length}${left !== null ? ` · 약 ${left}초 남음` : ""}</span></div>` +
-      `<div class="bar"><i style="width:${Math.round(done.length / todo.length * 100)}%"></i></div>` +
-      `<div class="pips">` + todo.map(k => `<span class="pip${done.includes(k) ? " ok" : k === cur ? " run" : ""}">` +
-        `${done.includes(k) ? "✓ " : k === cur ? "● " : ""}${slotNm(k)}</span>`).join("") + `</div>`;
-  };
-  if(stat) stat.hidden = true;
   try{
     for(let i = 0; i < todo.length; i++){
       // 어느 자리를 하고 있는지 이름으로 보여준다. 한 자리에 1초 넘게 걸리는
       // 단계라 숫자만 도는 것보다 "지금 상악" 이 훨씬 덜 답답하다.
-      draw(i, todo[i]);
       b.textContent = `정합 중… ${slotNm(todo[i])} (${i + 1}/${todo.length})`;
       const r = await api(`/api/register/${SESSION.session_id}`,
         {method: "POST", headers: {"Content-Type": "application/json"},
          body: JSON.stringify({slots: [todo[i]]})});
       REVIEW = r.review; STAGED = r.photos;
-      done.push(todo[i]);
     }
-    draw(todo.length, null);
   }catch(e){
     preMsg(`정합에 실패했습니다: ${e.message}`, "err");
   }finally{
     b.disabled = false; b.textContent = label;
-    if(prog) prog.hidden = true;
-    if(stat) stat.hidden = false;
   }
   renderVisitBadges();   // 예상 기준 → 실제로 정합에 쓰인 기준으로 갱신
   showView("proc");
   // 판을 그리기 전에 노트를 확보해 두면 십자뷰가 뜨는 순간부터 박스가 얹혀 있다.
   if(!NOTES) loadNotes();
-  syncTabs();            // 추가 작업용 상자에 사진이 있으면 그 탭이 열린다
   drawBoard();
 };
 
@@ -4512,90 +4054,36 @@ function syncFinButtons(planned){
   open.disabled = !(SESSION && planned);
 }
 
-/* 저장 검토 — 요약 카드(환자 · 차수 · 정합 · PPT와 위치 · 사진 폴더 · 저장 위치)와
-   썸네일 표(자리 · 파일 · 조정값). 값은 전부 서버의 계획과 세션에서 온다. */
-const ROUND = (v, d) => Math.round(v * Math.pow(10, d)) / Math.pow(10, d);
-function editorNote(ed, flip, init){
-  const parts = [];
-  if(ed && (Math.abs(ed.angle) > .05 || Math.abs(ed.scale - 1) > .005 || Math.abs(ed.dx) > .5 || Math.abs(ed.dy) > .5))
-    parts.push(`회전 ${ROUND(ed.angle, 1)}° · ${Math.round(ed.scale * 100)}% · ${Math.round(ed.dx)}, ${Math.round(ed.dy)}px`);
-  else parts.push(init === "registered" ? "정합 구도" : init === "model" ? "자동 구도" : init === "manual" ? "손으로 맞춤" : "조정 없음");
-  if(flip) parts.push("상하반전");
-  return parts.join(" · ");
-}
-function planSummary(p){
-  const ids = SESSION && SESSION.ids || {};
-  const visit = p.visit || (SESSION && SESSION.visit) || "";
-  const mode = p.mode || (SESSION && SESSION.mode) || "";
-  const info = visitInfo();
-  const regd = p.slots.filter(x => !x.empty && x.initial === "registered").length;
-  const photoDirs = [...new Set(p.slots.filter(x => !x.empty).map(x => dirPart(x.file)).filter(Boolean))];
-  const extraDir = p.extra_dir || (p.extras && p.extras.length ? dirPart(p.extras[0].file) : "");
-  const rawDir = [...new Set(p.slots.filter(x => x.raw).map(x => dirPart(x.raw)).filter(Boolean))][0];
-  return `<div class="finsum">
-    <dl>
-      <dt>환자</dt><dd><b>${esc(ids.name || (picked && picked.name) || "")}</b> · ${esc(ids.ortho_id || "")} · <code>${esc((picked && picked.folder) || p.patient_dir.split("/").pop())}</code></dd>
-      <dt>차수</dt><dd><b>${esc(visit)}</b> · ${mode === "first" ? "초진" : "재진"}${p.label ? ` · 라벨 <code>${esc(p.label)}</code>` : ""}</dd>
-      <dt>정합</dt><dd>${mode === "first" ? "초진 — 프레이밍 모델로 구도를 잡았습니다"
-        : p.ref_visit === REF_LABEL ? `기준 사진에 정합 · ${regd}장 정합됨`
-        : p.ref_visit ? `기준 ${esc(p.ref_visit)} 차수 · ${regd}장 정합됨` : info && info.basis ? esc(info.basis) : "기준 없음"}</dd>
-    </dl>
-    <dl>
-      <dt>PPT</dt><dd><code>${esc(p.ppt)}</code>${p.ppt_exists
-        ? `<span class="pos">${p.insert_after == null ? "" : p.insert_after === 0 ? "맨 앞에 " : `${p.insert_after}번 뒤에 `}1장 추가${p.ppt_slides ? ` → ${p.ppt_slides + 1}장` : ""}</span>`
-        : `<span class="pos new">새로 만듦</span>`}</dd>
-      <dt>사진</dt><dd>${photoDirs.length ? photoDirs.map(d => `<code>${esc(d)}/</code>`).join(" ") : "환자 폴더 바로 아래"} ${p.slots.filter(x => !x.empty).length}장${p.extras.length ? ` · 추가 작업용 ${p.extras.length}장${extraDir && !photoDirs.includes(extraDir) ? ` <code>${esc(extraDir)}/</code>` : ""}` : ""}${rawDir ? ` · 원본 <code>${esc(rawDir)}/</code>` : ""}</dd>
-      <dt>저장 위치</dt><dd><code>${esc(p.patient_dir)}</code>${p.patient_dir_exists ? "" : ` <span class="aux">확정할 때 만들어집니다</span>`}</dd>
-    </dl>
-  </div>`;
-}
-function planRow(thumb, name, file, note, cls){
-  return `<div class="fr${cls ? " " + cls : ""}">` +
-    (thumb ? `<img src="${thumb}" alt="" loading="lazy">` : `<span class="ico"></span>`) +
-    `<b>${name}</b><code>${esc(file)}</code><span class="r">${note}</span></div>`;
-}
 async function loadPlan(){
   if(FAST) return fastLoadPlan();
   const body = el("fin-body"), err = el("fin-err"), btn = el("btn-commit");
-  err.textContent = ""; btn.disabled = true; btn.textContent = "확정 저장"; syncFinButtons(false);
+  err.textContent = ""; btn.disabled = true; syncFinButtons(false);
   if(!SESSION){ body.innerHTML = `<div class="ph">세션이 없습니다</div>`; return; }
   body.innerHTML = `<div class="ph">불러오는 중…</div>`;
   try{
     const p = await api(`/api/plan/${SESSION.session_id}`);
-    p.extras = p.extras || [];
     renderVisitBadges();
-    const rows = [];
+    const items = [];
     for(const s of p.slots){
-      const nm = slotNm(s.slot);
-      if(s.empty){ rows.push(planRow(null, nm, "", "빈 자리 · 이대로 확정하면 이 칸은 비워 둡니다", "miss")); continue; }
-      const ph = primaryOf(s.slot);
-      rows.push(planRow(ph ? ph.card || ph.thumb : null, nm, s.file,
-        editorNote(s.editor || (ph && ph.editor), s.flip_v != null ? s.flip_v : ph && ph.flip_v, s.initial) + (s.extras.length ? ` · 추가 촬영본 ${s.extras.length}장` : "")));
-      for(const x of s.extras){
-        const xp = photoOf(x.pid);
-        rows.push(planRow(xp ? xp.card || xp.thumb : null, "추가 촬영본", x.file, "조정 없이 원본 그대로", "sub"));
-      }
+      if(s.empty){ items.push(`<li class="miss"><span class="k">${slotNm(s.slot)}</span>비어 있음</li>`); continue; }
+      items.push(`<li><span class="k">${slotNm(s.slot)}</span><code>${esc(s.file)}</code>`
+               + `<span class="aux">${esc(s.label)}</span></li>`);
+      for(const x of s.extras)
+        items.push(`<li class="sub"><span class="k">추가</span><code>${esc(x.file)}</code>`
+                 + `<span class="aux">${esc(x.label)}</span></li>`);
     }
-    p.extras.forEach((x, i) => {
-      const xp = photoOf(x.pid);
-      rows.push(planRow(xp ? xp.card || xp.thumb : null, `추가 작업용 ${i + 1}`, x.file, editorNote(x.editor, !!x.flip_v, "manual") + " · 슬라이드에 넣지 않음"));
-    });
-    for(const f of p.faces){
-      // 케이스 덱에 놓인 얼굴은 그 자리를 말한다 — "PPT 미삽입" 은 정말로 안 들어갈 때만
-      const c = f.cell ? cellOf(f.cell) : null;
-      const where = c ? `${slideName(c)} · ${posName(c.pos)}` : f.cell ? `슬라이드 자리 ${esc(f.cell)}` : "슬라이드에 넣지 않음 · 파일로만 저장";
-      const fp = photoOf(f.pid);
-      rows.push(planRow(fp ? fp.card || fp.thumb : null, "얼굴", f.file, where, c ? "" : "dim"));
-    }
-    if(!p.faces.length && (SESSION.mode !== "first"))
-      rows.push(planRow(null, "얼굴", "없음", "재진에는 얼굴 슬라이드를 만들지 않습니다", "dim"));
-    const raws = p.slots.filter(x => x.raw).length;
-    if(raws) rows.push(planRow(null, "원본", `${dirPart(p.slots.find(x => x.raw).raw) || "환자 폴더"}/ (${raws}장)`, "조정 전 원본 · 설정에서 끌 수 있습니다", "dim"));
-    body.innerHTML = planSummary(p) + `<div class="fintab">${rows.join("")}</div>`;
+    for(const f of p.faces)
+      items.push(`<li><span class="k">얼굴</span><code>${esc(f.file)}</code>`
+               + `<span class="aux">${esc(f.label)} · PPT 미삽입</span></li>`);
+    body.innerHTML =
+        `<div class="finsec"><span class="eyebrow">저장 위치</span><code>${esc(p.patient_dir)}</code></div>`
+      + `<div class="finsec"><span class="eyebrow">프레젠테이션</span><code>${esc(p.ppt)}</code>`
+      + `<span class="aux">${p.ppt_exists ? "기존 파일에 슬라이드 추가" : "새로 만듦"}</span></div>`
+      + `<ul class="finlist">${items.join("")}</ul>`;
     if(p.missing.length)
-      err.textContent = `빈 자리 ${p.missing.length}곳 — ${p.missing.map(slotNm).join(", ")}. 채우고 오거나, 이대로 확정할 수 있습니다.`;
+      err.textContent = `빈 슬롯 ${p.missing.length}곳 — ${p.missing.map(slotNm).join(", ")}. `
+                      + `채우고 오거나, 이대로 확정할 수 있습니다.`;
     btn.disabled = false;
-    btn.textContent = p.missing.length ? `빈 자리 ${p.missing.length}곳 두고 확정` : "확정 저장";
     syncFinButtons(true);
     // 사진이 실제로 떨어질 폴더는 계획이 정한다 — 차수별 하위 폴더일 수도, 환자
     // 폴더 바로 아래일 수도 있다(설정). PPT 도 마찬가지로 하위 폴더의 기존 덱에
@@ -4603,11 +4091,9 @@ async function loadPlan(){
     const anyPhoto = p.slots.find(x => !x.empty) || p.faces[0];
     FINDIRS = {folder: (picked && picked.folder) || "",
                photos: anyPhoto ? dirPart(anyPhoto.file) : "",
-               ppt: dirPart(p.ppt), pptfile: p.ppt, committed: false,
+               ppt: dirPart(p.ppt),
                exists: !!p.patient_dir_exists};
     syncFinDirButtons();
-    const m = el("fin-after-msg"); if(m) m.textContent = p.patient_dir_exists ? "" : "초진은 확정 저장 뒤에 폴더가 생깁니다";
-    el("btn-home-fin").classList.remove("primary");
   }catch(e){
     body.innerHTML = `<div class="ph">불러오지 못했습니다</div>`;
     err.textContent = e.message;
@@ -4646,13 +4132,6 @@ function syncFinDirButtons(){
   const ready = !!(finFolder() && FINDIRS && FINDIRS.exists);
   for(const b of btns){
     b.disabled = !ready;
-    if(b.id === "btn-open-pptdir"){
-      // PPT 는 **확정 뒤에만** 연다 — PowerPoint 가 덱을 잡고 있으면 확정 저장이 쓰지 못한다
-      const ok = ready && FINDIRS.committed && FINDIRS.pptfile;
-      b.disabled = !ok;
-      b.title = ok ? "PowerPoint 로 엽니다" : "확정 저장 뒤에 열 수 있습니다 — 열려 있으면 저장하지 못합니다";
-      continue;
-    }
     b.title = ready ? "탐색기에서 폴더를 엽니다"
       : FINDIRS ? `확정 저장을 하면 ${FAST && !picked ? "저장" : "환자"} 폴더가 만들어집니다`
                   + " — 그 뒤에 열 수 있습니다"
@@ -4683,17 +4162,7 @@ async function openFinDir(which, btn){
 }
 el("btn-open-patient").onclick = e => openFinDir("", e.currentTarget);
 el("btn-open-photos").onclick = e => openFinDir("photos", e.currentTarget);
-el("btn-open-pptdir").onclick = async e => {
-  const btn = e.currentTarget, err = el("fin-err"), folder = finFolder();
-  if(!folder || !FINDIRS || !FINDIRS.pptfile) return;
-  err.textContent = ""; btn.disabled = true;
-  try{
-    const r = await api("/api/open-file", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({folder, sub: FINDIRS.pptfile})});
-    if(r.fallback) err.textContent = `PowerPoint 로 열지 못해 폴더를 열었습니다 — ${r.opened}`;
-  }catch(e2){ err.textContent = e2.message || "PPT 를 열지 못했습니다"; }
-  finally{ syncFinDirButtons(); }
-};
+el("btn-open-pptdir").onclick = e => openFinDir("ppt", e.currentTarget);
 
 /* 확정 저장하면 나올 그 PPT 를 임시로 만들어 파워포인트로 연다. 환자 폴더에는
    아무것도 쓰지 않는다 — 화면에서 보던 것과 실제 슬라이드가 같은지 눈으로
@@ -4730,17 +4199,15 @@ el("btn-commit").onclick = async () => {
       // 빈 슬롯은 막지 않는다 — 사진이 없는 날도 있다. 대신 반드시 되묻는다.
       if(e.status === 409 && e.data?.error === "missing_slots"){
         const nm = (e.data.missing || []).map(slotNm).join(", ");
-        if(!await uiConfirm(`빈 자리가 있습니다 — ${nm}\n이 칸은 비워 둔 채 사진과 슬라이드를 기록합니다.`, {ok: "이대로 확정", danger: true})){
-          btn.textContent = `빈 자리 ${(e.data.missing || []).length}곳 두고 확정`; btn.disabled = false; return;
+        if(!confirm(`빈 슬롯이 있습니다 — ${nm}\n\n이대로 저장할까요?`)){
+          btn.textContent = "확정 저장"; btn.disabled = false; return;
         }
         r = await api(`/api/commit/${SESSION.session_id}?allow_missing=true`, {method:"POST"});
       }else throw e;
     }
     el("fin-body").innerHTML =
-        `<div class="findone">${ICON.check}<b>사진 ${(r.files || []).filter(f => /\.(jpe?g|png)$/i.test(f)).length}장${/\.pptx$/i.test((r.files || []).join(" ")) ? "과 슬라이드 1장" : ""}을 기록했습니다</b> · <code>${esc(r.patient_dir)}</code></div>`
-      + `<div class="fintab">${(r.files || []).map(f => `<div class="fr"><span class="ico ok">${ICON.check}</span><b>${/\.pptx$/i.test(f) ? "PPT" : "사진"}</b><code>${esc(f)}</code><span class="r okc">✓ 저장됨</span></div>`).join("")}</div>`;
-    el("btn-home-fin").classList.add("primary");
-    const m = el("fin-after-msg"); if(m) m.textContent = "방금 저장한 것을 보러 갑니다";
+        `<div class="finsec"><span class="eyebrow">저장 완료</span><code>${esc(r.patient_dir)}</code></div>`
+      + `<ul class="finlist">${(r.files || []).map(f => `<li><code>${esc(f)}</code></li>`).join("")}</ul>`;
     el("fin-visit").hidden = false;
     el("fin-visit").dataset.tone = "done";
     el("fin-visit").textContent = `차수 ${r.visit} 저장됨`;
@@ -4750,7 +4217,7 @@ el("btn-commit").onclick = async () => {
     // 세션은 버리되 폴더 경로는 살려 둔다 — 방금 저장한 것을 보러 가는 게 아래
     // 세 버튼의 본래 쓰임이다. resetSession 이 FINDIRS 를 지우므로 되돌려 놓는다.
     // 여기서 환자 폴더가 **비로소 만들어졌다** — 셋을 켜도 되는 시점이 지금이다.
-    const dirs = FINDIRS ? {...FINDIRS, folder: saved || FINDIRS.folder, exists: true, committed: true} : null;
+    const dirs = FINDIRS ? {...FINDIRS, folder: saved || FINDIRS.folder, exists: true} : null;
     resetSession();
     FINDIRS = dirs; syncFinDirButtons();
     btn.textContent = "확정 저장";
@@ -4784,9 +4251,9 @@ addEventListener("paste", e => {
 /* 홈화면으로. 저장 검토에서도 부른다 — 확정한 뒤 다음 환자로 가는 길이,
    화면 위쪽으로 되짚어 올라가는 것뿐이면 번거롭다. 확정 뒤에는 담아둔 사진이
    없으므로 묻지 않고 바로 돌아간다. */
-async function goHome(){
+function goHome(){
   if(STAGED.length &&
-     !await uiConfirm(`담아둔 사진 ${STAGED.length}장이 사라집니다\n홈화면으로 돌아갈까요?`, {ok: "홈화면으로", danger: true})) return;
+     !confirm(`담아둔 사진 ${STAGED.length}장이 사라집니다.\n\n홈화면으로 돌아갈까요?`)) return;
   resetSession();
   el("find").value = "";
   showView("setup");          // 저장 검토에서 눌렀으면 화면도 함께 돌아온다

@@ -92,3 +92,33 @@ def test_사람이_고르면_그_덱으로_바뀐다(_isolate_paths):
                       json={"folder": d.name, "ppt": "../다른.pptx"}).status_code == 400
         assert c.post("/api/folder/ppt",
                       json={"folder": d.name, "ppt": "없는파일.pptx"}).status_code == 400
+
+
+def test_remembered_deck_wins_even_when_ortho_id_differs(_isolate_paths):
+    """"폴더 번호가 맞음 — 이 덱을 이 환자 것으로 지정" 을 누른 뒤에는 그 덱이
+    후보에 들어야 한다. 예전에는 교정번호 검사에서 걸러져 버튼이 헛돌았다."""
+    from starlette.testclient import TestClient
+
+    d = _isolate_paths / "홍길동_111111111_10000"
+    d.mkdir(parents=True)
+    _touch(d, "홍길동_111111111_99999.pptx")
+    assert _pick(d) is None, "교정번호가 다른 덱은 저절로 골라지지 않는다"
+    with TestClient(M.app) as c:
+        r = c.post("/api/folder/ppt", json={"folder": d.name, "ppt": "홍길동_111111111_99999.pptx"})
+        assert r.status_code == 200, r.text
+    assert _pick(d) == "홍길동_111111111_99999.pptx"
+
+
+def test_remembered_deck_wins_even_when_name_is_not_in_pattern(_isolate_paths):
+    """`/api/folder/ppt` 는 그 폴더의 아무 .pptx 나 받는다 — 손으로 지은 이름의
+    덱도 기억시킨 뒤에는 후보에 들어야 한다."""
+    from starlette.testclient import TestClient
+
+    d = _isolate_paths / "홍길동_123456789_12345"
+    d.mkdir(parents=True)
+    _touch(d, "홍길동 교정.pptx")
+    assert _pick(d) is None
+    with TestClient(M.app) as c:
+        r = c.post("/api/folder/ppt", json={"folder": d.name, "ppt": "홍길동 교정.pptx"})
+        assert r.status_code == 200, r.text
+    assert _pick(d) == "홍길동 교정.pptx"

@@ -100,6 +100,12 @@ def _detach(s, photo) -> None:
         for lst in _bins_of(s, photo.pool).values():
             if photo.id in lst:
                 lst.remove(photo.id)
+        # 추가 작업용에서 나가면 거기서 잡은 구도도 버린다 — 그 창 기준 값이라
+        # 다른 자리에서는 뜻이 없다 (본편 `_detach` 와 같은 규칙).
+        if photo.id in s.extra:
+            s.extra.remove(photo.id)
+        s.extra_editors.pop(photo.id, None)
+        s.extra_shape.pop(photo.id, None)
         photo.slot = None
 
 
@@ -227,6 +233,41 @@ def _contain_state(pw: int, ph: int, win) -> EditorState:
     return EditorState(scale=min(win.w / bw, win.h / bh))
 
 
+def _looks_saved(pw: int, ph: int, win) -> bool:
+    """지난 차수 **완성본**처럼 보이는가 — 창과 종횡비가 같고(±2%) 크기가 저장본
+    크기(창 cm × export_px_per_cm, 여유 15%) 이하다. 원본은 3:2 에 6000px 이라
+    여기서 갈린다. 상한을 설정에서 계산하므로 창이 넓거나 export 해상도가 높은
+    덱에서도 저장본을 원본으로 오인하지 않는다."""
+    if not pw or not ph:
+        return True
+    same_ratio = abs((pw / ph) - (win.w / win.h)) / (win.w / win.h) <= 0.02
+    cap = max(win.w, win.h) * M.cfg.geometry.export_px_per_cm * 1.15
+    return same_ratio and max(pw, ph) <= cap
+
+
+def _ref_state(photo, win, arr) -> EditorState:
+    """기준 사진을 창에 앉히는 구도.
+
+    완성본이면 있는 그대로(contain) — 그 프레임이 곧 정합이 맞춰야 할 목표다.
+    **원본을 기준으로 넣은 경우**(카메라에서 바로 가져온 3:2 · 6000px)는 contain
+    하면 치아가 창의 절반도 안 되게 작아져 오늘 사진(프레이밍된 것)과 배율이
+    어긋나고 정합이 문턱에서 기각된다. 그때는 오늘 사진과 같은 프레이밍 모델로
+    잘라 같은 눈금에 올린다. 모델이 없거나 기각하면 contain 으로 물러선다.
+    """
+    if _looks_saved(photo.w, photo.h, win):
+        return _contain_state(photo.w, photo.h, win)
+    try:
+        if M.framer is not None and photo.label and M.framer.has(photo.label):
+            res = M.framer.predict(arr, photo.label)
+            if res.ok:
+                st = M.framing_to_editor(res, win, photo.w, photo.h)
+                return M.flip_editor_v(st) if photo.flip_v else st
+    except Exception as e:                                        # noqa: BLE001
+        _audit({"event": "ref_frame_error", "pid": photo.id,
+                "error": f"{type(e).__name__}: {e}"[:200]})
+    return _contain_state(photo.w, photo.h, win)
+
+
 def _ref_bake(s, slot: str):
     """기준 사진 대표를 **있는 그대로** 창에 앉힌다 (PPC 해상도).
 
@@ -258,10 +299,14 @@ def _ref_bake(s, slot: str):
     if arr is None:
         return None
     win = s.slot_windows[slot]
-    img = M.Cr.render_window(arr, win, _contain_state(photo.w, photo.h, win),
+    img = M.Cr.render_window(arr, win, _ref_state(photo, win, arr),
                              photo.flip_v, M.PPC, M.PPC,
                              M.Cr.hex_to_bgr(M._letterbox_color()))
     with s.lock:
+        # 굽는 사이 대표가 바뀌었을 수 있다(미리 데우기가 늦게 끝난 경우) — 그때는
+        # 캐시에 넣지 않는다. 지금 대표는 다음 호출이 제 것으로 다시 굽는다.
+        if _ref_slots(s).get(slot) != pid:
+            return img
         s.references[slot] = {REF_KEY: img}
         s.ref_src[slot] = (pid, photo.flip_v)
     return img
@@ -284,11 +329,11 @@ def _prewarm(s, photo) -> None:
             return
         # `_ref_bake` 와 **똑같이** 굽는다 — 픽셀이 한 톨이라도 다르면 이미지
         # 해시가 달라져 캐시가 안 맞고, 데운 보람이 없어진다.
-        win = s.slot_windows[slot]
-        img = M.Cr.render_window(arr, win, _contain_state(photo.w, photo.h, win),
-                                 photo.flip_v, M.PPC, M.PPC,
-                                 M.Cr.hex_to_bgr(M._letterbox_color()))
-        M.Reg.centers(img, use_gate=True)
+        # `_ref_bake` 로 굽고 **캐시에 넣는다** — 정합이 같은 그림을 그대로 쓴다.
+        # 예전처럼 여기서 따로 구우면 프레이밍 추론과 굽기가 두 번 돈다.
+        img = _ref_bake(s, slot)
+        if img is not None:
+            M.Reg.centers(img, use_gate=True)
     except Exception as e:                                        # noqa: BLE001
         _audit({"event": "prewarm_error", "pid": photo.id,
                 "error": f"{type(e).__name__}: {e}"[:200]})
@@ -361,6 +406,10 @@ def _frame_face(s, pid: str) -> None:
     """얼굴 한 장. 짝이 없으므로 언제나 프레이밍 모델이다."""
     photo = M._photo(s, pid)
     M._auto_frame(s, photo, FACE_WINDOW)
+    # 얼굴은 모델의 회전 추론값을 쓰지 않는다 — 0° 에서 시작하고 사람이 돌린다
+    # (본편의 케이스 덱 자리 `_frame_face_cell` 과 같은 규칙).
+    e = photo.editor
+    photo.editor = EditorState(e.dx_px, e.dy_px, e.scale, 0.0)
     photo.editor0 = photo.editor
 
 
@@ -453,6 +502,8 @@ def _review_json(s) -> dict:
             # OTHERS 로 빠진 기준 사진도 화면에 나와야 사람이 끌어 넣을 수 있다.
             "has_ref": any(p.pool == "ref" for p in s.photos),
             "progress": _progress_json(s),
+            # 추가 작업용 — 본편과 같은 열쇠(extra · extra_editors · extra_window)
+            **M._extra_json(s),
             "missing": [sl for sl in names if sl not in s.slots]}
 
 
@@ -498,6 +549,8 @@ def drop_pool(sid: str, pool: str = ""):
         for bins in (s.bins, s.ref_bins):
             for k in list(bins):
                 bins[k] = [x for x in bins[k] if x not in ids]
+        s.extra = [x for x in s.extra if x not in ids]
+        s.extra_editors = {k: v for k, v in s.extra_editors.items() if k not in ids}
         s.framed = {k: v for k, v in s.framed.items()
                     if (v[0] if isinstance(v, tuple) else v) not in ids}
         s.face_framed = {k: v for k, v in s.face_framed.items() if k not in ids}
@@ -575,6 +628,8 @@ def flip(req: FlipReq):
         photo.flip_v = want
         photo.editor = M.flip_editor_v(photo.editor)
         photo.editor0 = M.flip_editor_v(photo.editor0)
+        if photo.id in s.extra_editors:            # 추가 작업용의 구도는 세션 쪽에 산다
+            s.extra_editors[photo.id] = M.flip_editor_v(s.extra_editors[photo.id])
         _invalidate(s, photo)
     return _state(s)
 
@@ -851,7 +906,15 @@ def assign(req: AssignReq):
     s = _fast(req.session_id)
     photo = M._photo(s, req.photo_id)
     _invalidate(s, photo)
-    if req.slot:
+    if req.slot == M.EXTRA_KEY:
+        # 추가 작업용은 **오늘 사진**의 자리다 — 기준 사진은 지난 차수 완성본이라
+        # 다시 손질해 저장할 것이 아니다. 본편의 `_put_extra` 가 오늘 상자(s.bins)
+        # 만 보므로, 기준 풀 사진을 넣으면 기준 상자에 남은 채 EXTRA 에도 든다.
+        if photo.pool != "cur":
+            raise HTTPException(400, "기준 사진은 추가 작업용으로 보낼 수 없습니다")
+        with s.lock:                      # 상자를 고치는 순간은 잠근다 (_put 과 같다)
+            M._put_extra(s, photo, at=req.at)
+    elif req.slot:
         _put(s, photo, req.slot, req.at)
     else:
         _detach(s, photo)
@@ -1017,6 +1080,35 @@ def _folder_names(s, entries):
     return want, bump
 
 
+def _extra_names(s, epre: str):
+    """추가 작업용 손질본의 이름 — 저장 순서(`s.extra`)대로 1 부터 센다.
+
+    환자 모드는 본편 그대로 `교정번호_차수_extra (n).jpg` 이고, 환자 없이 진행하면
+    접두어가 그 신원 자리를 대신한다 — `접두어_extra (n).jpg`. 슬롯 사진처럼 이름
+    체계가 둘이 되지 않게 `_extra` 접미는 본편(`naming.EXTRA_SUFFIX`)의 것이다.
+    """
+    if _folder_mode(s):
+        head = (s.prefix or _label(s)) + M.N.EXTRA_SUFFIX
+
+        def name(n):
+            return f"{head} ({n}).jpg"
+    else:
+        def name(n):
+            return M.N.extra_filename(s.ids.ortho_id, s.visit, n)
+
+    want = [epre + name(n) for n in range(1, len(s.extra) + 1)]
+
+    def bump(i, taken):
+        """겹치면 **트레이 전체 뒤**의 첫 빈 번호를 준다. 2 부터 찾으면 아직 이름을
+        받지 않은 뒷장의 번호를 가로채 뒤가 줄줄이 밀린다."""
+        n = len(s.extra) + 1
+        while (epre + name(n)).lower() in taken:
+            n += 1
+        return epre + name(n)
+
+    return want, bump
+
+
 class _ExampleSession:
     """이름 예시를 만들 때만 쓰는 껍데기 — `_folder_names` 는 접두어만 본다."""
     ids = None
@@ -1067,34 +1159,55 @@ def _build_plan(s, overwrite: set[str] | None = None) -> dict:
     if folder:
         ppre = ""
         rpre = "raw/"
+        extra_dir = ""
         want, bump = _folder_names(s, entries)
     else:
         ids = s.ids
         ppre = "" if M._photo_dir() == "flat" else f"{M.N.visit_dir(ids.ortho_id, s.visit)}/"
         rpre = "" if rdir == "flat" else f"{M.N.visit_raw_dir(ids.ortho_id, s.visit)}/"
+        # 추가 작업용은 본편처럼 차수 폴더 **안**에 — '환자 폴더에 바로' 면 폴더 없이
+        extra_dir = "" if M._photo_dir() == "flat" else M.N.visit_extra_dir(ids.ortho_id, s.visit)
         want, bump = _patient_names(s, entries, ppre)
+    ewant, ebump = _extra_names(s, f"{extra_dir}/" if extra_dir else "")
 
     taken = _existing(s)
-    files = []
-    for i, (e, nm) in enumerate(zip(entries, want)):
+
+    def settle(i, nm, bump):
+        """이미 있는 이름이면 사람이 고른 쪽(덮어쓰기)이 아닌 한 다음 번호를 받는다."""
         exists = nm.lower() in taken
         if exists and nm.lower() not in picked:
             final, action = bump(i, taken), "number"
         else:
             final, action = nm, ("overwrite" if exists else "new")
         taken.add(final.lower())
+        # base = 충돌 전 원래 이름. 화면의 선택과 commit 의 overwrite 목록이
+        # 이 이름을 열쇠로 쓴다.
+        return {"base": nm, "file": final, "exists": exists, "action": action}
+
+    files = []
+    for i, (e, nm) in enumerate(zip(entries, want)):
         photo = M._photo(s, e["pid"])
-        stem = Path(final).stem
+        got = settle(i, nm, bump)
+        stem = Path(got["file"]).stem
         files.append({
-            "pid": e["pid"], "slot": e["slot"], "extra": e["extra"],
-            "label": photo.label,
-            # base = 충돌 전 원래 이름. 화면의 선택과 commit 의 overwrite 목록이
-            # 이 이름을 열쇠로 쓴다.
-            "base": nm, "file": final, "exists": exists, "action": action,
+            "pid": e["pid"], "slot": e["slot"], "kind": "photo", "extra": e["extra"],
+            "label": photo.label, **got,
             "raw": (rpre + (FN.raw_name(stem, photo.orig_name) if folder
-                            else M.N.raw_filename(Path(final).name, photo.path.name))
+                            else M.N.raw_filename(Path(got["file"]).name, photo.path.name))
                     if raw and not e["extra"] else None),
         })
+    # 추가 작업용 — 슬라이드에 안 들어가는 손질본. `extra` 는 "같은 자리의 추가
+    # 촬영본" 표시라 그대로 두고 `kind` 로 가른다. 원본 사본은 남기지 않는다(본편과
+    # 같다 — 손질 자체가 목적이라 잘라낸 결과만 기록이다).
+    extras = []
+    for i, (pid, nm) in enumerate(zip(s.extra, ewant)):
+        extras.append({
+            "pid": pid, "slot": M.EXTRA_KEY, "kind": "extra_work", "extra": False,
+            "label": M._photo(s, pid).label, **settle(i, nm, ebump),
+            "flip_v": M._photo(s, pid).flip_v,
+            "editor": M._editor_json(M._extra_editor(s, pid)), "raw": None,
+        })
+    files += extras
 
     dest = _dest(s)
     return {"patient_dir": str(dest),
@@ -1104,6 +1217,9 @@ def _build_plan(s, overwrite: set[str] | None = None) -> dict:
             "prefix": (s.prefix or _label(s)) if folder else "",
             "visit": s.visit, "fast": True,
             "files": files,
+            # 본편의 plan 과 같은 열쇠 — 화면의 추가 작업용 묶음이 이걸 읽는다.
+            "extras": extras,
+            "extra_dir": extra_dir,
             "save_raw": raw,
             # 이 모드는 PPT 를 만들지도 고치지도 않는다. 화면이 그 사실을 사람에게
             # 알려야 한다 — 차수는 사람이 PowerPoint 에서 넣어야 남는다.
@@ -1163,7 +1279,14 @@ def commit(sid: str, req: CommitReq = Body(default=CommitReq()),
         with M.S.Transaction(dest) as tx:
             for e in pl["files"]:
                 photo = M._photo(s, e["pid"])
-                if e["extra"]:
+                if e["kind"] == "extra_work":
+                    # 추가 작업용 — 본편과 같은 길로 굽고 반전도 사진의 값을 따른다.
+                    # 창은 구내 정면과 같은 `_extra_window`.
+                    baked, _wh = M._bake_window(photo, M._extra_window(s, photo),
+                                                M._extra_editor(s, photo.id), photo.flip_v,
+                                                s.tmp / f"bake_extra_{e['pid']}.jpg")
+                    tx.stage_file(baked or photo.path, e["file"])
+                elif e["extra"]:
                     # 같은 자리의 추가 촬영본은 편집값이 없다 — 본편과 같이
                     # 원본 그대로 간다.
                     tx.stage_file(photo.path, e["file"])
@@ -1186,7 +1309,9 @@ def commit(sid: str, req: CommitReq = Body(default=CommitReq()),
     _audit({"event": "commit", "fast": True, "visit": s.visit,
             "patient": dest.name, "folder_mode": _folder_mode(s),
             "files": [q.relative_to(dest).as_posix() for q in moved],
-            "slots": {k: M._photo(s, v).label for k, v in s.slots.items()}})
+            "slots": {k: M._photo(s, v).label for k, v in s.slots.items()},
+            # 추가 작업용은 슬라이드에 없어 파일명으로만 추적된다 — 본편처럼 남긴다
+            "extras": [e["file"] for e in pl["extras"]]})
     out = {"ok": True, "patient_dir": str(dest), "visit": s.visit,
            "folder_mode": _folder_mode(s),
            "files": [q.relative_to(dest).as_posix() for q in moved]}

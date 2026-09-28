@@ -245,19 +245,22 @@ def test_Rx는_초진일을_자동으로_넣지_않는다():
     """Rx 기준일도 Tx·App 과 같은 규칙 — 고르기 전에는 괄호가 없다.
 
     예전에는 Rx 만 초진일을 기본 기준일로 박아 넣어서, 기준일 체크를 풀어도
-    날짜가 남았다 (2026-08-14 결정으로 없앰).
+    날짜가 남았다 (2026-08-14 결정으로 없앰). 개월 수는 **오늘**에서 세므로
+    초진일을 오늘로 두어 날짜가 흘러도 깨지지 않게 한다.
     """
+    import datetime as _dt
     import main as _M
     import naming as _N
+    today = _dt.date.today().strftime("%y.%m.%d")
     ids = _N.Identifiers("홍길동", "", "12345")
     s = _M.Session("first", ids, "A")
-    s.first_date = "26.08.14"
+    s.first_date = today
     status = _M._note_text(s)["NOTE_STATUS"]
     assert "Rx. Period: 0 month\n" in status + "\n", status
-    assert "(26.08.14)" not in status, status
+    assert f"({today})" not in status, status
     # 기준일을 고르면 그때 괄호가 붙는다 — Tx·App 과 같은 동작
-    s.period_start["rx"] = "26.08.14"
-    assert "Rx. Period: 0 month (26.08.14)" in _M._note_text(s)["NOTE_STATUS"]
+    s.period_start["rx"] = today
+    assert f"Rx. Period: 0 month ({today})" in _M._note_text(s)["NOTE_STATUS"]
 
 
 def test_TxRxApp_상자는_줄_앞_간격을_갖고_태어난다():
