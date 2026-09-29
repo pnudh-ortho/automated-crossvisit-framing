@@ -1641,6 +1641,43 @@ def discard_session(s: "Session") -> None:
     shutil.rmtree(s.tmp, ignore_errors=True)
 
 
+# ── 열린 창 ↔ 세션 ───────────────────────────────────────────────────────────
+# 세션을 아는 것은 그 브라우저 탭뿐이다(새로고침·탭 닫기로 되찾을 길이 없다).
+# 그래서 탭이 닫히면 버린다(close). 그래도 남은 것(강제 종료 · 절전 중 닫힘)은
+# 시간으로 지우지 않고, 업데이트 때 목록으로 보여 사람이 고른다
+# (/api/sessions/open → /api/update/apply discard). 마지막 작업 시각은 그 탭의
+# 모든 요청이 갱신하는 `touched` 그대로다 — 살아 있는지 짐작하지 않는다.
+
+
+@app.post("/api/session/{sid}/close")
+def session_close(sid: str):
+    """탭이 닫힐 때(sendBeacon). 이미 없으면 조용히 넘어간다."""
+    s = SESSIONS.get(sid)
+    if s:
+        discard_session(s)
+    return {"ok": True}
+
+
+def _session_brief(s: "Session") -> dict:
+    """업데이트를 막는 작업을 사람이 알아볼 수 있게 — 누구 · 몇 장 · 어디까지 · 언제."""
+    ids = s.ids
+    who = (f"{ids.name} {ids.ortho_id}".strip() if ids and (ids.name or ids.ortho_id)
+           else (s.folder or "환자 없이 진행"))
+    stage = ("검수·조정" if s.framed else
+             "자동 분류" if any(p.label for p in s.photos) else "사진 추가")
+    idle = max(0, int(time.time() - s.touched))
+    return {"id": s.id, "who": who, "visit": s.visit or "", "fast": bool(s.fast),
+            "photos": len(s.photos), "stage": stage, "idle_s": idle}
+
+
+@app.get("/api/sessions/open")
+def sessions_open():
+    """확정하지 않은 작업(사진이 든 세션) 목록 — 오래 조용한 것부터."""
+    rows = [_session_brief(s) for s in SESSIONS.values() if getattr(s, "photos", None)]
+    rows.sort(key=lambda r: -r["idle_s"])
+    return {"sessions": rows}
+
+
 def sweep_sessions(now: float | None = None) -> int:
     """기한 지난 세션과 고아 폴더를 지운다. 반환값은 지운 폴더 수."""
     now = time.time() if now is None else now
@@ -4784,10 +4821,15 @@ def update_check():
 
 class UpdateApplyReq(BaseModel):
     force: bool = False      # 직접 수정한 파일을 백업하고 강제 진행
+    discard: list[str] = []  # 사람이 목록을 보고 버리기로 고른 세션 — 먼저 지우고 진행
 
 
 @app.post("/api/update/apply")
 def update_apply(req: UpdateApplyReq = Body(default=UpdateApplyReq())):
+    for sid in req.discard:
+        s = SESSIONS.get(sid)
+        if s:
+            discard_session(s)
     st = _safe_check()
     if not st.has_update:
         return {"ok": False, "detail": st.reason or "이미 최신입니다"}

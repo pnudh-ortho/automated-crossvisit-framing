@@ -1746,7 +1746,18 @@ function syncThemeSeg(){
 }
 
 /* 저장 위치가 바뀌면 열려 있던 세션은 옛 경로를 가리킨다 — 서버도 함께 버린다 */
+/* 서버의 세션은 이 탭만 쥐고 있다 — 탭이 닫히면(새로고침 포함) 서버에서도 버린다.
+   남은 것은 업데이트 때 목록으로 보여 사람이 고른다(updateOverOpenWork). */
+function closeServerSession(sid){
+  if(!sid) return;
+  try{ navigator.sendBeacon(`/api/session/${sid}/close`); }catch(e){}
+}
+addEventListener("pagehide", () => { if(SESSION) closeServerSession(SESSION.session_id); });
+
 function resetSession(){
+  // 이 탭이 쥐던 세션은 서버에서도 버린다 — 되찾을 길이 없는 작업이 업데이트를 막지 않게.
+  // 확정을 마친 세션이면 서버가 이미 지웠으니 조용히 넘어간다.
+  if(SESSION) closeServerSession(SESSION.session_id);
   SESSION = null;
   STAGED = []; REVIEW = null; ED.slot = null;
   boardEl.innerHTML = ""; segEl.innerHTML = "";
@@ -2515,6 +2526,7 @@ function startSession(r){
     if(/^\/api\/(thumb|reference)\//.test(url) && !url.includes(`/${r.session_id}/`))
       imgCache.delete(url);
   }
+  if(SESSION && SESSION.session_id !== r.session_id) closeServerSession(SESSION.session_id);
   SESSION = r;
   // 모드는 세션에 박힌다. 진행 중에 바꾸려면 세션을 버려야 한다 — 이미 잡아 둔
   // 구도·기준영상이 다른 규칙 위에서 계산된 값이기 때문이다.
@@ -4364,11 +4376,14 @@ async function checkUpdate(manual){
     `<b>새 버전이 있습니다</b> <span>${ver}</span>
      ${blocked || '<span class="grow"></span>'}
      ${u.blocked ? (/직접 수정/.test(u.blocked)
-        ? '<button class="btn" id="btn-upd-force">백업 후 업데이트</button>' : "")
+        ? '<button class="btn" id="btn-upd-force">백업 후 업데이트</button>'
+        : /확정하지 않은 작업/.test(u.blocked) ? '<button class="btn" id="btn-upd-open">작업 확인 후 업데이트</button>' : "")
         : '<button class="btn" id="btn-upd">업데이트</button>'}
      <ul class="lst">${u.log.slice(0,5).map(l => `<li>${l}</li>`).join("")}${wt}</ul>`);
   const b = el("btn-upd");
   if(b) b.onclick = () => doUpdate(false);
+  const bo = el("btn-upd-open");
+  if(bo) bo.onclick = updateOverOpenWork;
   const bf = el("btn-upd-force");
   if(bf) bf.onclick = async () => {
     if(await uiConfirm("직접 수정한 파일을 백업 폴더로 옮깁니다\n원본으로 되돌린 뒤 " +
@@ -4380,18 +4395,40 @@ async function checkUpdate(manual){
     const bn = el("banner");
     bn.style.cursor = "pointer";
     bn.title = "눌러서 업데이트";
-    bn.onclick = doUpdate;
+    bn.onclick = () => doUpdate(false);   // 클릭 이벤트가 force 로 들어가지 않게
   }
 }
 
-async function doUpdate(force){
+/* 확정하지 않은 작업이 업데이트를 막을 때 — 무엇인지 사실만 보이고(누구 · 몇 장 · 단계 ·
+   마지막 작업 시각), 버릴지 묻는다. 이 창의 작업이면 그렇게 말한다. 열린 창인지 짐작하지 않는다.
+   버리면 확정 전 사진·조정은 사라진다(환자 폴더와 PPT 는 그대로). */
+async function updateOverOpenWork(){
+  const d = await api("/api/sessions/open").catch(() => null);
+  const rows = (d && d.sessions) || [];
+  if(!rows.length) return doUpdate(false);
+  const ago = s => s < 90 ? "방금" : s < 3600 ? `${Math.round(s / 60)}분 전` : s < 86400 ? `${Math.round(s / 3600)}시간 전` : `${Math.round(s / 86400)}일 전`;
+  const mine = SESSION && SESSION.session_id;
+  const lines = rows.map(r =>
+    `· ${r.who}${r.visit ? " " + r.visit : ""}${r.fast ? " (Fastest Lap)" : ""} — 사진 ${r.photos}장 · ${r.stage} · 마지막 작업 ${ago(r.idle_s)}` +
+    (r.id === mine ? " (이 창)" : ""));
+  const ok = await uiConfirm(
+    `확정하지 않은 작업 ${rows.length}건이 업데이트를 막고 있습니다\n\n${lines.join("\n")}\n\n` +
+    "버리고 업데이트하면 위 작업의 사진과 조정값이 사라집니다. 환자 폴더와 PPT 는 그대로입니다.\n" +
+    "저장할 작업이 있으면 취소하고 그 창에서 먼저 확정 저장해 주세요.",
+    {ok: "버리고 업데이트", danger: true});
+  if(!ok) return;
+  if(rows.some(r => r.id === mine)) resetSession();
+  doUpdate(false, rows.map(r => r.id));
+}
+
+async function doUpdate(force, discard){
   if(doUpdate.busy) return;      // 배너와 버튼 양쪽에 달려 있다 — 중복 실행 방지
   doUpdate.busy = true;
   const b = el("btn-upd") || el("btn-upd-force");
   if(b){ b.disabled = true; b.textContent = "받는 중..."; }
   const r = await api("/api/update/apply", {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({force: !!force})}).catch(() => null);
+    body: JSON.stringify({force: !!force, discard: Array.isArray(discard) ? discard : []})}).catch(() => null);
   if(!r || !r.ok){
     banner("warn", `<b>업데이트 실패</b> <span class="grow">${(r&&r.detail)||"알 수 없는 오류"}</span>`);
     doUpdate.busy = false;
