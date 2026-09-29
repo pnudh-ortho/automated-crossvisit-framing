@@ -2568,6 +2568,12 @@ const facePhoto   = pid => facePhotos().find(p => p.id === pid) || null;
 const faceAll     = () => [...faceCells(), ...faceMirrors()];
 
 function slideName(c){ return c.label || `슬라이드 ${c.slide}`; }
+/* 파생 자리가 따라가는 원본 자리를 사람 말로 — "정면뷰 좌측(4번 슬라이드 좌측 사진)" */
+function mirrorSourceName(c){
+  const src = c && c.from ? cellOf(c.from) : null;
+  if(!src) return c && c.from ? c.from : "";
+  return `${slideName(src)} ${posName(src.pos)}(${src.slide}번 슬라이드 ${posName(src.pos)} 사진)`;
+}
 const posName = p => p === "L" ? "좌측" : p === "R" ? "우측" : p === "C" ? "중앙" : "전체";
 /* TEMPLATE 탭은 양식에서 그대로 가져오는 슬라이드 전체를 훑는다 — 사진 자리가
    없는 장(표지·구내 개별 등)도 넘겨 보며 계측선을 손볼 수 있어야 하기 때문이다. */
@@ -2761,7 +2767,7 @@ function drawFaceBoard(){
     b.style.top    = `${c.y / CASE.slide_h * 100}%`;
     b.style.width  = `${c.w / CASE.slide_w * 100}%`;
     b.style.height = `${c.h / CASE.slide_h * 100}%`;
-    b.title = c.from ? `${slideName(c)} — 다른 자리를 따라갑니다`
+    b.title = c.from ? `${slideName(c)} — ${mirrorSourceName(c)}에 연동됩니다. 그 자리를 고치면 여기도 같이 바뀝니다`
                      : `${slideName(c)} ${posName(c.pos)}`;
     if(p){
       const cv = document.createElement("canvas");
@@ -2981,7 +2987,7 @@ async function pickFace(key){
   FED.bright = pid ? (+facePhoto(pid).brightness || 0) : 0;
   FED.img = pid ? await getImg(facePhoto(pid).thumb) : null;
   // 모델이 예측을 기각한 자리는 cover-fit 이라 사람이 잡아 줘야 한다 — 그 사실을 밝힌다
-  const how = c.from ? ` · ${posName((cellOf(c.from) || {}).pos)} 자리를 따라갑니다`
+  const how = c.from ? ` · ${mirrorSourceName(c)}에 연동됩니다`
             : !pid ? " · 비어 있음"
             : faceFraming()[key] === "model" ? "" : " · 자동 프레이밍 없음";
   el("face-dock-title").firstChild.textContent = `${slideName(c)} · ${posName(c.pos)}${how}`;
@@ -3190,13 +3196,10 @@ function drawMirrorNote(){
   if(!mirrors.length){ note.innerHTML = ""; note.hidden = true; return; }
   note.hidden = false;
   const mp = facePhoto(slots[mirrors[0].cell]);
-  const src = faceCells().find(c => c.cell === mirrors[0].from);
-  const srcName = src ? `${slideName(src)} ${posName(src.pos)}` : mirrors[0].from;
-  // 조사를 붙이지 않는다 — 라벨이 설정에서 오므로 받침을 알 수 없다
   note.innerHTML = (mp ? `<img src="${mp.thumb}" alt="">` : `<span class="sw"></span>`) +
     `<span>슬라이드 ${mirrors.map(m => m.slide).join("·")}` +
     `${mirrors[0].label ? ` (${esc(mirrors[0].label)})` : ""}` +
-    ` — <b>${esc(srcName)}</b> 사진을 그대로 씁니다</span>`;
+    ` — <b>${esc(mirrorSourceName(mirrors[0]))}</b>에 연동됩니다. 그 자리의 사진과 구도를 고치면 여기도 같이 바뀝니다</span>`;
 }
 
 function drawPool(){
