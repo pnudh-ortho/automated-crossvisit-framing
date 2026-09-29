@@ -1519,7 +1519,36 @@ function drawRoots(list, current){
     sel.value = cur;
     sel.title = cur;
   }
+  // 목록 위 상자의 닫힌 글자 — 앞을 "…" 로 접고 끝(폴더 이름)이 보이게 얹는다 (CSS .rootshow)
+  const show = el("root-show");
+  if(show){
+    const r = ROOTS.find(x => x.path === cur);
+    show.dataset.full = cur ? cur + (r && !r.exists ? " · 연결 안 됨" : "") : "";
+    fitRootShow();
+  }
+  if(!picked && !FAST && el("detail")) drawDetail();   // 홈 오른쪽의 전체 경로도 같이 갱신
 }
+
+/* 저장 위치 글자를 칸 폭에 맞춘다: 넘치면 앞에서 한 글자씩 덜어내고 "…" 를 붙인다.
+   CSS 만으로는 앞을 접을 수 없다(rtl 트릭은 브라우저마다 줄임표가 안 붙는다).
+   글자 폭은 서브픽셀로 잰다 — 정수 폭으로는 1px 이 남아 끝이 잘린다. */
+function fitRootShow(){
+  const show = el("root-show"); if(!show) return;
+  const full = show.dataset.full || "";
+  show.textContent = full;
+  if(!full) return;
+  const range = document.createRange();
+  const textW = () => { range.selectNodeContents(show); return range.getBoundingClientRect().width; };
+  const box = show.clientWidth - 0.5;
+  if(textW() <= box) return;
+  let cut = 1;
+  while(cut < full.length - 1){
+    show.textContent = "…" + full.slice(cut);
+    if(textW() <= box) break;
+    cut++;
+  }
+}
+addEventListener("resize", () => { clearTimeout(fitRootShow._t); fitRootShow._t = setTimeout(fitRootShow, 120); });
 
 async function loadRoots(current){
   const d = await api("/api/roots").catch(() => null);
@@ -1862,7 +1891,9 @@ function drawDetail(){
   if(!p){
     // fast 모드는 환자 없이도 진행할 수 있다 — 저장 폴더 이름을 직접 적는다.
     if(FAST){ d.innerHTML = fastFolderHtml(); fastBindZones(); drawStaged(); return; }
-    d.innerHTML = `<div class="sec"><p class="empty">왼쪽에서 환자를 고르거나<br><b>＋ 새 환자</b>로 등록하세요</p></div>`;
+    const cur = (ROOTS.find(r => r.current) || {}).path || "";
+    d.innerHTML = `<div class="sec"><p class="empty">왼쪽에서 환자를 고르거나<br><b>＋ 새 환자</b>로 등록하세요</p>` +
+      (cur ? `<p class="rootpath"><span class="lbl">저장 위치</span><code>${esc(cur)}</code></p>` : "") + `</div>`;
     return;
   }
   const V = p.next_visit;

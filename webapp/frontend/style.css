@@ -87,8 +87,11 @@ svg.i{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.8;
   background:var(--panel); border-radius:9px; margin-right:2px;}
 .head .howto:visited{color:var(--ink);}
 .head .howto svg.i{fill:var(--link); stroke:none;}
-@media (max-width:1440px){ .mark .full{display:none;} }
-@media (max-width:1180px){ .hb .lbl{display:none;} .hb{padding:0 8px;} }
+/* 헤더는 1200px 까지 부제·버튼 글자·"영상" 꼬리를 다 보인다. 그 아래(1366 노트북의
+   125% 배율 = 1093px 등)에서는 73px 이 모자라 **부제만** 접는다. 버튼 글자와 영상
+   글자는 어느 폭에서도 줄이지 않는다. */
+.mark .full{white-space:nowrap;}
+@media (max-width:1199px){ .mark .full{display:none;} }
 
 /* ══ 버튼 (SwiFT) ══════════════════════════════════════════════════════════ */
 .btn{
@@ -287,6 +290,11 @@ svg.i{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.8;
 .bin .sf{flex:none; display:flex; justify-content:space-between; font-size:12px; color:var(--ink2); margin-top:8px;}
 .bin .sf .c{color:var(--done); font-weight:600;}
 .bin .sf .c.low{color:var(--warn);}
+/* 홈 오른쪽(환자 미선택) — 저장 위치 전체 경로 */
+.rootpath{margin:14px 0 0; text-align:center; font-size:12.5px; color:var(--ink3);}
+.rootpath .lbl{margin-right:8px;}
+.rootpath code{font:12.5px var(--f-mono); color:var(--ink2); background:var(--panel2); padding:2px 8px; border-radius:6px; word-break:break-all;}
+
 /* 트레이 셋 */
 .trays{flex:1; min-height:0; display:grid; grid-template-columns:2fr 1.5fr 1.5fr; gap:10px;}
 .trays .bin{border-style:dashed; background:var(--panel2); box-shadow:none; overflow:auto;}
@@ -388,20 +396,31 @@ svg.i{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.8;
 
 /* 저장 위치 — 남는 폭을 전부 쓰고, 넘칠 때만 앞쪽을 줄인다 */
 .rootbar{
+  position:relative;
   flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:6px;
   height:28px; padding:0 4px 0 8px;
   border:1px solid var(--edge); border-radius:8px;
   background:var(--panel); font-size:13px; color:var(--ink3);
 }
 /* 저장 위치 고르기 — 여러 곳을 등록해 두고 오간다.
-   테두리·바탕은 바깥 .rootbar 가 이미 그리므로 셀렉트는 투명하게 얹는다. */
+   테두리·바탕은 바깥 .rootbar 가 이미 그리므로 셀렉트는 투명하게 얹는다.
+   닫힌 상태의 글자는 브라우저가 끝을 잘라 "/home/h…" 가 되므로(셀렉트에는 앞을
+   접는 방법이 없다) 글자를 숨기고 그 위에 .rootshow 를 얹어 **앞을 "…" 로 접고
+   끝**(폴더 이름)을 보인다. 펼치면 옵션은 전체 경로 그대로다. */
 .rootbar .rootsel{
   flex:1 1 auto; min-width:0; height:24px; padding:0 2px;
   font:12.5px var(--f-mono); color:var(--ink);
   background:transparent; border:0; outline:0; cursor:pointer;
-  text-overflow:ellipsis; direction:rtl; text-align:left;
+  text-overflow:ellipsis;
 }
-.rootbar .rootsel option{color:var(--ink); background:var(--panel); direction:ltr;}
+.rootbar:has(> .rootshow) .rootsel{color:transparent;}   /* 목록 위 상자만 — 설정 창 상자는 글자 그대로 */
+.rootbar .rootsel option{color:var(--ink); background:var(--panel);}
+.rootbar .rootshow{
+  position:absolute; left:28px; right:24px; top:0; bottom:0;
+  display:flex; align-items:center; pointer-events:none;
+  font:12.5px var(--f-mono); color:var(--ink);
+  overflow:hidden; white-space:nowrap;
+}
 .rootbar .rootsel option:disabled{color:var(--ink3);}
 /* 설정 창의 저장 위치 줄 — 여기서는 버튼이 옆에 붙는다 */
 .modal .rootbar{height:32px;}
@@ -574,9 +593,9 @@ svg.i{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.8;
   box-shadow:0 0 0 4px var(--accent-soft); margin:0;}
 .track .dt.nx small{color:var(--accent); font-family:var(--f-ui); font-weight:600;}
 /* 미리보기 — 오른쪽 절반을 가로로 채운다 */
-/* 타일은 4:3 두 장, 폭 240px 까지만 — 오른쪽 절반 가운데에 놓인다 (낮은 창은 아래 media 에서 줄인다) */
+/* 타일은 4:3 두 장, 폭 240px 까지만 — 카드 오른쪽 끝에 붙인다(오른쪽에 여백 없음). 낮은 창은 아래 media 에서 줄인다 */
 .pvs{display:grid; grid-template-columns:repeat(2, minmax(0, 240px)); gap:8px;
-  align-self:center; justify-content:center;}
+  align-self:center; justify-content:end;}
 /* 자리 표시 — 덱이 아직 없거나(초진) 덱에서 못 찾았을 때 */
 .pvs.none .pv{border-style:dashed; background:var(--panel2); align-items:center; justify-content:center;}
 .pvph{display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center;
@@ -1557,13 +1576,14 @@ body.tab-extra .keyhint .kh-tab, body.tab-extra .keyhint .kh-slots{display:none;
    이기는데, 여기서 줄이는 값들(.prow·.frow·.dropzone…)의 원래 규칙이 위쪽에 있어
    앞에 두면 그대로 덮여 아무 일도 일어나지 않는다. 실제로 한 번 그렇게 넣었다. */
 @media (max-width:1500px), (max-height:860px){
-  :root{ --rail:212px; --ctl-h:30px; }
+  :root{ --rail:224px; --ctl-h:30px; }
   body{ font-size:13px; }
 
-  /* 사이드바 */
+  /* 사이드바 — 번호 원(22px)에 맞는 칸을 준다. 16px 이면 원이 글자를 덮었다. */
   .rail{ padding:13px 9px; }
   .rail > .eyebrow{ padding:0 9px; margin-bottom:8px; }
-  .nav{ padding:8px 11px 8px 10px; gap:1px 8px; grid-template-columns:16px 1fr; }
+  .nav{ padding:8px 10px; gap:1px 8px; grid-template-columns:22px 1fr; }
+  .nav .n{ width:22px; height:22px; font-size:11.5px; }
   .nav .nm{ font-size:13px; }
   .nav .st{ font-size:12px; }
   /* 라틴 부제는 19자 고정폭("PRE-PROCESSING (AI)")이라 사이드바 폭을 그대로 다
@@ -1619,12 +1639,13 @@ body.tab-extra .keyhint .kh-tab, body.tab-extra .keyhint .kh-slots{display:none;
 }
 
 /* 짧은 화면에서 로고는 폭보다 **세로**를 먹는다 — 모자란 쪽이 세로다 */
+@media (max-height:600px){ .rail-logo{ display:none; } }
 @media (max-height:820px){
-  .rail-logo{ display:none; }
+
   /* 환자 화면이 세로로 빠듯하다 — 미리보기와 카드 여백을 줄여 패널이 스크롤되지 않게 */
-  .pvs{ grid-template-columns:repeat(2, minmax(0, 190px)); }
   .hero{ gap:8px; }
   .rec{ padding:8px 14px 8px; }
+  .pvs{ grid-template-columns:repeat(2, minmax(0, 190px)); }
   .track .trow{ height:50px; }
   .plan{ padding:9px 16px; gap:2px; line-height:1.5; }
   .detail > .sec{ padding:10px 16px; }
@@ -1640,7 +1661,7 @@ body.tab-extra .keyhint .kh-tab, body.tab-extra .keyhint .kh-slots{display:none;
    더 좁아지면 한 줄로 세우는 900px 규칙까지 이겨 버리면 안 되기 때문이다. */
 @media (min-width:901px) and (max-width:1500px),
        (min-width:901px) and (max-height:860px){
-  .setup{ grid-template-columns:minmax(180px,210px) minmax(0,1fr); }
+  .setup{ grid-template-columns:minmax(230px,262px) minmax(0,1fr); }
 }
 
 /* ══ Fastest Lap ══════════════════════════════════════════════════════════════
@@ -1794,7 +1815,7 @@ body:not([data-mode="fast"]) #fin-tip-fast{display:none;}
 
 /* 설명 영상이 둘이 되면서 머리말이 빡빡해졌다. 좁은 화면에서는 뒷말을 접는다 —
    무엇을 여는 링크인지는 앞부분(기능 · Fastest Lap)이 이미 말한다. */
-@media (max-width:1280px){ .head .howto .vfull{display:none;} }
+
 
 /* ── 교정번호가 폴더와 덱에서 어긋날 때 ─────────────────────────────────────
    둘 중 어느 쪽이 맞는지 고르게 한다. 어느 쪽을 고르든 **한쪽으로 맞춰진다** —
