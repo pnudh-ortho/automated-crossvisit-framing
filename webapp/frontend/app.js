@@ -2604,8 +2604,12 @@ function ensureFocus(){
   // 양식의 **첫 장부터** 연다. 사진이 있는 장으로 건너뛰면 표지·환자정보 같은
   // 앞장을 한 번도 안 보고 지나치게 된다 — 거기도 사람이 채울 것이 있다.
   if(!nos.includes(FSLIDE)) FSLIDE = nos[0];
-  // 이 슬라이드에 사진 자리가 있으면 하나 켜 둔다(없으면 선만 있는 장이다)
-  const here = cellsOf(FSLIDE).filter(c => !c.from);
+  // 이 슬라이드에 사진 자리가 있으면 하나 켜 둔다(없으면 선만 있는 장이다).
+  // 파생 자리뿐인 장(10·11)은 그 파생 자리를 켠다 — 슬라이드 4 왼쪽을 따라간
+  // 구도가 편집기에 그대로 보이고, 손잡이는 잠긴다. 예전에는 아무것도 안 켜서
+  // 직전 장의 그림이 남거나(옛 화면) 검게 비었다(개편 첫 판).
+  const all = cellsOf(FSLIDE), own = all.filter(c => !c.from);
+  const here = own.length ? own : all;
   if(!here.some(c => c.cell === FED.cell)){
     const slots = faceSlots();
     FED.cell = (here.find(c => slots[c.cell]) || here[0] || {}).cell || null;
@@ -3040,9 +3044,25 @@ function afterFaceEdit(){
   if(REVIEW){
     (REVIEW.face_editors = REVIEW.face_editors || {})[FED.cell] =
       {dx: FED.dx, dy: FED.dy, scale: FED.scale, angle: FED.angle};
+    syncMirrorEditors(FED.cell);
   }
   syncFaceKnobs(); renderFaceEditor(); renderFaceCell(FED.cell);
   saveFaceEdit();
+}
+
+/* 파생 자리(10·11)의 값을 원본 자리(4번 왼쪽)에서 환산해 둔다 — 서버 `_face_editor`
+   와 같은 규칙: 비율이 같은 창이면 dx·dy 를 창 폭 비율만큼 키우고 배율·회전은 그대로.
+   서버 응답을 기다리지 않고 바로 맞춰 두어야 10·11 장으로 넘어갔을 때 옛 구도가 안 보인다. */
+function syncMirrorEditors(srcCell){
+  const src = cellOf(srcCell); if(!src || !REVIEW || !REVIEW.face_editors) return;
+  const st = REVIEW.face_editors[srcCell]; if(!st) return;
+  for(const m of faceMirrors()){
+    if(m.from !== srcCell) continue;
+    if(Math.abs(src.w / src.h - m.w / m.h) > 1e-3) continue;
+    const k = m.w / src.w;
+    REVIEW.face_editors[m.cell] = {dx: st.dx * k, dy: st.dy * k, scale: st.scale, angle: st.angle};
+    renderFaceCell(m.cell);
+  }
 }
 
 function saveFaceEdit(){
@@ -3058,6 +3078,10 @@ function saveFaceEdit(){
       if(r.clamped_scale && Math.abs(r.clamped_scale - FED.scale) > 1e-6){
         FED.scale = r.clamped_scale;
         syncFaceKnobs(); renderFaceEditor(); renderFaceCell(FED.cell);
+      }
+      if(r.face_editors && REVIEW){
+        REVIEW.face_editors = r.face_editors;          // 파생 자리(10·11)의 환산값까지 서버 기준으로
+        for(const m of faceMirrors()) if(m.from === FED.cell) renderFaceCell(m.cell);
       }
       el("face-saved").textContent = "저장됨";
     }catch(e){ el("face-saved").textContent = "저장 실패"; }

@@ -3820,7 +3820,9 @@ def face_adjust(req: FaceAdjustReq):
     s.face_editors[req.cell] = st
     # 잡아 둔 구도도 사람의 손이다. 상자를 다시 세운다고 이걸 지워서는 안 된다.
     s.face_manual = True
-    return {"clamped_scale": st.scale}
+    # 파생 자리(10·11)의 환산값도 같이 내려보낸다 — 화면이 그 장으로 넘어갔을 때
+    # 옛 구도를 보이지 않게.
+    return {"clamped_scale": st.scale, "face_editors": _face_editors_json(s)}
 
 
 def _face_slots_json(s: Session) -> dict:
